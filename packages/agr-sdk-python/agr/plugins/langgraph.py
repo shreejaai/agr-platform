@@ -38,9 +38,7 @@ def agr_governed(
             )
 
             if result.denied:
-                raise AGRError(
-                    f"Action '{action}' denied by AGR policy: {result.reason}"
-                )
+                raise AGRError(f"Action '{action}' denied by AGR policy: {result.reason}")
 
             if result.requires_approval and result.approval_id:
                 logger.info(
@@ -50,9 +48,7 @@ def agr_governed(
                 )
                 approved = client.wait_for_approval(result.approval_id)
                 if not approved:
-                    raise AGRError(
-                        f"Action '{action}' was rejected during approval."
-                    )
+                    raise AGRError(f"Action '{action}' was rejected during approval.")
 
             return func(*args, **kwargs)
 

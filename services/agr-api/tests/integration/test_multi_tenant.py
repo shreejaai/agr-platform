@@ -3,12 +3,9 @@
 import uuid
 
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
+from app.models import Organization
+from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.models import AuditEvent, Organization, Policy
-from tests.conftest import _override_get_session, test_session_factory
 
 
 @pytest.mark.asyncio
@@ -57,8 +54,12 @@ async def test_org_b_cannot_see_org_a_audit_events(
     # Create an eval for Org A
     await client.post(
         "/v1/evaluate",
-        json={"agent_id": "a1", "action": "deploy", "resource": "s1",
-              "context": {"environment": "staging"}},
+        json={
+            "agent_id": "a1",
+            "action": "deploy",
+            "resource": "s1",
+            "context": {"environment": "staging"},
+        },
         headers=auth_headers,
     )
 

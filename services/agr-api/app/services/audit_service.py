@@ -24,13 +24,12 @@ def compute_entry_hash(
 
     hash = SHA-256(sequence_num + event_type + json(payload) + prev_hash)
     """
-    data = f"{sequence_num}:{event_type}:{json.dumps(payload, sort_keys=True, default=str)}:{prev_hash or ''}"
+    payload_json = json.dumps(payload, sort_keys=True, default=str)
+    data = f"{sequence_num}:{event_type}:{payload_json}:{prev_hash or ''}"
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
-async def get_last_audit_event(
-    session: AsyncSession, org_id: UUID
-) -> AuditEvent | None:
+async def get_last_audit_event(session: AsyncSession, org_id: UUID) -> AuditEvent | None:
     """Get the most recent audit event for an org to chain hashes."""
     result = await session.execute(
         select(AuditEvent)

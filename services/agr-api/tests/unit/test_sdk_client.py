@@ -31,9 +31,11 @@ class TestEvaluationResult:
 
 class TestAGRClient:
     def test_init_requires_api_key(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
-            with pytest.raises(AGRError, match="API key is required"):
-                AGRClient(api_key="")
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            pytest.raises(AGRError, match="API key is required"),
+        ):
+            AGRClient(api_key="")
 
     def test_init_with_api_key(self) -> None:
         client = AGRClient(api_key="agr_sk_test123", base_url="http://localhost:8000")

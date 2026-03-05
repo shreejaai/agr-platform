@@ -57,9 +57,7 @@ async def test_update_policy_increments_version(
 
 
 @pytest.mark.asyncio
-async def test_toggle_policy_active(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_toggle_policy_active(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     create_resp = await client.post(
         "/v1/policies",
         json={

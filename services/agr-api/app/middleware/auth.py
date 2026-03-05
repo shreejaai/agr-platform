@@ -25,7 +25,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not auth_header or not auth_header.startswith("Bearer "):
             return Response(
                 content='{"error":"unauthorized","message":"Missing or invalid Authorization '
-                'header. Provide a Bearer token. Get your API key at '
+                "header. Provide a Bearer token. Get your API key at "
                 'https://dashboard.agr.dev/settings"}',
                 status_code=401,
                 media_type="application/json",

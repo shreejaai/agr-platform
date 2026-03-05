@@ -25,17 +25,12 @@ async def load_active_policies(
         Policy.active.is_(True),
     )
     if agent_id:
-        stmt = stmt.where(
-            (Policy.agent_id.is_(None)) | (Policy.agent_id == agent_id)
-        )
+        stmt = stmt.where((Policy.agent_id.is_(None)) | (Policy.agent_id == agent_id))
 
     result = await session.execute(stmt)
     policies = result.scalars().all()
 
-    return [
-        {"id": str(p.id), "cedar_rule": p.cedar_rule}
-        for p in policies
-    ]
+    return [{"id": str(p.id), "cedar_rule": p.cedar_rule} for p in policies]
 
 
 async def evaluate_request(

@@ -5,7 +5,6 @@ import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -18,9 +17,7 @@ from app.models import Base, Organization, Policy
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
 test_engine = create_async_engine(TEST_DB_URL, echo=False)
-test_session_factory = async_sessionmaker(
-    test_engine, class_=AsyncSession, expire_on_commit=False
-)
+test_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest_asyncio.fixture
@@ -86,7 +83,7 @@ async def test_policies(db_session: AsyncSession, test_org: Organization) -> lis
             name="Allow staging deploy",
             level="org",
             cedar_rule='permit(principal, action == Action::"deploy", resource)\n'
-                       'when { resource has environment && resource.environment == "staging" };',
+            'when { resource has environment && resource.environment == "staging" };',
             active=True,
         ),
         Policy(
@@ -95,8 +92,8 @@ async def test_policies(db_session: AsyncSession, test_org: Organization) -> lis
             name="Block production DB drops",
             level="org",
             cedar_rule='forbid(principal, action in [Action::"db.drop", Action::"db.truncate"], '
-                       'resource)\n'
-                       'when { resource has environment && resource.environment == "production" };',
+            "resource)\n"
+            'when { resource has environment && resource.environment == "production" };',
             active=True,
         ),
         Policy(
@@ -105,9 +102,9 @@ async def test_policies(db_session: AsyncSession, test_org: Organization) -> lis
             name="Require approval for production deploy",
             level="org",
             cedar_rule='forbid(principal, action == Action::"deploy", resource)\n'
-                       'when { resource has environment && resource.environment == "production" }\n'
-                       'unless { context has approval_status && context.approval_status == '
-                       '"approved" };',
+            'when { resource has environment && resource.environment == "production" }\n'
+            "unless { context has approval_status && context.approval_status == "
+            '"approved" };',
             active=True,
         ),
     ]
@@ -122,8 +119,8 @@ async def client(
     db_session: AsyncSession, test_org: Organization, test_policies: list[Policy]
 ) -> AsyncGenerator[AsyncClient, None]:
     # Patch the auth middleware and session factory for tests
-    import app.middleware.auth as auth_mod
     import app.database as db_mod
+    import app.middleware.auth as auth_mod
     from app.main import app
 
     original_factory = auth_mod.async_session_factory

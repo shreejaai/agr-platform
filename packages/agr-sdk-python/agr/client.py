@@ -21,6 +21,7 @@ class AGRError(Exception):
 
 class AGRAuthError(AGRError):
     """Raised on 401 Unauthorized."""
+
     pass
 
 
@@ -95,8 +96,10 @@ class AGRClient:
         if response.status_code == 401:
             data = response.json()
             raise AGRAuthError(
-                data.get("message", "Unauthorized. Check your API key at "
-                          "https://dashboard.agr.dev/settings"),
+                data.get(
+                    "message",
+                    "Unauthorized. Check your API key at https://dashboard.agr.dev/settings",
+                ),
                 status_code=401,
             )
 
@@ -137,11 +140,9 @@ class AGRClient:
         while True:
             elapsed = time.monotonic() - start
             if elapsed >= timeout:
-                raise TimeoutError(
-                    f"Approval {approval_id} not resolved within {timeout}s."
-                )
+                raise TimeoutError(f"Approval {approval_id} not resolved within {timeout}s.")
 
-            response = self._client.get(f"/v1/approvals")
+            response = self._client.get("/v1/approvals")
             if response.status_code == 200:
                 approvals = response.json()
                 for approval in approvals:

@@ -4,7 +4,6 @@ Primary: calls cedar-policy CLI via subprocess.
 Fallback: simple Python evaluator for local dev without cedar CLI installed.
 """
 
-import json
 import logging
 import re
 import time
@@ -70,7 +69,6 @@ def _python_evaluator(
 
     for policy in policies:
         rule = policy["cedar_rule"]
-        policy_id = policy["id"]
 
         lines = rule.strip().split("\n")
         for line in lines:
@@ -86,9 +84,7 @@ def _python_evaluator(
 
         if _matches_rule(rule, agent_id, action, resource, context):
             if is_forbid:
-                has_unless_approval = (
-                    "approval_status" in rule and "unless" in rule
-                )
+                has_unless_approval = "approval_status" in rule and "unless" in rule
                 if has_unless_approval:
                     approval_status = context.get("approval_status")
                     if approval_status == "approved":
@@ -129,7 +125,7 @@ def _python_evaluator(
 
     return EvaluationResult(
         decision="DENY",
-        reason=f"No matching policy found for action '{action}' on '{resource}'. Denied by default.",
+        reason=f"No matching policy for '{action}' on '{resource}'. Denied by default.",
         policy_id=None,
         requires_approval=False,
         latency_ms=0,
@@ -162,17 +158,14 @@ def _matches_rule(
 
 def _check_action_match(rule: str, action: str) -> bool:
     """Check if the action matches the rule's action constraint."""
-    all_actions_pattern = r'forbid\s*\(\s*principal\s*,\s*action\s*,'
+    all_actions_pattern = r"forbid\s*\(\s*principal\s*,\s*action\s*,"
     if re.search(all_actions_pattern, rule):
-        action_specific = re.search(r'action\s*(==|in\s)', rule)
+        action_specific = re.search(r"action\s*(==|in\s)", rule)
         if not action_specific:
             return True
 
     exact_pattern = rf'Action::"{re.escape(action)}"'
-    if re.search(exact_pattern, rule):
-        return True
-
-    return False
+    return bool(re.search(exact_pattern, rule))
 
 
 def _check_when_clause(
@@ -181,7 +174,7 @@ def _check_when_clause(
     context: dict[str, object],
 ) -> bool:
     """Check if when clause conditions are met."""
-    when_match = re.search(r'when\s*\{([^}]+)\}', rule)
+    when_match = re.search(r"when\s*\{([^}]+)\}", rule)
     if not when_match:
         return True
 
@@ -198,9 +191,7 @@ def _check_when_clause(
         elif str(actual) != str(expected):
             return False
 
-    like_patterns = re.findall(
-        r'resource\.(\w+)\s+like\s+"([^"]+)"', conditions
-    )
+    like_patterns = re.findall(r'resource\.(\w+)\s+like\s+"([^"]+)"', conditions)
     for attr, pattern in like_patterns:
         actual = context.get(attr, "")
         regex_pattern = pattern.replace("*", ".*").replace("?", ".")

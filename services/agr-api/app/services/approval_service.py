@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,7 +28,7 @@ async def create_approval_request(
         resource=resource,
         context=context,
         status="pending",
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=48),
+        expires_at=datetime.now(UTC) + timedelta(hours=48),
     )
     session.add(approval)
     await session.flush()

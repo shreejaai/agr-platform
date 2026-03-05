@@ -43,9 +43,7 @@ async def test_approval_flow_evaluate_approve(
 
 
 @pytest.mark.asyncio
-async def test_approval_reject(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_approval_reject(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     eval_resp = await client.post(
         "/v1/evaluate",
         json={

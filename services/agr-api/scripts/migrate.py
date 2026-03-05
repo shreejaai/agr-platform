@@ -14,6 +14,7 @@ MIGRATION_DIR = Path(__file__).resolve().parents[3] / "infra" / "migrations"
 
 async def run_migrations() -> None:
     import os
+
     db_url = os.environ.get(
         "DATABASE_URL", "postgresql+asyncpg://agr:password@localhost:5432/agr_dev"
     )

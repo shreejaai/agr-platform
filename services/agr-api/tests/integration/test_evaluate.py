@@ -1,14 +1,10 @@
 """Integration tests for POST /v1/evaluate — the core endpoint."""
 
-import uuid
-
 import pytest
-import pytest_asyncio
+from app.models import AuditEvent, Organization, Policy
 from httpx import AsyncClient
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.models import AuditEvent, Organization, Policy
 
 
 @pytest.mark.asyncio
@@ -106,8 +102,10 @@ async def test_evaluate_returns_401_with_invalid_key(client: AsyncClient) -> Non
 
 @pytest.mark.asyncio
 async def test_evaluate_returns_429_when_limit_exceeded(
-    client: AsyncClient, auth_headers: dict[str, str], test_org: Organization,
-    db_session: AsyncSession
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    test_org: Organization,
+    db_session: AsyncSession,
 ) -> None:
     """POST /v1/evaluate returns 429 when eval_limit is exceeded."""
     await db_session.execute(
@@ -135,8 +133,10 @@ async def test_evaluate_returns_429_when_limit_exceeded(
 
 @pytest.mark.asyncio
 async def test_evaluate_writes_audit_event(
-    client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession,
-    test_org: Organization
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_session: AsyncSession,
+    test_org: Organization,
 ) -> None:
     """POST /v1/evaluate creates a valid audit event."""
     response = await client.post(
@@ -151,9 +151,7 @@ async def test_evaluate_writes_audit_event(
     )
     assert response.status_code == 200
 
-    result = await db_session.execute(
-        select(AuditEvent).where(AuditEvent.org_id == test_org.id)
-    )
+    result = await db_session.execute(select(AuditEvent).where(AuditEvent.org_id == test_org.id))
     events = result.scalars().all()
     assert len(events) >= 1
     event = events[0]
@@ -165,27 +163,35 @@ async def test_evaluate_writes_audit_event(
 
 @pytest.mark.asyncio
 async def test_evaluate_hash_chain_valid(
-    client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession,
-    test_org: Organization
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_session: AsyncSession,
+    test_org: Organization,
 ) -> None:
     """Two consecutive evaluations produce a valid hash chain."""
     await client.post(
         "/v1/evaluate",
-        json={"agent_id": "a1", "action": "deploy", "resource": "s1",
-              "context": {"environment": "staging"}},
+        json={
+            "agent_id": "a1",
+            "action": "deploy",
+            "resource": "s1",
+            "context": {"environment": "staging"},
+        },
         headers=auth_headers,
     )
     await client.post(
         "/v1/evaluate",
-        json={"agent_id": "a2", "action": "deploy", "resource": "s2",
-              "context": {"environment": "staging"}},
+        json={
+            "agent_id": "a2",
+            "action": "deploy",
+            "resource": "s2",
+            "context": {"environment": "staging"},
+        },
         headers=auth_headers,
     )
 
     result = await db_session.execute(
-        select(AuditEvent)
-        .where(AuditEvent.org_id == test_org.id)
-        .order_by(AuditEvent.sequence_num)
+        select(AuditEvent).where(AuditEvent.org_id == test_org.id).order_by(AuditEvent.sequence_num)
     )
     events = result.scalars().all()
     assert len(events) >= 2
@@ -198,18 +204,17 @@ async def test_evaluate_hash_chain_valid(
 
 @pytest.mark.asyncio
 async def test_evaluate_deny_default_no_policies(
-    client: AsyncClient, db_session: AsyncSession, test_org: Organization,
-    auth_headers: dict[str, str]
+    client: AsyncClient,
+    db_session: AsyncSession,
+    test_org: Organization,
+    auth_headers: dict[str, str],
 ) -> None:
     """Evaluate with no matching policies returns DENY (safe default)."""
-    await db_session.execute(
-        select(Policy).where(Policy.org_id == test_org.id)
-    )
+    await db_session.execute(select(Policy).where(Policy.org_id == test_org.id))
     # Delete all policies for this org
     from sqlalchemy import delete
-    await db_session.execute(
-        delete(Policy).where(Policy.org_id == test_org.id)
-    )
+
+    await db_session.execute(delete(Policy).where(Policy.org_id == test_org.id))
     await db_session.commit()
 
     response = await client.post(

@@ -35,9 +35,7 @@ def AGRToolWrapper(
             )
 
             if result.denied:
-                raise AGRError(
-                    f"Action '{tool_name}' denied by AGR policy: {result.reason}"
-                )
+                raise AGRError(f"Action '{tool_name}' denied by AGR policy: {result.reason}")
 
             if result.requires_approval and result.approval_id:
                 logger.info(
@@ -47,9 +45,7 @@ def AGRToolWrapper(
                 )
                 approved = client.wait_for_approval(result.approval_id)
                 if not approved:
-                    raise AGRError(
-                        f"Action '{tool_name}' was rejected during approval."
-                    )
+                    raise AGRError(f"Action '{tool_name}' was rejected during approval.")
 
             return original_run(self, *args, **kwargs)
 
