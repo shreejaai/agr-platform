@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agr
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: agr_dev
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgresql+asyncpg://agr:password@localhost:5432/agr_dev
+      REDIS_URL: redis://localhost:6379
+      SECRET_KEY: ci-test-secret-key
+      ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r services/agr-api/requirements.txt
+
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Unit tests
+        run: |
+          cd services/agr-api
+          python -m pytest tests/unit -v
+
+      - name: Integration tests
+        run: |
+          cd services/agr-api
+          python -m pytest tests/integration -v
