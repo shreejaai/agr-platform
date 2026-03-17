@@ -2,22 +2,24 @@
 
 import logging
 import uuid
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models import ApprovalRequest
-from app.schemas import ApprovalDecisionRequest, ApprovalResponse
+from app.schemas import ApprovalDecideRequest, ApprovalDecisionRequest, ApprovalResponse
 from app.services.audit_service import create_audit_event
+from app.services.notification_service import verify_decision_token
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1")
 
 
-def _approval_to_response(a: ApprovalRequest) -> ApprovalResponse:
+def _to_response(a: ApprovalRequest) -> ApprovalResponse:
     return ApprovalResponse(
         id=str(a.id),
         org_id=str(a.org_id),
@@ -26,9 +28,32 @@ def _approval_to_response(a: ApprovalRequest) -> ApprovalResponse:
         resource=a.resource,
         context=a.context,
         status=a.status,
+        approver_email=a.approver_email,
+        decision_at=a.decision_at,
         expires_at=a.expires_at,
         created_at=a.created_at,
     )
+
+
+async def _load_pending(
+    approval_id: uuid.UUID, org_id: uuid.UUID, session: AsyncSession
+) -> ApprovalRequest:
+    """Load an approval scoped to the org, raise 404/409 as needed."""
+    result = await session.execute(
+        select(ApprovalRequest).where(
+            ApprovalRequest.id == approval_id,
+            ApprovalRequest.org_id == org_id,
+        )
+    )
+    approval = result.scalar_one_or_none()
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval request not found.")
+    if approval.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Approval request already resolved with status '{approval.status}'.",
+        )
+    return approval
 
 
 @router.get("/approvals", response_model=list[ApprovalResponse])
@@ -43,14 +68,144 @@ async def list_approvals(
         stmt = stmt.where(ApprovalRequest.status == status)
     stmt = stmt.order_by(ApprovalRequest.created_at.desc())
     result = await session.execute(stmt)
-    approvals = result.scalars().all()
-    return [_approval_to_response(a) for a in approvals]
+    return [_to_response(a) for a in result.scalars().all()]
 
 
-@router.post("/approvals/{approval_id}/approve", response_model=ApprovalResponse)
-async def approve_request(
+# NOTE: must be registered before /{approval_id} so "decide" is not matched as a UUID
+@router.get("/approvals/decide")
+async def decide_via_email_get(
+    token: str,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Render a confirmation page for one-click email approve/reject links."""
+    parsed = verify_decision_token(token)
+    if parsed is None:
+        return Response(
+            content=_html_page("Invalid or expired link", "error"),
+            media_type="text/html",
+            status_code=400,
+        )
+    approval_id_str, decision = parsed
+    try:
+        approval_uuid = uuid.UUID(approval_id_str)
+    except ValueError:
+        return Response(
+            content=_html_page("Invalid approval ID", "error"),
+            media_type="text/html",
+            status_code=400,
+        )
+    result = await session.execute(
+        select(ApprovalRequest).where(ApprovalRequest.id == approval_uuid)
+    )
+    approval = result.scalar_one_or_none()
+    if not approval:
+        return Response(
+            content=_html_page("Approval request not found.", "error"),
+            media_type="text/html",
+            status_code=404,
+        )
+    if approval.status != "pending":
+        return Response(
+            content=_html_page(
+                f"This request was already {approval.status}.", "info"
+            ),
+            media_type="text/html",
+            status_code=200,
+        )
+
+    verb = "Approve" if decision == "approved" else "Reject"
+    color = "#16a34a" if decision == "approved" else "#dc2626"
+    return Response(
+        content=f"""
+<html><body style="font-family:sans-serif;max-width:480px;margin:48px auto;padding:0 16px">
+  <h2>Confirm {verb}</h2>
+  <p><strong>Agent:</strong> {approval.agent_id}</p>
+  <p><strong>Action:</strong> {approval.action}</p>
+  <p><strong>Resource:</strong> {approval.resource}</p>
+  <form method="POST" action="/v1/approvals/decide?token={token}">
+    <button type="submit"
+      style="background:{color};color:#fff;padding:12px 28px;border:none;
+             border-radius:6px;font-size:16px;font-weight:600;cursor:pointer">
+      Confirm {verb}
+    </button>
+  </form>
+</body></html>""",
+        media_type="text/html",
+        status_code=200,
+    )
+
+
+@router.post("/approvals/decide")
+async def decide_via_email_post(
+    token: str,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Execute one-click approve/reject from email link (no auth required)."""
+    parsed = verify_decision_token(token)
+    if parsed is None:
+        return Response(
+            content=_html_page("Invalid or expired link.", "error"),
+            media_type="text/html",
+            status_code=400,
+        )
+    approval_id_str, decision = parsed
+    try:
+        approval_uuid = uuid.UUID(approval_id_str)
+    except ValueError:
+        return Response(
+            content=_html_page("Invalid approval ID.", "error"),
+            media_type="text/html",
+            status_code=400,
+        )
+    result = await session.execute(
+        select(ApprovalRequest).where(ApprovalRequest.id == approval_uuid)
+    )
+    approval = result.scalar_one_or_none()
+    if not approval:
+        return Response(
+            content=_html_page("Approval request not found.", "error"),
+            media_type="text/html",
+            status_code=404,
+        )
+    if approval.status != "pending":
+        return Response(
+            content=_html_page(
+                f"This request was already {approval.status}.", "info"
+            ),
+            media_type="text/html",
+            status_code=200,
+        )
+
+    approval.status = decision
+    approval.decision_at = datetime.now(UTC)
+    await session.flush()
+
+    await create_audit_event(
+        session=session,
+        org_id=approval.org_id,
+        event_type=f"APPROVAL_{decision.upper()}",
+        agent_id=approval.agent_id,
+        action=approval.action,
+        resource=approval.resource,
+        decision=decision,
+        approval_id=approval.id,
+        payload={"decided_by": "email_link", "reason": ""},
+    )
+
+    label = "approved" if decision == "approved" else "rejected"
+    return Response(
+        content=_html_page(
+            f"'{approval.action}' on '{approval.resource}' has been {label}.",
+            "success" if decision == "approved" else "rejected",
+        ),
+        media_type="text/html",
+        status_code=200,
+    )
+
+
+@router.get("/approvals/{approval_id}", response_model=ApprovalResponse)
+async def get_approval(
     approval_id: uuid.UUID,
-    body: ApprovalDecisionRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> ApprovalResponse:
@@ -64,13 +219,51 @@ async def approve_request(
     approval = result.scalar_one_or_none()
     if not approval:
         raise HTTPException(status_code=404, detail="Approval request not found.")
-    if approval.status != "pending":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Approval request already resolved with status '{approval.status}'.",
-        )
+    return _to_response(approval)
+
+
+@router.post("/approvals/{approval_id}/decide", response_model=ApprovalResponse)
+async def decide_approval(
+    approval_id: uuid.UUID,
+    body: ApprovalDecideRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> ApprovalResponse:
+    """Unified approve/reject endpoint."""
+    org_id: uuid.UUID = request.state.org_id
+    approval = await _load_pending(approval_id, org_id, session)
+
+    approval.status = body.decision
+    approval.decision_at = datetime.now(UTC)
+    await session.flush()
+
+    await create_audit_event(
+        session=session,
+        org_id=org_id,
+        event_type=f"APPROVAL_{body.decision.upper()}",
+        agent_id=approval.agent_id,
+        action=approval.action,
+        resource=approval.resource,
+        decision=body.decision,
+        approval_id=approval.id,
+        payload={"decided_by": body.decided_by, "reason": body.reason},
+    )
+
+    return _to_response(approval)
+
+
+@router.post("/approvals/{approval_id}/approve", response_model=ApprovalResponse)
+async def approve_request(
+    approval_id: uuid.UUID,
+    body: ApprovalDecisionRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> ApprovalResponse:
+    org_id: uuid.UUID = request.state.org_id
+    approval = await _load_pending(approval_id, org_id, session)
 
     approval.status = "approved"
+    approval.decision_at = datetime.now(UTC)
     await session.flush()
 
     await create_audit_event(
@@ -85,7 +278,7 @@ async def approve_request(
         payload={"decided_by": body.decided_by, "reason": body.reason},
     )
 
-    return _approval_to_response(approval)
+    return _to_response(approval)
 
 
 @router.post("/approvals/{approval_id}/reject", response_model=ApprovalResponse)
@@ -96,22 +289,10 @@ async def reject_request(
     session: AsyncSession = Depends(get_session),
 ) -> ApprovalResponse:
     org_id: uuid.UUID = request.state.org_id
-    result = await session.execute(
-        select(ApprovalRequest).where(
-            ApprovalRequest.id == approval_id,
-            ApprovalRequest.org_id == org_id,
-        )
-    )
-    approval = result.scalar_one_or_none()
-    if not approval:
-        raise HTTPException(status_code=404, detail="Approval request not found.")
-    if approval.status != "pending":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Approval request already resolved with status '{approval.status}'.",
-        )
+    approval = await _load_pending(approval_id, org_id, session)
 
     approval.status = "rejected"
+    approval.decision_at = datetime.now(UTC)
     await session.flush()
 
     await create_audit_event(
@@ -126,4 +307,14 @@ async def reject_request(
         payload={"decided_by": body.decided_by, "reason": body.reason},
     )
 
-    return _approval_to_response(approval)
+    return _to_response(approval)
+
+
+def _html_page(message: str, kind: str) -> str:
+    colors = {"success": "#16a34a", "rejected": "#dc2626", "error": "#b91c1c", "info": "#2563eb"}
+    color = colors.get(kind, "#111")
+    return f"""
+<html><body style="font-family:sans-serif;max-width:480px;margin:48px auto;padding:0 16px;text-align:center">
+  <p style="font-size:18px;color:{color}">{message}</p>
+  <p style="color:#9ca3af;font-size:12px">You can close this window.</p>
+</body></html>"""

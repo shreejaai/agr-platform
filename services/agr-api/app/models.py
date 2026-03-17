@@ -72,6 +72,8 @@ class ApprovalRequest(Base):
     resource: Mapped[str] = mapped_column(Text, nullable=False)
     context: Mapped[dict | None] = mapped_column(JSONType, nullable=True)  # type: ignore[assignment]
     status: Mapped[str] = mapped_column(Text, default="pending")
+    approver_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     temporal_run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

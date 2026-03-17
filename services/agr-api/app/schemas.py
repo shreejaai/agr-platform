@@ -9,6 +9,7 @@ class EvaluateRequest(BaseModel):
     action: str = Field(..., min_length=1, max_length=256)
     resource: str = Field(..., min_length=1, max_length=512)
     context: dict[str, object] = Field(default_factory=dict)
+    approver_email: str | None = Field(default=None, max_length=256)
 
 
 class EvaluateResponse(BaseModel):
@@ -56,11 +57,19 @@ class ApprovalResponse(BaseModel):
     resource: str
     context: dict[str, object] | None
     status: str
+    approver_email: str | None
+    decision_at: datetime | None
     expires_at: datetime
     created_at: datetime
 
 
 class ApprovalDecisionRequest(BaseModel):
+    decided_by: str = Field(default="api_user", max_length=256)
+    reason: str = Field(default="", max_length=1024)
+
+
+class ApprovalDecideRequest(BaseModel):
+    decision: str = Field(..., pattern=r"^(approved|rejected)$")
     decided_by: str = Field(default="api_user", max_length=256)
     reason: str = Field(default="", max_length=1024)
 

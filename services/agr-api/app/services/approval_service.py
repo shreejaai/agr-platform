@@ -18,6 +18,7 @@ async def create_approval_request(
     action: str,
     resource: str,
     context: dict[str, object] | None = None,
+    approver_email: str | None = None,
 ) -> ApprovalRequest:
     """Create a new pending approval request."""
     approval = ApprovalRequest(
@@ -28,6 +29,7 @@ async def create_approval_request(
         resource=resource,
         context=context,
         status="pending",
+        approver_email=approver_email,
         expires_at=datetime.now(UTC) + timedelta(hours=48),
     )
     session.add(approval)

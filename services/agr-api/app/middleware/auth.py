@@ -11,7 +11,7 @@ from app.models import Organization
 
 logger = logging.getLogger(__name__)
 
-UNPROTECTED_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
+UNPROTECTED_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/v1/approvals/decide"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

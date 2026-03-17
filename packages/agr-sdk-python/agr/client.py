@@ -135,22 +135,25 @@ class AGRClient:
         """Wait for an approval decision. Returns True if approved, False if rejected.
 
         Raises TimeoutError if the approval is not resolved within the timeout.
+        Raises AGRError on unexpected API failures.
         """
         start = time.monotonic()
         while True:
-            elapsed = time.monotonic() - start
-            if elapsed >= timeout:
+            if time.monotonic() - start >= timeout:
                 raise TimeoutError(f"Approval {approval_id} not resolved within {timeout}s.")
 
-            response = self._client.get("/v1/approvals")
+            response = self._client.get(f"/v1/approvals/{approval_id}")
             if response.status_code == 200:
-                approvals = response.json()
-                for approval in approvals:
-                    if approval["id"] == approval_id:
-                        if approval["status"] == "approved":
-                            return True
-                        if approval["status"] == "rejected":
-                            return False
+                status = response.json().get("status")
+                if status == "approved":
+                    return True
+                if status == "rejected":
+                    return False
+            elif response.status_code >= 400:
+                raise AGRError(
+                    f"AGR API error ({response.status_code}): {response.text}",
+                    status_code=response.status_code,
+                )
 
             time.sleep(poll_interval)
 

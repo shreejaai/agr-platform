@@ -3,7 +3,7 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from app.schemas import ErrorResponse, EvaluateRequest, EvaluateResponse
 from app.services.approval_service import create_approval_request
 from app.services.audit_service import create_audit_event
 from app.services.cedar_service import evaluate_request
+from app.services.notification_service import send_approval_email
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ async def evaluate(
     body: EvaluateRequest,
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ) -> EvaluateResponse | Response:
     org: Organization = request.state.org
@@ -66,8 +68,10 @@ async def evaluate(
             action=body.action,
             resource=body.resource,
             context=body.context,
+            approver_email=body.approver_email,
         )
         approval_id = str(approval.id)
+        background_tasks.add_task(send_approval_email, approval)
 
     event_type = f"TOOL_{result.decision}"
     if result.decision == "APPROVAL_REQUIRED":
