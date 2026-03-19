@@ -10,7 +10,7 @@ This file is read by Claude Code at the start of every session. It contains ever
 
 **AGR (Agentic Governance Runtime)** — developer infrastructure. A drop-in governance layer for AI agent frameworks. Every agent tool call is evaluated against Cedar policies before execution. Sensitive actions (production deploys, DB drops) require human approval.
 
-**This repo is the backend product only.** The frontend dashboard lives separately.
+**This repo is a full-stack monorepo:** FastAPI backend (`services/agr-api/`) + Angular 17 dashboard (`apps/agr-dashboard/`).
 
 **Owner:** Navneet — solo founder, Shreeja AI (`shreejaai.com`)
 
@@ -51,6 +51,64 @@ eval_count synced to DB via BackgroundTask (Redis is authoritative for rate chec
 
 ```
 agr-platform/
+├── apps/
+│   └── agr-dashboard/                  # Angular 17 standalone dashboard
+│       ├── src/
+│       │   ├── app/
+│       │   │   ├── app.component.ts    # Root — calls clerk.init()
+│       │   │   ├── app.config.ts       # provideRouter + provideHttpClient(withInterceptors)
+│       │   │   ├── app.routes.ts       # Lazy routes — authGuard + apiKeyGuard
+│       │   │   ├── core/
+│       │   │   │   ├── auth/
+│       │   │   │   │   ├── clerk.service.ts       # @clerk/clerk-js singleton wrapper (signals)
+│       │   │   │   │   ├── auth.guard.ts          # CanActivateFn — Clerk signed-in
+│       │   │   │   │   └── api-key.guard.ts       # CanActivateFn — agr_sk_ key in localStorage
+│       │   │   │   ├── http/
+│       │   │   │   │   ├── api-key.interceptor.ts # Injects Bearer <key> on /v1/ requests
+│       │   │   │   │   └── error.interceptor.ts   # Redirects to /settings on 401
+│       │   │   │   └── models/                    # TypeScript interfaces (mirrors schemas.py)
+│       │   │   │       ├── approval.model.ts
+│       │   │   │       ├── policy.model.ts
+│       │   │   │       ├── audit-event.model.ts
+│       │   │   │       ├── agent.model.ts
+│       │   │   │       └── webhook.model.ts
+│       │   │   ├── layout/
+│       │   │   │   ├── shell/shell.component.ts    # Flex layout: sidebar + router-outlet
+│       │   │   │   └── sidebar/sidebar.component.ts # Nav, user email, API key warning
+│       │   │   ├── pages/
+│       │   │   │   ├── login/login.component.ts    # Clerk sign-in flow
+│       │   │   │   ├── home/home.component.ts      # Stat cards + recent audit events
+│       │   │   │   ├── approvals/approvals.component.ts  # List + inline approve/reject
+│       │   │   │   ├── policies/policies.component.ts    # CRUD + enable/disable toggle
+│       │   │   │   ├── audit/audit.component.ts    # Filtered table + pagination
+│       │   │   │   ├── agents/agents.component.ts  # Register + list, API key reveal
+│       │   │   │   ├── webhooks/webhooks.component.ts    # Create + list + delete
+│       │   │   │   └── settings/settings.component.ts    # API key storage
+│       │   │   ├── services/                       # HttpClient-based Observables
+│       │   │   │   ├── api-key.service.ts           # localStorage signal wrapper
+│       │   │   │   ├── approval.service.ts
+│       │   │   │   ├── policy.service.ts
+│       │   │   │   ├── audit.service.ts
+│       │   │   │   ├── agent.service.ts
+│       │   │   │   └── webhook.service.ts
+│       │   │   └── shared/
+│       │   │       ├── components/
+│       │   │       │   ├── badge/badge.component.ts       # 10 colour variants
+│       │   │       │   └── stat-card/stat-card.component.ts
+│       │   │       └── pipes/relative-time.pipe.ts        # Intl.RelativeTimeFormat
+│       │   ├── environments/
+│       │   │   ├── environment.ts          # clerkPublishableKey, apiBase: '/v1'
+│       │   │   └── environment.prod.ts
+│       │   ├── index.html
+│       │   ├── main.ts                     # bootstrapApplication(AppComponent, appConfig)
+│       │   └── styles.css                  # Tailwind + .btn-primary .card .input .table-*
+│       ├── angular.json
+│       ├── package.json                    # Angular 17.3, @clerk/clerk-js, Tailwind
+│       ├── tailwind.config.js              # Dark slate/indigo palette
+│       ├── proxy.conf.json                 # Dev: /v1 → http://localhost:8000
+│       ├── nginx.conf                      # Prod: SPA fallback + /v1/ proxy to agr-api:8000
+│       ├── Dockerfile                      # Node 20 build → nginx 1.27 serve
+│       └── tsconfig.json                   # strict, ES2022, moduleResolution: bundler
 ├── services/
 │   └── agr-api/                        # The deployed FastAPI service
 │       ├── app/
@@ -96,7 +154,10 @@ agr-platform/
 │       │       ├── test_evaluate.py
 │       │       ├── test_approvals.py
 │       │       ├── test_policies.py
-│       │       └── test_multi_tenant.py
+│       │       ├── test_multi_tenant.py
+│       │       ├── test_agents.py           # includes GET /v1/agents/{id} + cross-org
+│       │       ├── test_webhooks.py         # 11 tests: CRUD, isolation, auth
+│       │       └── test_clerk_webhook.py    # org creation, 5 default policies, idempotency
 │       ├── requirements.txt
 │       ├── Dockerfile
 │       └── Dockerfile.dev
@@ -136,7 +197,7 @@ agr-platform/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml
-├── docker-compose.yml                  # postgres:16 + redis:7 + agr-api
+├── docker-compose.yml                  # postgres:16 + redis:7 + agr-api + agr-dashboard
 ├── pyproject.toml                      # ruff + mypy + pytest config
 ├── .env.example
 └── README.md
@@ -166,6 +227,9 @@ agr-platform/
 | Type checking | mypy --strict | Live | Must pass on every PR. tests/ excluded. |
 | Testing | pytest + pytest-asyncio | Live | SQLite in-memory for integration tests |
 | TypeScript SDK | native fetch, ESM+CJS | Live | Node 18+, camelCase interface |
+| Dashboard | Angular 17 standalone, Tailwind CSS | Live | OnPush, signals, inject(), no NgModules |
+| Dashboard auth (identity) | @clerk/clerk-js (vanilla JS) | Live | Wrapped in ClerkService singleton; no official Angular SDK |
+| Dashboard auth (API) | agr_sk_ in localStorage | Live | apiKeyInterceptor injects Bearer header on /v1/ requests |
 
 ---
 
@@ -538,8 +602,8 @@ api_base_url: str          # http://localhost:8000  (used in email links)
 temporal_host: str         # localhost:7233  (empty string = Temporal disabled)
 temporal_namespace: str    # default
 resend_api_key: str        # ""  (empty = email disabled)
-slack_bot_token: str       # Slack Bot Token — empty = disabled
-slack_channel_id: str      # Slack channel ID, e.g. C0123456789 — empty = disabled
+slack_bot_token: str       # Slack Bot Token — empty = no Slack notifications
+slack_channel_id: str      # Slack channel ID, e.g. C0123456789 — empty = no Slack notifications
 clerk_webhook_secret: str  # ""  (empty = Svix verification skipped in dev)
 clerk_secret_key: str      # ""  (for future dashboard auth)
 clerk_publishable_key: str # ""  (for future dashboard auth)
@@ -846,7 +910,28 @@ temporal server start-dev
 
 ---
 
-### Step 10 (Optional) — TypeScript SDK development
+### Step 10 — Run the Angular dashboard
+
+```bash
+cd apps/agr-dashboard
+npm install
+npm start         # http://localhost:4200 (proxies /v1 → localhost:8000)
+```
+
+On first load:
+1. Sign in with Clerk (or skip if Clerk keys are blank — dashboard will still render)
+2. Go to **Settings** and paste your `agr_sk_` API key
+3. All pages (Approvals, Policies, Audit, Agents, Webhooks) become available
+
+Build for production:
+```bash
+npm run build -- --configuration production
+# Output: dist/agr-dashboard/browser/
+```
+
+---
+
+### Step 11 (Optional) — TypeScript SDK development
 
 ```bash
 cd packages/agr-sdk-ts
@@ -854,6 +939,20 @@ npm install
 npm test          # Jest tests
 npm run build     # compile ESM + CJS to dist/
 ```
+
+---
+
+### Dashboard Angular Patterns
+
+- **All components** are standalone (no NgModules). `imports: [...]` per component.
+- **Change detection**: `ChangeDetectionStrategy.OnPush` everywhere. Use signals to trigger updates.
+- **DI**: `inject()` function, not constructor injection.
+- **Control flow**: Angular 17 `@for`, `@if`, `@else` — NOT `*ngFor` / `*ngIf`.
+- **HTTP interceptors**: Functional (`HttpInterceptorFn`) — registered in `appConfig` via `withInterceptors([...])`.
+- **Route guards**: Functional (`CanActivateFn`) — `authGuard` (Clerk), `apiKeyGuard` (agr_sk_ key).
+- **Models** live in `src/app/core/models/`. Services live in `src/app/services/`. Shared components in `src/app/shared/`.
+- **API calls** return `Observable<T>`. Subscribe in `ngOnInit`, update signals in callbacks.
+- No `async` pipe — components subscribe manually and write to signals to keep OnPush working.
 
 ---
 
@@ -888,7 +987,7 @@ mypy app/
 ### Alternative: Run everything via Docker Compose
 
 ```bash
-# Builds and starts postgres + redis + agr-api together
+# Builds and starts postgres + redis + agr-api + agr-dashboard (port 4200)
 docker compose up --build
 
 # Migrations still need to be run manually (first time):
@@ -975,7 +1074,7 @@ API_BASE_URL=http://localhost:8000          # used in email approve/reject links
 TEMPORAL_HOST=localhost:7233               # empty = Temporal disabled (DB-only approvals)
 TEMPORAL_NAMESPACE=default
 RESEND_API_KEY=re_...                      # empty = approval emails disabled
-SLACK_BOT_TOKEN=xoxb-...                  # not yet used in code
+SLACK_BOT_TOKEN=xoxb-...                  # empty = Slack notifications disabled
 CLERK_WEBHOOK_SECRET=whsec_...            # empty = Svix verification skipped (dev-safe)
 CLERK_SECRET_KEY=sk_test_...
 CLERK_PUBLISHABLE_KEY=pk_test_...
@@ -1000,16 +1099,14 @@ CLERK_PUBLISHABLE_KEY=pk_test_...
 ## Future Scope (Planned, Not Built)
 
 ### High Priority
-1. **`GET /v1/agents/{agent_id}`** — single agent lookup, for SDK + dashboard use
-2. **Slack retry on failure** — Slack notifications fire once; add retry if needed
-3. **Webhook retry logic** — `webhook_service.py` fires once and logs failure; no retry/dead-letter queue
-4. **`POST /v1/approvals/{id}/escalate`** — re-send email, change approver
+1. **`POST /v1/approvals/{id}/escalate`** — re-send email, change approver
+2. **Webhook dead-letter queue** — `webhook_service.py` retries 3× with exponential backoff; permanently-failed events are logged but not queued for manual replay
+3. **Slack retry on failure** — Slack `send_approval_slack()` fires once and logs error; no retry
 
 ### Architecture Hardening
-5. **PyO3 Cedar bindings** — replace CLI subprocess with Python bindings when available
-6. **`pg_cron` for audit partition creation** — call `ensure_audit_partitions()` monthly via cron
-7. **Clerk dashboard full integration** — `clerk_secret_key` is in config but not used beyond webhook ingestion
-8. **Redis connection pooling** — current impl creates a new connection per request; add a module-level persistent pool
+4. **PyO3 Cedar bindings** — replace CLI subprocess with Python bindings when available
+5. **Clerk dashboard full integration** — `clerk_secret_key` is in config but not used beyond webhook ingestion
+6. **Dashboard unit tests** — Angular Karma/Jest tests not yet written
 
 ---
 
@@ -1034,6 +1131,6 @@ CLERK_PUBLISHABLE_KEY=pk_test_...
 
 - **No LLM calls in the governance path.** Cedar is deterministic. The evaluate endpoint never calls an AI model.
 - **No agent execution.** AGR evaluates agent actions. It does not run agents.
-- **No frontend.** The dashboard is a separate repo.
+- **No LLM in the dashboard.** The Angular dashboard is a pure REST client — no AI calls.
 - **No secrets management.** If an agent tries to read `.env` files, Cedar blocks it.
 - **No real-time push.** All client SDK communication is polling or REST. Webhooks push to registered endpoints.
