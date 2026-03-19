@@ -72,9 +72,7 @@ def evaluate_policies(
             result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
             return result
         except Exception as exc:
-            logger.warning(
-                "Cedar CLI evaluation failed, using Python fallback: %s", exc
-            )
+            logger.warning("Cedar CLI evaluation failed, using Python fallback: %s", exc)
 
     result = _python_evaluator(cedar_policies, agent_id, action, resource, context)
     result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
