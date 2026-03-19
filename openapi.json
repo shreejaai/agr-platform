@@ -280,6 +280,24 @@
         "responses": { "204": { "description": "Deleted" } }
       }
     },
+    "/v1/org/me": {
+      "get": {
+        "summary": "Get authenticated org profile and usage stats",
+        "operationId": "get_org_me",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Org profile",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OrgMeResponse" }
+              }
+            }
+          },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
     "/v1/clerk/webhook": {
       "post": {
         "summary": "Clerk user.created webhook — creates org + seeds default policies",
@@ -460,6 +478,18 @@
           "secret": { "type": "string", "description": "Shown once on creation — store securely" },
           "events": { "type": "array", "items": { "type": "string" } },
           "active": { "type": "boolean" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "OrgMeResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "slug": { "type": "string", "nullable": true },
+          "plan": { "type": "string", "enum": ["developer", "startup", "business", "enterprise"] },
+          "eval_count": { "type": "integer" },
+          "eval_limit": { "type": "integer", "description": "0 = unlimited" },
           "created_at": { "type": "string", "format": "date-time" }
         }
       }
