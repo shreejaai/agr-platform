@@ -1,13 +1,19 @@
 """POST /v1/evaluate — THE core endpoint."""
 
+from __future__ import annotations
+
 import logging
 import uuid
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
-from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models import Organization
 
 from app.database import get_session
-from app.models import Organization
 from app.schemas import ErrorResponse, EvaluateRequest, EvaluateResponse
 from app.services.approval_service import create_approval_request
 from app.services.audit_service import create_audit_event
@@ -64,17 +70,15 @@ async def evaluate(
     # -------------------------------------------------------------------------
     # Cache lookup — skip Cedar + policy DB query on hit
     # -------------------------------------------------------------------------
-    cached = await get_cached_eval(
-        org_id, body.agent_id, body.action, body.resource, body.context
-    )
+    cached = await get_cached_eval(org_id, body.agent_id, body.action, body.resource, body.context)
 
     eval_id = str(uuid.uuid4())
     approval_id: str | None = None
 
     if cached and cached.get("decision") in ("ALLOW", "DENY"):
-        decision   = str(cached["decision"])
-        reason     = str(cached.get("reason", ""))
-        policy_id  = cached.get("policy_id")
+        decision = str(cached["decision"])
+        reason = str(cached.get("reason", ""))
+        policy_id = cached.get("policy_id")
         latency_ms = float(cached.get("latency_ms", 0))
 
         await create_audit_event(
@@ -124,7 +128,11 @@ async def evaluate(
         approval_id = str(approval.id)
         background_tasks.add_task(send_approval_email, approval)
 
-    event_type = "APPROVAL_REQUESTED" if result.decision == "APPROVAL_REQUIRED" else f"TOOL_{result.decision}"
+    event_type = (
+        "APPROVAL_REQUESTED"
+        if result.decision == "APPROVAL_REQUIRED"
+        else f"TOOL_{result.decision}"
+    )
 
     await create_audit_event(
         session=session,

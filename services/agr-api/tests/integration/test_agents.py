@@ -1,11 +1,9 @@
 """Integration tests for agent registration and listing."""
 
 import pytest
+from app.models import Organization
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.models import Organization
-
 
 # ---------------------------------------------------------------------------
 # POST /v1/agents/register
@@ -106,9 +104,7 @@ async def test_register_agent_org_isolation(
 
 
 @pytest.mark.asyncio
-async def test_list_agents_empty(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_list_agents_empty(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     resp = await client.get("/v1/agents", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json() == []
@@ -132,9 +128,7 @@ async def test_list_agents_returns_registered(
 
 
 @pytest.mark.asyncio
-async def test_list_agents_all_present(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_list_agents_all_present(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     for name in ("first", "second", "third"):
         await client.post(
             "/v1/agents/register",
@@ -160,9 +154,7 @@ async def test_list_agents_requires_auth(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_agent_by_id(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_get_agent_by_id(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     register_resp = await client.post(
         "/v1/agents/register",
         json={"agent_id": "coder-001", "metadata": {"env": "prod"}},
@@ -179,9 +171,7 @@ async def test_get_agent_by_id(
 
 
 @pytest.mark.asyncio
-async def test_get_agent_by_id_not_found(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_get_agent_by_id_not_found(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     import uuid
 
     resp = await client.get(f"/v1/agents/{uuid.uuid4()}", headers=auth_headers)
@@ -213,20 +203,11 @@ async def test_get_agent_by_id_wrong_org(
 
 
 @pytest.mark.asyncio
-async def test_seed_default_policies(
-    db_session: AsyncSession, test_org: Organization
-) -> None:
-    from app.models import Policy
+async def test_seed_default_policies(db_session: AsyncSession, test_org: Organization) -> None:
     from app.services.org_service import seed_default_policies
-    from sqlalchemy import select
 
     policies = await seed_default_policies(db_session, test_org.id)
     await db_session.commit()
-
-    result = await db_session.execute(
-        select(Policy).where(Policy.org_id == test_org.id)
-    )
-    all_policies = result.scalars().all()
 
     seeded_names = {p.name for p in policies}
     assert "Block production DB drops" in seeded_names
