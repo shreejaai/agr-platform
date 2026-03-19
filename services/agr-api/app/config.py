@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     temporal_namespace: str = "default"
     resend_api_key: str = ""
     slack_bot_token: str = ""
+    clerk_webhook_secret: str = ""
+    clerk_secret_key: str = ""
+    clerk_publishable_key: str = ""
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
