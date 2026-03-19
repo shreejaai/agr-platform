@@ -7,7 +7,11 @@ WORKDIR /build
 COPY services/agr-api/requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-# Stage 2: lean runtime image
+# Stage 2: build Cedar CLI binary (enables real Cedar policy evaluation)
+FROM rust:slim AS cedar-builder
+RUN cargo install cedar-policy-cli --quiet
+
+# Stage 3: lean runtime image
 FROM python:3.12-slim
 
 # Non-root user
@@ -17,6 +21,9 @@ WORKDIR /app
 
 # Installed packages from builder
 COPY --from=builder /install /usr/local
+
+# Cedar CLI for real policy evaluation (Python fallback used if absent)
+COPY --from=cedar-builder /usr/local/cargo/bin/cedar /usr/local/bin/cedar
 
 # API source
 COPY --chown=agr:agr services/agr-api/ .

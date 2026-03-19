@@ -1,6 +1,9 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import { Clerk } from '@clerk/clerk-js';
 import { environment } from '../../../environments/environment';
+import { ApiKeyService } from '../../services/api-key.service';
 
 export interface ClerkUser {
   id: string;
@@ -11,6 +14,8 @@ export interface ClerkUser {
 @Injectable({ providedIn: 'root' })
 export class ClerkService {
   private clerk: any = null;
+  private http = inject(HttpClient);
+  private apiKeySvc = inject(ApiKeyService);
 
   readonly isLoaded = signal(false);
   readonly user = signal<ClerkUser | null>(null);
@@ -26,8 +31,28 @@ export class ClerkService {
       await this.clerk.load();
       this.isLoaded.set(true);
       this._syncUser();
+      // Auto-fetch AGR API key from Clerk session (if not already stored)
+      if (this.clerk?.user && !this.apiKeySvc.hasKey()) {
+        await this._fetchApiKey();
+      }
     } catch (err) {
       console.error('ClerkService: failed to initialise Clerk', err);
+    }
+  }
+
+  private async _fetchApiKey(): Promise<void> {
+    try {
+      const token: string = await this.clerk.session.getToken();
+      const res = await firstValueFrom(
+        this.http.get<{ api_key: string }>('/v1/clerk/api-key', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      );
+      if (res?.api_key) {
+        this.apiKeySvc.setKey(res.api_key);
+      }
+    } catch {
+      // Silently ignore — user can paste key manually in Settings
     }
   }
 

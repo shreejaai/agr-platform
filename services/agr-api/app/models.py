@@ -112,6 +112,28 @@ class Webhook(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     organization: Mapped["Organization"] = relationship(back_populates="webhooks")
+    deliveries: Mapped[list["WebhookDelivery"]] = relationship(
+        back_populates="webhook", cascade="all, delete-orphan"
+    )
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    webhook_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("webhooks.id", ondelete="CASCADE"), nullable=False
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    event: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONType, nullable=False)  # type: ignore[assignment]
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    webhook: Mapped["Webhook"] = relationship(back_populates="deliveries")
 
 
 class AuditEvent(Base):
