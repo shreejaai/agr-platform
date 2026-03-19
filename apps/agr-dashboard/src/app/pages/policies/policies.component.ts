@@ -72,12 +72,12 @@ function deriveAction(cedar_rule: string): string {
           <div class="space-y-3">
             <div class="grid grid-cols-2 gap-3">
               <div>
-                <label class="block text-xs text-slate-400 mb-1">Policy name</label>
-                <input [(ngModel)]="form.name" class="input w-full" placeholder="allow-web-search" />
+                <label for="policy-name" class="block text-xs text-slate-400 mb-1">Policy name</label>
+                <input id="policy-name" [(ngModel)]="form.name" class="input w-full" placeholder="allow-web-search" />
               </div>
               <div>
-                <label class="block text-xs text-slate-400 mb-1">Applies to</label>
-                <select [(ngModel)]="form.level" class="input w-full">
+                <label for="policy-level" class="block text-xs text-slate-400 mb-1">Applies to</label>
+                <select id="policy-level" [(ngModel)]="form.level" class="input w-full">
                   <option value="org">Entire org</option>
                   <option value="project">Project</option>
                   <option value="agent">Specific agent</option>
@@ -87,33 +87,33 @@ function deriveAction(cedar_rule: string): string {
 
             <div class="grid grid-cols-2 gap-3">
               <div>
-                <label class="block text-xs text-slate-400 mb-1">Effect</label>
-                <select [(ngModel)]="form.effect" class="input w-full">
+                <label for="policy-effect" class="block text-xs text-slate-400 mb-1">Effect</label>
+                <select id="policy-effect" [(ngModel)]="form.effect" class="input w-full">
                   <option value="allow">Allow</option>
                   <option value="deny">Deny</option>
                   <option value="require_approval">Require approval</option>
                 </select>
               </div>
               <div>
-                <label class="block text-xs text-slate-400 mb-1">Action (tool name)</label>
-                <input [(ngModel)]="form.action" class="input w-full" placeholder="web_search" />
+                <label for="policy-action" class="block text-xs text-slate-400 mb-1">Action (tool name)</label>
+                <input id="policy-action" [(ngModel)]="form.action" class="input w-full" placeholder="web_search" />
               </div>
             </div>
 
             <div class="grid grid-cols-2 gap-3">
               <div>
-                <label class="block text-xs text-slate-400 mb-1">When resource has attribute</label>
-                <input [(ngModel)]="form.resource_attr" class="input w-full" placeholder="environment (optional)" />
+                <label for="policy-resource-attr" class="block text-xs text-slate-400 mb-1">When resource has attribute</label>
+                <input id="policy-resource-attr" [(ngModel)]="form.resource_attr" class="input w-full" placeholder="environment (optional)" />
               </div>
               <div>
-                <label class="block text-xs text-slate-400 mb-1">equals value</label>
-                <input [(ngModel)]="form.resource_value" class="input w-full" placeholder="production (optional)" />
+                <label for="policy-resource-value" class="block text-xs text-slate-400 mb-1">equals value</label>
+                <input id="policy-resource-value" [(ngModel)]="form.resource_value" class="input w-full" placeholder="production (optional)" />
               </div>
             </div>
 
             @if (previewRule()) {
               <div>
-                <label class="block text-xs text-slate-400 mb-1">Generated Cedar rule</label>
+                <p class="block text-xs text-slate-400 mb-1">Generated Cedar rule</p>
                 <pre class="text-xs bg-slate-900 rounded p-2 text-indigo-300 overflow-x-auto">{{ previewRule() }}</pre>
               </div>
             }

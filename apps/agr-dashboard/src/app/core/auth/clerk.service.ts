@@ -10,7 +10,6 @@ export interface ClerkUser {
 
 @Injectable({ providedIn: 'root' })
 export class ClerkService {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private clerk: any = null;
 
   readonly isLoaded = signal(false);
@@ -23,7 +22,6 @@ export class ClerkService {
       return;
     }
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       this.clerk = new (Clerk as any)(key);
       await this.clerk.load();
       this.isLoaded.set(true);

@@ -25,8 +25,8 @@ const EVENT_TYPES = [
       <div class="card">
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
-            <label class="block text-xs text-slate-400 mb-1">Event type</label>
-            <select [(ngModel)]="filterType" (ngModelChange)="resetAndLoad()" class="input w-full text-sm">
+            <label for="audit-event-type" class="block text-xs text-slate-400 mb-1">Event type</label>
+            <select id="audit-event-type" [(ngModel)]="filterType" (ngModelChange)="resetAndLoad()" class="input w-full text-sm">
               <option value="">All types</option>
               @for (t of eventTypes; track t) {
                 <option [value]="t">{{ t }}</option>
@@ -34,13 +34,13 @@ const EVENT_TYPES = [
             </select>
           </div>
           <div>
-            <label class="block text-xs text-slate-400 mb-1">Agent ID</label>
-            <input [(ngModel)]="filterAgent" (blur)="resetAndLoad()"
+            <label for="audit-agent-id" class="block text-xs text-slate-400 mb-1">Agent ID</label>
+            <input id="audit-agent-id" [(ngModel)]="filterAgent" (blur)="resetAndLoad()"
                    class="input w-full text-sm font-mono" placeholder="agent-id…" />
           </div>
           <div>
-            <label class="block text-xs text-slate-400 mb-1">From date</label>
-            <input [(ngModel)]="filterStartDate" (change)="resetAndLoad()"
+            <label for="audit-start-date" class="block text-xs text-slate-400 mb-1">From date</label>
+            <input id="audit-start-date" [(ngModel)]="filterStartDate" (change)="resetAndLoad()"
                    class="input w-full text-sm" type="date" />
           </div>
         </div>
