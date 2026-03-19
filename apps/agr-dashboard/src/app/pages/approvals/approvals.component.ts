@@ -1,4 +1,5 @@
 import { Component, inject, OnInit, ChangeDetectionStrategy, signal } from '@angular/core';
+import { JsonPipe, NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApprovalService } from '../../services/approval.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
@@ -11,7 +12,7 @@ type StatusFilter = 'pending' | 'approved' | 'rejected' | '';
   selector: 'agr-approvals',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, BadgeComponent, RelativeTimePipe],
+  imports: [FormsModule, JsonPipe, NgClass, BadgeComponent, RelativeTimePipe],
   template: `
     <div class="space-y-4">
       <div class="flex items-center justify-between">
@@ -38,7 +39,7 @@ type StatusFilter = 'pending' | 'approved' | 'rejected' | '';
         <div class="space-y-3">
           @for (item of items(); track item.id) {
             <div class="card hover:border-slate-700 transition-colors"
-                 [class.border-amber-500/30]="item.status === 'pending'">
+                 [ngClass]="{'border-amber-500/30': item.status === 'pending'}">
               <div class="flex items-start justify-between gap-4">
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 mb-1">

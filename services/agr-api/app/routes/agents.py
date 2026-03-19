@@ -18,7 +18,7 @@ def _to_response(agent: Agent) -> AgentResponse:
         id=str(agent.id),
         org_id=str(agent.org_id),
         agent_id=agent.agent_id,
-        metadata=agent.metadata,
+        metadata=agent.agent_metadata,
         created_at=agent.created_at,
         updated_at=agent.updated_at,
     )
@@ -47,11 +47,11 @@ async def register_agent(
             id=uuid.uuid4(),
             org_id=org_id,
             agent_id=body.agent_id,
-            metadata=body.metadata or {},
+            agent_metadata=body.metadata or {},
         )
         session.add(agent)
     else:
-        agent.metadata = body.metadata or {}
+        agent.agent_metadata = body.metadata or {}
 
     await session.flush()
     await session.refresh(agent)

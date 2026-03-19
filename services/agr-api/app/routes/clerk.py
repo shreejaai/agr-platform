@@ -109,6 +109,7 @@ async def clerk_webhook(
     except IntegrityError:
         # Duplicate slug = same Clerk user already registered. Return 200 so
         # Clerk stops retrying.
+        await session.rollback()
         logger.info("Duplicate Clerk user %s — org already exists, ignoring.", clerk_user_id)
         return Response(status_code=200)
 

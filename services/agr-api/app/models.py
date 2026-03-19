@@ -89,7 +89,7 @@ class Agent(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("organizations.id"), nullable=False)
     agent_id: Mapped[str] = mapped_column(Text, nullable=False)
-    metadata: Mapped[dict | None] = mapped_column(JSONType, nullable=True)  # type: ignore[assignment]
+    agent_metadata: Mapped[dict | None] = mapped_column("metadata", JSONType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

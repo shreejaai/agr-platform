@@ -11,7 +11,11 @@ export type BadgeVariant =
   | 'info'
   | 'org'
   | 'project'
-  | 'agent';
+  | 'agent'
+  | 'success'
+  | 'danger'
+  | 'warning'
+  | 'neutral';
 
 const VARIANT_CLASSES: Record<BadgeVariant, string> = {
   pending:   'bg-amber-500/20 text-amber-400 border-amber-500/30',
@@ -24,6 +28,10 @@ const VARIANT_CLASSES: Record<BadgeVariant, string> = {
   org:       'bg-blue-500/20 text-blue-400 border-blue-500/30',
   project:   'bg-purple-500/20 text-purple-400 border-purple-500/30',
   agent:     'bg-teal-500/20 text-teal-400 border-teal-500/30',
+  success:   'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+  danger:    'bg-red-500/20 text-red-400 border-red-500/30',
+  warning:   'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  neutral:   'bg-slate-500/20 text-slate-400 border-slate-500/30',
 };
 
 @Component({

@@ -1,5 +1,6 @@
 import { Component, inject, ChangeDetectionStrategy, signal, OnInit } from '@angular/core';
-import { FormsModule, DecimalPipe } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ApiKeyService } from '../../services/api-key.service';
 import { OrgService, OrgMe } from '../../services/org.service';
 

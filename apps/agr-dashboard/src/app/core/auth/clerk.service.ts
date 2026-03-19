@@ -1,5 +1,5 @@
 import { Injectable, signal } from '@angular/core';
-import Clerk from '@clerk/clerk-js';
+import { Clerk } from '@clerk/clerk-js';
 import { environment } from '../../../environments/environment';
 
 export interface ClerkUser {
@@ -10,15 +10,27 @@ export interface ClerkUser {
 
 @Injectable({ providedIn: 'root' })
 export class ClerkService {
-  private clerk = new Clerk(environment.clerkPublishableKey);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private clerk: any = null;
 
   readonly isLoaded = signal(false);
   readonly user = signal<ClerkUser | null>(null);
 
   async init(): Promise<void> {
-    await this.clerk.load();
-    this.isLoaded.set(true);
-    this._syncUser();
+    const key = environment.clerkPublishableKey;
+    if (!key || key.includes('REPLACE_WITH')) {
+      console.warn('ClerkService: publishableKey not configured — auth disabled.');
+      return;
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this.clerk = new (Clerk as any)(key);
+      await this.clerk.load();
+      this.isLoaded.set(true);
+      this._syncUser();
+    } catch (err) {
+      console.error('ClerkService: failed to initialise Clerk', err);
+    }
   }
 
   private _syncUser(): void {
@@ -35,15 +47,15 @@ export class ClerkService {
   }
 
   isSignedIn(): boolean {
-    return !!this.clerk.user;
+    return !!this.clerk?.user;
   }
 
   async signIn(): Promise<void> {
-    await this.clerk.redirectToSignIn();
+    await this.clerk?.redirectToSignIn({ afterSignInUrl: '/' });
   }
 
   async signOut(): Promise<void> {
-    await this.clerk.signOut();
+    await this.clerk?.signOut();
     this.user.set(null);
   }
 }

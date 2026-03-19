@@ -15,27 +15,33 @@
 -- Running this migration is OPTIONAL if you manage partitions manually or
 -- pre-created enough months in migration 006 (which covers 13 months ahead).
 
-BEGIN;
+-- Wrapped in a DO block so the migration succeeds even when pg_cron
+-- is not installed (local Docker, vanilla RDS without the extension).
+DO $$
+BEGIN
+    CREATE EXTENSION IF NOT EXISTS pg_cron;
 
--- Enable pg_cron if not already enabled
-CREATE EXTENSION IF NOT EXISTS pg_cron;
+    -- Remove any existing schedule (idempotent)
+    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'agr-audit-partitions') THEN
+        PERFORM cron.unschedule('agr-audit-partitions');
+    END IF;
 
--- Remove any existing schedule with this name (idempotent)
-SELECT cron.unschedule('agr-audit-partitions')
-WHERE EXISTS (
-    SELECT 1 FROM cron.job WHERE jobname = 'agr-audit-partitions'
-);
+    -- Schedule: 02:00 on the 1st of every month
+    PERFORM cron.schedule(
+        'agr-audit-partitions',
+        '0 2 1 * *',
+        'SELECT ensure_audit_partitions()'
+    );
 
--- Schedule: 02:00 on the 1st of every month
--- ensure_audit_partitions() creates current month + 3 months ahead,
--- so the partitions are always ready before data arrives.
-SELECT cron.schedule(
-    'agr-audit-partitions',
-    '0 2 1 * *',
-    $$SELECT ensure_audit_partitions()$$
-);
+    RAISE NOTICE 'pg_cron job scheduled: agr-audit-partitions (0 2 1 * *)';
 
-COMMIT;
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'pg_cron not available (%). Skipping automated partition scheduling. '
+                 'Migration 006 pre-creates 13 months of partitions. '
+                 'Re-run this migration on a pg_cron-enabled host (Railway, Supabase, RDS) when ready.',
+                 SQLERRM;
+END;
+$$;
 
 -- Verify the job was registered:
 -- SELECT jobid, jobname, schedule, command FROM cron.job WHERE jobname = 'agr-audit-partitions';
