@@ -1027,6 +1027,252 @@ docker compose exec redis redis-cli KEYS "eval:*"
 
 ---
 
+## Development Workflow & Deployment Rules
+
+**These rules govern EVERY code change — features, bug fixes, refactors, migrations, dashboard updates. Follow them without exception.**
+
+---
+
+### Rule 1 — Branch Before You Touch Code
+
+Every change, no matter how small, happens on a branch. Never commit directly to `main`.
+
+| Change type | Branch prefix | Example |
+|---|---|---|
+| New feature | `feature/` | `feature/slack-notifications` |
+| Bug fix | `fix/` | `fix/audit-hash-chain-corrupt` |
+| Refactor (no behaviour change) | `refactor/` | `refactor/cedar-service-cleanup` |
+| Database migration | `migration/` | `migration/008-add-org-timezone` |
+| Dependency / infra update | `chore/` | `chore/upgrade-fastapi-0116` |
+| Hotfix to production | `hotfix/` | `hotfix/429-wrong-status-code` |
+
+```bash
+git checkout main && git pull origin main
+git checkout -b feature/my-feature
+```
+
+---
+
+### Rule 2 — Commit Message Format
+
+Every commit message must follow this format:
+
+```
+<type>(<scope>): <short description>
+
+[optional body — explain WHY, not WHAT]
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+```
+
+**Types:** `feat` · `fix` · `refactor` · `chore` · `test` · `docs` · `migration`
+
+**Scopes:** `api` · `dashboard` · `sdk-ts` · `sdk-python` · `infra` · `ci`
+
+**Examples:**
+```
+feat(api): add GET /v1/org/me endpoint with eval usage
+
+fix(dashboard): label-has-associated-control ESLint errors in 5 components
+
+migration(infra): add org_timezone column (008_add_org_timezone.sql)
+
+chore(ci): upgrade Node 20 → 24, pin action versions
+```
+
+**Rules:**
+- Description is imperative mood, lowercase, no period
+- Max 72 characters on first line
+- Never commit directly: always commit on a branch, then PR
+
+---
+
+### Rule 3 — Quality Gates (Run Before Every Commit)
+
+**All of these must pass before pushing. CI will catch failures — fix them locally first.**
+
+#### Python (services/agr-api + packages/)
+```bash
+cd services/agr-api && source .venv/bin/activate
+ruff check .                    # linting — zero errors
+ruff format --check .           # formatting — zero diffs
+mypy app/                       # strict type check — zero errors
+pytest tests/unit -v            # unit tests — all pass
+pytest tests/integration -v     # integration tests — all pass
+```
+
+#### TypeScript SDK (packages/agr-sdk-ts)
+```bash
+cd packages/agr-sdk-ts
+npm run typecheck               # tsc --noEmit — zero errors
+npm test                        # jest — all pass
+npm run build                   # must compile without errors
+```
+
+#### Angular Dashboard (apps/agr-dashboard)
+```bash
+cd apps/agr-dashboard
+npm run lint                    # eslint — zero errors
+npm run build -- --configuration production  # must compile
+```
+
+**If any gate fails: fix it on the same branch before opening the PR. Do not open a PR with known failures.**
+
+---
+
+### Rule 4 — What Must Change Together
+
+When you add or change a feature, ALL of the following must be updated in the SAME PR:
+
+| Changed | Also update |
+|---|---|
+| New API endpoint | Schema in `schemas.py` · ORM model if new columns · Integration test · `openapi.json` if maintained · `AGR_CLAUDE.md` endpoints section |
+| New DB column | New migration file (`00N_name.sql`) · ORM model (`models.py`) · Schema (`schemas.py`) · Rollback script (`rollback/00N_down.sql`) · Tests |
+| New config var | `config.py` (pydantic field with default) · `.env.example` · `AGR_CLAUDE.md` env var reference · `docker-compose.yml` if used at runtime |
+| New Python dependency | `requirements.txt` · verify no `pip install --user` pollution |
+| New TS SDK public method | Type in `types.ts` · Export in `index.ts` · Test in `__tests__/client.test.ts` |
+| New Angular page/service | Route in `app.routes.ts` · Nav link in `sidebar.component.ts` · Model in `core/models/` |
+| Breaking API change | Dashboard service updated · TS SDK updated · Python SDK updated — ALL in same PR |
+
+---
+
+### Rule 5 — Database Migrations
+
+**Migrations are permanent. They cannot be modified once merged to main.**
+
+- Migration files are numbered sequentially: `008_name.sql`, `009_name.sql`, etc.
+- Always write the rollback script `rollback/00N_down.sql` in the same PR
+- Migrations must be idempotent: use `IF NOT EXISTS`, `IF EXISTS`, `ON CONFLICT DO NOTHING`
+- Never drop a column in the same migration that adds data depending on it
+- `audit_events` is append-only and partitioned — any schema change to it requires special care (must apply to parent table AND existing partitions)
+- Test migrations locally before pushing:
+  ```bash
+  psql postgresql://agr:password@localhost:5432/agr_dev -f infra/migrations/00N_name.sql
+  # verify it works, then test rollback:
+  psql postgresql://agr:password@localhost:5432/agr_dev -f infra/migrations/rollback/00N_down.sql
+  ```
+
+---
+
+### Rule 6 — CI Must Pass Before Merge
+
+The CI pipeline has three mandatory jobs. **All three must be green before merging to `main`.**
+
+| Job | What it checks |
+|---|---|
+| `lint-and-test` | ruff lint + format · Python unit tests · Python integration tests |
+| `build-dashboard` | Angular ESLint · Angular production build |
+| `test-ts-sdk` | TS typecheck · Jest tests · TS SDK build |
+
+**Deploy job** runs automatically on merge to `main` (Railway). It is blocked until all three pass.
+
+If CI fails:
+1. Read the error output carefully — do not guess
+2. Reproduce the failure locally using the quality gate commands (Rule 3)
+3. Fix it on the same branch
+4. Push — CI re-runs automatically
+
+---
+
+### Rule 7 — PR Checklist (Open a PR for Every Branch)
+
+Before marking a PR ready for review (or merging if solo):
+
+- [ ] Branch name follows Rule 1 naming
+- [ ] All commits follow Rule 2 message format
+- [ ] All quality gates pass locally (Rule 3)
+- [ ] All affected files updated together (Rule 4)
+- [ ] Migration + rollback written if DB changed (Rule 5)
+- [ ] CI is green (Rule 6)
+- [ ] `AGR_CLAUDE.md` updated if: new endpoint added, new config var, new dependency, architecture decision changed
+- [ ] No secrets, `.env` files, or credentials in the diff
+
+PR description must include:
+```
+## What
+<1-3 bullet points describing the change>
+
+## Why
+<the motivation — bug it fixes, feature it enables>
+
+## Test plan
+<what was tested and how>
+```
+
+---
+
+### Rule 8 — Deployment Process
+
+**Deployment is fully automated. The only manual step is merging to `main`.**
+
+```
+Branch → PR → CI passes (all 3 jobs) → Merge to main → Railway auto-deploys agr-api
+```
+
+Railway config:
+- Service: `agr-api`
+- Build: `docker build -f services/agr-api/Dockerfile .` (repo root context)
+- Start command: `uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2`
+- Auto-deploy: yes, on push to `main`
+
+**After merging, verify the deploy:**
+```bash
+# Check Railway deploy status
+railway status --service agr-api
+
+# Smoke test production
+curl https://<your-railway-url>/health
+curl -X POST https://<your-railway-url>/v1/evaluate \
+  -H "Authorization: Bearer agr_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id":"smoke-test","action":"read","resource":"healthcheck","context":{}}'
+```
+
+**Database migrations on production:**
+Migrations do NOT run automatically. After merging a migration:
+```bash
+# Connect to production DB via Railway
+railway connect postgres
+\i infra/migrations/00N_name.sql
+```
+Or via psql with the production `DATABASE_URL` from Railway env vars.
+
+---
+
+### Rule 9 — Hotfix Process
+
+For a critical production bug that cannot wait for a normal PR cycle:
+
+```bash
+git checkout main && git pull origin main
+git checkout -b hotfix/short-description
+
+# Make the minimal fix — no refactoring, no unrelated changes
+# Run quality gates
+# Commit with: fix(scope): <description>
+
+git push origin hotfix/short-description
+# Open PR, add "HOTFIX" label, merge as soon as CI passes
+```
+
+A hotfix PR must contain ONLY the fix. No cleanup, no improvements. Those go in a separate PR.
+
+---
+
+### Rule 10 — What Claude Must Never Do
+
+- **Never commit directly to `main`** — always a branch + PR
+- **Never skip CI** — if CI is failing for unrelated reasons, fix the underlying issue; do not bypass
+- **Never modify an existing migration file** — create a new one
+- **Never commit `.env`, secrets, or API keys** — check the diff before every commit
+- **Never open a PR with failing tests** — fix them first
+- **Never make a "quick fix" that skips the quality gates** — ruff format failures ARE CI failures
+- **Never deploy by pushing directly to Railway** — always merge to main and let CI gate the deploy
+- **Never `git push --force` to main** — destructive and irreversible
+- **Never amend a commit that has already been pushed to a shared branch**
+
+---
+
 ## Coding Rules — Follow These Always
 
 ### Python
