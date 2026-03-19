@@ -10,9 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models import ApprovalRequest
-from app.schemas import ApprovalDecideRequest, ApprovalDecisionRequest, ApprovalResponse
+from app.schemas import (
+    ApprovalDecideRequest,
+    ApprovalDecisionRequest,
+    ApprovalEscalateRequest,
+    ApprovalResponse,
+)
 from app.services.audit_service import create_audit_event
-from app.services.notification_service import verify_decision_token
+from app.services.notification_service import send_approval_email, verify_decision_token
 from app.services.temporal_service import signal_approval_workflow
 from app.services.webhook_service import fire_approval_webhook
 
@@ -350,6 +355,41 @@ async def reject_request(
         approval.agent_id, approval.action, approval.resource,
         body.decided_by, body.reason,
     )
+    return _to_response(approval)
+
+
+@router.post("/approvals/{approval_id}/escalate", response_model=ApprovalResponse)
+async def escalate_approval(
+    approval_id: uuid.UUID,
+    body: ApprovalEscalateRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> ApprovalResponse:
+    """Re-send approval email to a (new) approver email address.
+
+    Updates approver_email and resends the notification. Returns 409 if
+    the approval is no longer pending.
+    """
+    org_id: uuid.UUID = request.state.org_id
+    result = await session.execute(
+        select(ApprovalRequest).where(
+            ApprovalRequest.id == approval_id,
+            ApprovalRequest.org_id == org_id,
+        )
+    )
+    approval = result.scalar_one_or_none()
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval request not found.")
+    if approval.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot escalate: approval already '{approval.status}'.",
+        )
+
+    approval.approver_email = body.approver_email
+    await session.flush()
+    await send_approval_email(approval)
+    logger.info("Escalated approval %s to %s", approval_id, body.approver_email)
     return _to_response(approval)
 
 

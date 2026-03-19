@@ -1,4 +1,4 @@
-"""Audit trail query endpoint."""
+"""Audit trail query and chain-verification endpoints."""
 
 import uuid
 from datetime import datetime
@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models import AuditEvent
-from app.schemas import AuditEventResponse
+from app.schemas import AuditEventResponse, AuditVerifyResponse
+from app.services.audit_service import compute_entry_hash
 
 router = APIRouter(prefix="/v1")
 
@@ -60,3 +61,47 @@ async def list_audit_events(
     result = await session.execute(stmt)
     events = result.scalars().all()
     return [_event_to_response(e) for e in events]
+
+
+@router.get("/audit/verify", response_model=AuditVerifyResponse)
+async def verify_audit_chain(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> AuditVerifyResponse:
+    """Re-compute and verify the SHA-256 hash chain for this org's audit log.
+
+    Walks every event in sequence order, re-computes each entry_hash and
+    checks it matches the stored value. Returns the first invalid sequence
+    number if a break is found.
+
+    Note: for large audit logs this may be slow — paginate if needed.
+    """
+    org_id: uuid.UUID = request.state.org_id
+    stmt = (
+        select(AuditEvent)
+        .where(AuditEvent.org_id == org_id)
+        .order_by(AuditEvent.sequence_num.asc())
+    )
+    result = await session.execute(stmt)
+    events = result.scalars().all()
+
+    if not events:
+        return AuditVerifyResponse(valid=True, total=0)
+
+    prev_hash: str | None = None
+    for event in events:
+        expected = compute_entry_hash(
+            event.sequence_num,
+            event.event_type,
+            event.payload,
+            prev_hash,
+        )
+        if expected != event.entry_hash:
+            return AuditVerifyResponse(
+                valid=False,
+                total=len(events),
+                first_invalid_sequence=event.sequence_num,
+            )
+        prev_hash = event.entry_hash
+
+    return AuditVerifyResponse(valid=True, total=len(events))

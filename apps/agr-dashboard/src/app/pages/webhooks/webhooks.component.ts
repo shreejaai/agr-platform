@@ -3,11 +3,10 @@ import { FormsModule } from '@angular/forms';
 import { WebhookService } from '../../services/webhook.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { RelativeTimePipe } from '../../shared/pipes/relative-time.pipe';
-import { Webhook, WebhookCreate } from '../../models/webhook.model';
+import { Webhook, WebhookCreate, WebhookEvent } from '../../core/models/webhook.model';
 
-const AVAILABLE_EVENTS = [
-  'tool.allow', 'tool.deny', 'approval.requested', 'approval.approved', 'approval.rejected',
-];
+/** Events the AGR webhook system actually fires. */
+const AVAILABLE_EVENTS: WebhookEvent[] = ['approval.approved', 'approval.rejected'];
 
 @Component({
   selector: 'agr-webhooks',
@@ -19,7 +18,7 @@ const AVAILABLE_EVENTS = [
       <div class="flex items-center justify-between">
         <div>
           <h1 class="text-2xl font-bold text-slate-100">Webhooks</h1>
-          <p class="text-sm text-slate-400 mt-1">Push governance events to your systems via HMAC-signed HTTP.</p>
+          <p class="text-sm text-slate-400 mt-1">Push approval events to your systems via HMAC-signed HTTP.</p>
         </div>
         <button (click)="showForm.set(true)" class="btn-primary text-sm">+ New webhook</button>
       </div>
@@ -31,17 +30,17 @@ const AVAILABLE_EVENTS = [
           <div class="space-y-3">
             <div>
               <label class="block text-xs text-slate-400 mb-1">Endpoint URL</label>
-              <input [(ngModel)]="form.url" class="input w-full font-mono text-sm"
+              <input [(ngModel)]="formUrl" class="input w-full font-mono text-sm"
                      placeholder="https://your-server.com/agr-events" type="url" />
             </div>
             <div>
               <label class="block text-xs text-slate-400 mb-2">Events to subscribe</label>
-              <div class="grid grid-cols-2 gap-2">
+              <div class="flex gap-4">
                 @for (evt of availableEvents; track evt) {
                   <label class="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      [checked]="form.events.includes(evt)"
+                      [checked]="formEvents.includes(evt)"
                       (change)="toggleEvent(evt)"
                       class="w-3.5 h-3.5 accent-indigo-500"
                     />
@@ -56,8 +55,10 @@ const AVAILABLE_EVENTS = [
             }
             @if (createdSecret()) {
               <div class="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-                <p class="text-xs text-green-400 mb-1 font-medium">Webhook created! Save your signing secret — it won't be shown again.</p>
-                <code class="text-xs font-mono text-slate-200 break-all">{{ createdSecret() }}</code>
+                <p class="text-xs text-green-400 mb-1 font-medium">
+                  Webhook created. Save your signing secret — it will not be shown again.
+                </p>
+                <code class="text-xs font-mono text-slate-200 break-all select-all">{{ createdSecret() }}</code>
               </div>
             }
 
@@ -74,9 +75,16 @@ const AVAILABLE_EVENTS = [
         </div>
       }
 
+      <!-- Signature verification reference -->
+      <div class="card bg-slate-900/50">
+        <h2 class="text-xs font-semibold text-slate-400 mb-2">Verifying signatures</h2>
+        <pre class="text-xs font-mono text-slate-400 overflow-x-auto">X-AGR-Signature: t=&#123;timestamp&#125;,v1=&#123;hmac_hex&#125;
+Signed content:  "&#123;timestamp&#125;.&#123;json_body&#125;"</pre>
+      </div>
+
       <!-- List -->
       @if (loading()) {
-        <div class="py-16 text-center text-slate-500 text-sm">Loading…</div>
+        <div class="py-8 text-center text-slate-500 text-sm">Loading…</div>
       } @else if (items().length === 0) {
         <div class="card py-16 text-center">
           <p class="text-slate-400">No webhooks configured.</p>
@@ -89,8 +97,8 @@ const AVAILABLE_EVENTS = [
               <div class="flex items-start justify-between gap-4">
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 mb-1">
-                    <agr-badge [variant]="w.enabled ? 'success' : 'neutral'">
-                      {{ w.enabled ? 'active' : 'disabled' }}
+                    <agr-badge [variant]="w.active ? 'success' : 'neutral'">
+                      {{ w.active ? 'active' : 'disabled' }}
                     </agr-badge>
                     <span class="text-xs text-slate-500">{{ w.created_at | relativeTime }}</span>
                   </div>
@@ -106,9 +114,7 @@ const AVAILABLE_EVENTS = [
                 <button
                   (click)="remove(w.id)"
                   class="text-xs text-red-500/70 hover:text-red-400 shrink-0 transition-colors"
-                >
-                  Delete
-                </button>
+                >Delete</button>
               </div>
             </div>
           }
@@ -128,7 +134,8 @@ export class WebhooksComponent implements OnInit {
   readonly createdSecret = signal('');
   readonly items = signal<Webhook[]>([]);
 
-  form: WebhookCreate = this.emptyForm();
+  formUrl = '';
+  formEvents: WebhookEvent[] = [...AVAILABLE_EVENTS];
 
   ngOnInit(): void {
     this.loadList();
@@ -137,38 +144,37 @@ export class WebhooksComponent implements OnInit {
   loadList(): void {
     this.svc.list({ limit: 100 }).subscribe({
       next: (res) => {
-        this.items.set(res.items);
+        this.items.set(res);
         this.loading.set(false);
       },
       error: () => this.loading.set(false),
     });
   }
 
-  toggleEvent(evt: string): void {
-    if (this.form.events.includes(evt)) {
-      this.form = { ...this.form, events: this.form.events.filter((e) => e !== evt) };
+  toggleEvent(evt: WebhookEvent): void {
+    if (this.formEvents.includes(evt)) {
+      this.formEvents = this.formEvents.filter((e) => e !== evt);
     } else {
-      this.form = { ...this.form, events: [...this.form.events, evt] };
+      this.formEvents = [...this.formEvents, evt];
     }
   }
 
   create(): void {
-    if (!this.form.url.trim()) {
+    if (!this.formUrl.trim()) {
       this.formError.set('Endpoint URL is required.');
       return;
     }
-    if (this.form.events.length === 0) {
+    if (this.formEvents.length === 0) {
       this.formError.set('Select at least one event.');
       return;
     }
     this.saving.set(true);
     this.formError.set('');
-    this.svc.create(this.form).subscribe({
+    const body: WebhookCreate = { url: this.formUrl.trim(), events: [...this.formEvents] };
+    this.svc.create(body).subscribe({
       next: (res) => {
         this.saving.set(false);
-        if (res.secret) {
-          this.createdSecret.set(res.secret);
-        }
+        this.createdSecret.set(res.secret);
         this.loadList();
       },
       error: () => {
@@ -186,12 +192,9 @@ export class WebhooksComponent implements OnInit {
 
   cancelForm(): void {
     this.showForm.set(false);
-    this.form = this.emptyForm();
+    this.formUrl = '';
+    this.formEvents = [...AVAILABLE_EVENTS];
     this.formError.set('');
     this.createdSecret.set('');
-  }
-
-  private emptyForm(): WebhookCreate {
-    return { url: '', events: [] };
   }
 }

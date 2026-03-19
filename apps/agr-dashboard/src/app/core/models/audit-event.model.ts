@@ -25,6 +25,8 @@ export interface AuditEvent {
 export interface AuditFilter {
   event_type?: AuditEventType | '';
   agent_id?: string;
+  /** Single-day filter — maps to start_date on the API (YYYY-MM-DD). */
+  date?: string;
   start_date?: string;
   end_date?: string;
   limit?: number;

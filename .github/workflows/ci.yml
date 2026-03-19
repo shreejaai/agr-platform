@@ -78,6 +78,11 @@ jobs:
         run: npm run lint
         working-directory: apps/agr-dashboard
 
+      - name: Test
+        run: npm test -- --watch=false --browsers=ChromeHeadless
+        working-directory: apps/agr-dashboard
+        continue-on-error: true   # tests exist but Karma not yet configured in CI env
+
       - name: Build
         run: npm run build -- --configuration production
         working-directory: apps/agr-dashboard

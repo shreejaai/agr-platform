@@ -49,6 +49,10 @@ services:
     build:
       context: apps/agr-dashboard
       dockerfile: Dockerfile
+      args:
+        # Set CLERK_PUBLISHABLE_KEY in .env or pass inline:
+        # CLERK_PUBLISHABLE_KEY=pk_test_... docker compose up --build agr-dashboard
+        CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-pk_test_REPLACE_ME}
     ports:
       - "4200:80"
     depends_on:

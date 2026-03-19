@@ -1,14 +1,20 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { Webhook, WebhookCreate } from '../core/models/webhook.model';
+
+export interface WebhookListParams {
+  limit?: number;
+}
 
 @Injectable({ providedIn: 'root' })
 export class WebhookService {
   private http = inject(HttpClient);
 
-  list(): Observable<Webhook[]> {
-    return this.http.get<Webhook[]>('/v1/webhooks');
+  list(params: WebhookListParams = {}): Observable<Webhook[]> {
+    let p = new HttpParams();
+    if (params.limit != null) p = p.set('limit', String(params.limit));
+    return this.http.get<Webhook[]>('/v1/webhooks', { params: p });
   }
 
   get(id: string): Observable<Webhook> {

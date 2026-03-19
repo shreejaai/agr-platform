@@ -105,6 +105,16 @@ class AgentResponse(BaseModel):
     updated_at: datetime
 
 
+class ApprovalEscalateRequest(BaseModel):
+    approver_email: str = Field(..., min_length=1, max_length=256)
+
+
+class AuditVerifyResponse(BaseModel):
+    valid: bool
+    total: int
+    first_invalid_sequence: int | None = None
+
+
 class WebhookCreate(BaseModel):
     url: str = Field(..., min_length=8, max_length=512)
     events: list[str] = Field(

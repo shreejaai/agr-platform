@@ -3,13 +3,22 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { Approval, ApprovalDecideRequest } from '../core/models/approval.model';
 
+export interface ApprovalListParams {
+  status?: string;
+  limit?: number;
+  offset?: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ApprovalService {
   private http = inject(HttpClient);
 
-  list(status?: string): Observable<Approval[]> {
-    const params = status ? new HttpParams().set('status', status) : undefined;
-    return this.http.get<Approval[]>('/v1/approvals', { params });
+  list(params: ApprovalListParams = {}): Observable<Approval[]> {
+    let p = new HttpParams();
+    if (params.status) p = p.set('status', params.status);
+    if (params.limit != null) p = p.set('limit', String(params.limit));
+    if (params.offset != null) p = p.set('offset', String(params.offset));
+    return this.http.get<Approval[]>('/v1/approvals', { params: p });
   }
 
   get(id: string): Observable<Approval> {
@@ -26,5 +35,9 @@ export class ApprovalService {
 
   reject(id: string, reason = ''): Observable<Approval> {
     return this.decide(id, { decision: 'rejected', decided_by: 'dashboard', reason });
+  }
+
+  escalate(id: string, approver_email: string): Observable<Approval> {
+    return this.http.post<Approval>(`/v1/approvals/${id}/escalate`, { approver_email });
   }
 }

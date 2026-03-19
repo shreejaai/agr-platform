@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { ApprovalService } from '../../services/approval.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { RelativeTimePipe } from '../../shared/pipes/relative-time.pipe';
-import { Approval } from '../../models/approval.model';
+import { Approval } from '../../core/models/approval.model';
 
 type StatusFilter = 'pending' | 'approved' | 'rejected' | '';
 
@@ -45,49 +45,81 @@ type StatusFilter = 'pending' | 'approved' | 'rejected' | '';
                     <agr-badge [variant]="statusVariant(item.status)">{{ item.status }}</agr-badge>
                     <span class="text-xs text-slate-500">{{ item.created_at | relativeTime }}</span>
                   </div>
-                  <p class="text-sm font-medium text-slate-200 truncate">
-                    Tool: <span class="font-mono text-indigo-300">{{ item.tool_name }}</span>
+
+                  <!-- action is the tool name -->
+                  <p class="text-sm font-medium text-slate-200">
+                    Action: <span class="font-mono text-indigo-300">{{ item.action }}</span>
+                    on <span class="font-mono text-slate-300">{{ item.resource }}</span>
                   </p>
                   <p class="text-xs text-slate-400 mt-0.5 truncate">
                     Agent: <span class="font-mono">{{ item.agent_id }}</span>
                   </p>
-                  @if (item.reason) {
-                    <p class="text-xs text-slate-400 mt-1">{{ item.reason }}</p>
+
+                  @if (item.approver_email) {
+                    <p class="text-xs text-slate-500 mt-0.5">
+                      Approver: {{ item.approver_email }}
+                    </p>
                   }
-                  @if (item.tool_input && objectKeys(item.tool_input).length > 0) {
+
+                  <!-- context is the tool input equivalent -->
+                  @if (item.context && objectKeys(item.context).length > 0) {
                     <details class="mt-2">
                       <summary class="text-xs text-slate-500 cursor-pointer hover:text-slate-300">
-                        Tool input
+                        Context / tool input
                       </summary>
                       <pre class="mt-1 text-xs bg-slate-900 rounded p-2 overflow-x-auto text-slate-300">{{
-                        item.tool_input | json
+                        item.context | json
                       }}</pre>
                     </details>
                   }
+
+                  <!-- escalate form for pending items without approver -->
+                  @if (item.status === 'pending' && !item.approver_email) {
+                    @if (escalatingId() === item.id) {
+                      <div class="mt-2 flex items-center gap-2">
+                        <input
+                          [(ngModel)]="escalateEmail"
+                          type="email"
+                          placeholder="approver@example.com"
+                          class="input text-xs flex-1"
+                        />
+                        <button
+                          (click)="escalate(item.id)"
+                          class="px-2 py-1 text-xs rounded bg-slate-700 text-slate-200 hover:bg-slate-600"
+                        >Send</button>
+                        <button
+                          (click)="escalatingId.set(null)"
+                          class="text-xs text-slate-500 hover:text-slate-300"
+                        >Cancel</button>
+                      </div>
+                    }
+                  }
                 </div>
 
-                @if (item.status === 'pending') {
-                  <div class="flex gap-2 shrink-0">
+                <div class="flex flex-col gap-1.5 shrink-0">
+                  @if (item.status === 'pending') {
                     <button
                       (click)="decide(item.id, 'approve')"
                       [disabled]="deciding() === item.id"
                       class="px-3 py-1.5 text-xs font-medium rounded-lg
                              bg-green-500/15 text-green-400 border border-green-500/30
                              hover:bg-green-500/25 disabled:opacity-50 transition-colors"
-                    >
-                      Approve
-                    </button>
+                    >Approve</button>
                     <button
                       (click)="decide(item.id, 'reject')"
                       [disabled]="deciding() === item.id"
                       class="px-3 py-1.5 text-xs font-medium rounded-lg
                              bg-red-500/15 text-red-400 border border-red-500/30
                              hover:bg-red-500/25 disabled:opacity-50 transition-colors"
-                    >
-                      Reject
-                    </button>
-                  </div>
-                }
+                    >Reject</button>
+                    <button
+                      (click)="escalatingId.set(item.id); escalateEmail = ''"
+                      class="px-3 py-1.5 text-xs font-medium rounded-lg
+                             bg-slate-700 text-slate-300 border border-slate-600
+                             hover:bg-slate-600 transition-colors"
+                    >Escalate</button>
+                  }
+                </div>
               </div>
             </div>
           }
@@ -100,10 +132,12 @@ export class ApprovalsComponent implements OnInit {
   private svc = inject(ApprovalService);
 
   statusFilter: StatusFilter = 'pending';
+  escalateEmail = '';
+
   readonly loading = signal(true);
   readonly deciding = signal<string | null>(null);
+  readonly escalatingId = signal<string | null>(null);
   readonly items = signal<Approval[]>([]);
-
   readonly objectKeys = Object.keys;
 
   ngOnInit(): void {
@@ -115,7 +149,7 @@ export class ApprovalsComponent implements OnInit {
     const params = this.statusFilter ? { status: this.statusFilter, limit: 50 } : { limit: 50 };
     this.svc.list(params).subscribe({
       next: (res) => {
-        this.items.set(res.items);
+        this.items.set(res);
         this.loading.set(false);
       },
       error: () => this.loading.set(false),
@@ -131,6 +165,16 @@ export class ApprovalsComponent implements OnInit {
         this.deciding.set(null);
       },
       error: () => this.deciding.set(null),
+    });
+  }
+
+  escalate(id: string): void {
+    if (!this.escalateEmail.trim()) return;
+    this.svc.escalate(id, this.escalateEmail.trim()).subscribe({
+      next: (updated) => {
+        this.items.update((list) => list.map((a) => (a.id === id ? updated : a)));
+        this.escalatingId.set(null);
+      },
     });
   }
 

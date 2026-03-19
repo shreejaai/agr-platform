@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { AuditService } from '../../services/audit.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { RelativeTimePipe } from '../../shared/pipes/relative-time.pipe';
-import { AuditEvent } from '../../models/audit-event.model';
+import { AuditEvent } from '../../core/models/audit-event.model';
 
 const EVENT_TYPES = [
   'TOOL_ALLOW', 'TOOL_DENY', 'APPROVAL_REQUESTED', 'APPROVAL_APPROVED', 'APPROVAL_REJECTED',
@@ -26,7 +26,7 @@ const EVENT_TYPES = [
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label class="block text-xs text-slate-400 mb-1">Event type</label>
-            <select [(ngModel)]="filterType" (ngModelChange)="load()" class="input w-full text-sm">
+            <select [(ngModel)]="filterType" (ngModelChange)="resetAndLoad()" class="input w-full text-sm">
               <option value="">All types</option>
               @for (t of eventTypes; track t) {
                 <option [value]="t">{{ t }}</option>
@@ -35,12 +35,12 @@ const EVENT_TYPES = [
           </div>
           <div>
             <label class="block text-xs text-slate-400 mb-1">Agent ID</label>
-            <input [(ngModel)]="filterAgent" (blur)="load()"
-                   class="input w-full text-sm font-mono" placeholder="uuid…" />
+            <input [(ngModel)]="filterAgent" (blur)="resetAndLoad()"
+                   class="input w-full text-sm font-mono" placeholder="agent-id…" />
           </div>
           <div>
-            <label class="block text-xs text-slate-400 mb-1">Date (YYYY-MM-DD)</label>
-            <input [(ngModel)]="filterDate" (blur)="load()"
+            <label class="block text-xs text-slate-400 mb-1">From date</label>
+            <input [(ngModel)]="filterStartDate" (change)="resetAndLoad()"
                    class="input w-full text-sm" type="date" />
           </div>
         </div>
@@ -60,8 +60,8 @@ const EVENT_TYPES = [
               <tr>
                 <th class="table-header">Event</th>
                 <th class="table-header">Agent</th>
-                <th class="table-header">Tool</th>
-                <th class="table-header">Policy</th>
+                <th class="table-header">Action</th>
+                <th class="table-header">Resource</th>
                 <th class="table-header text-right">Time</th>
               </tr>
             </thead>
@@ -71,11 +71,11 @@ const EVENT_TYPES = [
                   <td class="table-cell">
                     <agr-badge [variant]="eventVariant(ev.event_type)">{{ ev.event_type }}</agr-badge>
                   </td>
-                  <td class="table-cell font-mono text-xs text-slate-300">
-                    {{ ev.agent_id | slice:0:8 }}…
+                  <td class="table-cell font-mono text-xs text-slate-300 max-w-[120px] truncate">
+                    {{ ev.agent_id }}
                   </td>
-                  <td class="table-cell text-slate-300">{{ ev.tool_name ?? '—' }}</td>
-                  <td class="table-cell text-xs text-slate-400">{{ ev.policy_id ? (ev.policy_id | slice:0:8) + '…' : '—' }}</td>
+                  <td class="table-cell font-mono text-xs text-slate-300">{{ ev.action }}</td>
+                  <td class="table-cell text-xs text-slate-400 max-w-[140px] truncate">{{ ev.resource }}</td>
                   <td class="table-cell text-right text-slate-400 whitespace-nowrap">
                     {{ ev.recorded_at | relativeTime }}
                   </td>
@@ -87,7 +87,7 @@ const EVENT_TYPES = [
 
         <!-- Pagination -->
         <div class="flex items-center justify-between text-xs text-slate-500">
-          <span>Showing {{ items().length }} events</span>
+          <span>Showing {{ items().length }} events (page {{ currentPage() + 1 }})</span>
           <div class="flex gap-2">
             <button
               (click)="prevPage()"
@@ -113,27 +113,38 @@ export class AuditComponent implements OnInit {
 
   filterType = '';
   filterAgent = '';
-  filterDate = '';
+  filterStartDate = '';
 
   readonly loading = signal(true);
   readonly offset = signal(0);
   readonly items = signal<AuditEvent[]>([]);
 
+  get currentPage(): () => number {
+    const o = this.offset;
+    const ps = this.pageSize;
+    return () => Math.floor(o() / ps);
+  }
+
   ngOnInit(): void {
+    this.load();
+  }
+
+  resetAndLoad(): void {
+    this.offset.set(0);
     this.load();
   }
 
   load(): void {
     this.loading.set(true);
     this.svc.list({
-      event_type: this.filterType || undefined,
+      event_type: (this.filterType as AuditEvent['event_type']) || undefined,
       agent_id: this.filterAgent.trim() || undefined,
-      date: this.filterDate || undefined,
+      start_date: this.filterStartDate || undefined,
       limit: this.pageSize,
       offset: this.offset(),
     }).subscribe({
       next: (res) => {
-        this.items.set(res.items);
+        this.items.set(res);
         this.loading.set(false);
       },
       error: () => this.loading.set(false),

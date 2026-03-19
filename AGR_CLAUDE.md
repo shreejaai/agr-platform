@@ -120,8 +120,8 @@ agr-platform/
 │       │   ├── routes/
 │       │   │   ├── evaluate.py         # POST /v1/evaluate — core endpoint (Redis cache + rate limit)
 │       │   │   ├── policies.py         # GET/POST/GET{id}/PATCH/DELETE /v1/policies
-│       │   │   ├── approvals.py        # Full approval endpoints + email one-click flow
-│       │   │   ├── audit.py            # GET /v1/audit (with filters)
+│       │   │   ├── approvals.py        # Full approval endpoints + email one-click flow + escalate
+│       │   │   ├── audit.py            # GET /v1/audit (with filters) + GET /v1/audit/verify
 │       │   │   ├── agents.py           # POST /v1/agents/register, GET /v1/agents (DB-backed)
 │       │   │   ├── webhooks.py         # POST/GET/DELETE /v1/webhooks
 │       │   │   ├── clerk.py            # POST /v1/clerk/webhook (Clerk user.created → org + policies)
@@ -193,7 +193,9 @@ agr-platform/
 │       ├── 003_default_policy_trigger.sql # PostgreSQL trigger: on_org_created → seed 5 default policies
 │       ├── 004_agents_table.sql        # agents table + RLS
 │       ├── 005_webhooks_table.sql      # webhooks table + RLS
-│       └── 006_audit_partitioning.sql  # Convert audit_events to monthly RANGE partitions
+│       ├── 006_audit_partitioning.sql  # Convert audit_events to monthly RANGE partitions
+│       ├── 007_api_keys_table.sql      # api_keys table + RLS
+│       └── rollback/                   # Rollback scripts 001_down.sql – 007_down.sql
 ├── .github/
 │   └── workflows/
 │       └── ci.yml
@@ -1098,15 +1100,18 @@ CLERK_PUBLISHABLE_KEY=pk_test_...
 
 ## Future Scope (Planned, Not Built)
 
-### High Priority
-1. **`POST /v1/approvals/{id}/escalate`** — re-send email, change approver
-2. **Webhook dead-letter queue** — `webhook_service.py` retries 3× with exponential backoff; permanently-failed events are logged but not queued for manual replay
-3. **Slack retry on failure** — Slack `send_approval_slack()` fires once and logs error; no retry
-
 ### Architecture Hardening
-4. **PyO3 Cedar bindings** — replace CLI subprocess with Python bindings when available
-5. **Clerk dashboard full integration** — `clerk_secret_key` is in config but not used beyond webhook ingestion
-6. **Dashboard unit tests** — Angular Karma/Jest tests not yet written
+1. **PyO3 Cedar bindings** — replace CLI subprocess with Python bindings when available
+2. **Clerk dashboard full integration** — `clerk_secret_key` is in config but not used beyond webhook ingestion
+3. **Webhook dead-letter queue** — `webhook_service.py` retries 3× with exponential backoff (1s, 2s); permanently-failed events are logged but not queued for manual replay
+
+## Recently Implemented (formerly Future Scope)
+
+- **`POST /v1/approvals/{id}/escalate`** — updates `approver_email`, resends notification email. Returns 409 if not pending.
+- **`GET /v1/audit/verify`** — walks all audit events in sequence order, re-computes SHA-256 hashes, returns `{valid, total, first_invalid_sequence}`.
+- **Slack retry on failure** — `send_approval_slack()` now retries 3× with exponential backoff (1s, 2s delays). Uses real HMAC tokens (not placeholder) for approve/reject buttons.
+- **Dashboard unit tests** — 4 Angular test files written: `relative-time.pipe.spec.ts`, `api-key.service.spec.ts`, `auth.guard.spec.ts`, `api-key.guard.spec.ts`.
+- **Rollback migrations** — `infra/migrations/rollback/001_down.sql` through `007_down.sql` written.
 
 ---
 

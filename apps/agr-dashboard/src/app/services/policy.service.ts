@@ -3,14 +3,20 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { Policy, PolicyCreate, PolicyUpdate } from '../core/models/policy.model';
 
+export interface PolicyListParams {
+  active?: boolean;
+  limit?: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class PolicyService {
   private http = inject(HttpClient);
 
-  list(active?: boolean): Observable<Policy[]> {
-    const params =
-      active !== undefined ? new HttpParams().set('active', String(active)) : undefined;
-    return this.http.get<Policy[]>('/v1/policies', { params });
+  list(params: PolicyListParams = {}): Observable<Policy[]> {
+    let p = new HttpParams();
+    if (params.active !== undefined) p = p.set('active', String(params.active));
+    if (params.limit != null) p = p.set('limit', String(params.limit));
+    return this.http.get<Policy[]>('/v1/policies', { params: p });
   }
 
   get(id: string): Observable<Policy> {
