@@ -45,5 +45,14 @@ services:
       - ./services/agr-api:/app
       - ./packages:/packages
 
+  agr-dashboard:
+    build:
+      context: apps/agr-dashboard
+      dockerfile: Dockerfile
+    ports:
+      - "4200:80"
+    depends_on:
+      - agr-api
+
 volumes:
   pgdata:

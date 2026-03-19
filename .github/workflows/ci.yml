@@ -56,9 +56,35 @@ jobs:
           cd services/agr-api
           python -m pytest tests/integration -v
 
+  build-dashboard:
+    name: Build Angular Dashboard
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/agr-dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: apps/agr-dashboard
+
+      - name: Lint
+        run: npm run lint
+        working-directory: apps/agr-dashboard
+
+      - name: Build
+        run: npm run build -- --configuration production
+        working-directory: apps/agr-dashboard
+
   deploy:
     name: Deploy to Railway
-    needs: lint-and-test
+    needs: [lint-and-test, build-dashboard]
     runs-on: ubuntu-latest
     # Only deploy on pushes to main (not on PRs)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
