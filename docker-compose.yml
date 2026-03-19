@@ -93,5 +93,38 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ── Temporal Approval Worker (optional) ────────────────────────────────────
+  # Processes durable 48h approval workflows. Only starts when the "temporal"
+  # profile is active AND TEMPORAL_HOST is set.
+  #
+  # Usage:
+  #   TEMPORAL_HOST=localhost:7233 docker compose --profile temporal up
+  #
+  # Run Temporal locally:
+  #   brew install temporal && temporal server start-dev
+  # Or use Temporal Cloud: https://temporal.io/cloud
+
+  temporal-worker:
+    profiles: ["temporal"]
+    build:
+      context: .
+      dockerfile: services/agr-api/Dockerfile
+    image: agr-api:latest
+    command: ["python", "-m", "app.workers.approval_worker"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://agr:password@postgres:5432/agr_dev
+      REDIS_URL: redis://redis:6379
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
+      ENV: ${ENV:-development}
+      # Use host.docker.internal:7233 (not localhost) when Temporal runs on your Mac/host
+      TEMPORAL_HOST: ${TEMPORAL_HOST:-host.docker.internal:7233}
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # resolves to host IP on Linux; no-op on Mac
+    depends_on:
+      agr-api:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:

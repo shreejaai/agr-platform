@@ -3,10 +3,15 @@
 Fires HMAC-signed HTTP POST to registered webhook URLs when approval decisions
 are made. Fires as a BackgroundTask — never blocks the API response.
 
+Every delivery attempt is recorded in webhook_deliveries. Failed deliveries
+(after all retries) can be replayed via POST /v1/webhooks/{id}/deliveries/{id}/retry.
+
 Signature format (Stripe-style):
   X-AGR-Signature: t=<unix_timestamp>,v1=<hmac_hex>
   Signed payload:  <timestamp>.<json_body>
 """
+
+from __future__ import annotations
 
 import asyncio
 import hashlib
@@ -14,13 +19,16 @@ import hmac
 import json
 import logging
 import time
-from uuid import UUID
+import uuid
+from typing import TYPE_CHECKING
 
 import httpx
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Webhook
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import Webhook, WebhookDelivery
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +45,9 @@ def _sign_payload(secret: str, timestamp: int, body: str) -> str:
 
 async def fire_approval_webhook(
     session: AsyncSession,
-    org_id: UUID,
+    org_id: uuid.UUID,
     event: str,
-    approval_id: UUID,
+    approval_id: uuid.UUID,
     agent_id: str,
     action: str,
     resource: str,
@@ -48,6 +56,7 @@ async def fire_approval_webhook(
 ) -> None:
     """Load active webhooks for the org and fire the event payload to each URL.
 
+    Records every delivery attempt in webhook_deliveries.
     Called as a BackgroundTask — errors are logged, never re-raised.
     """
     result = await session.execute(
@@ -84,7 +93,82 @@ async def fire_approval_webhook(
                 "X-AGR-Signature": f"t={timestamp},v1={sig}",
                 "X-AGR-Event": event,
             }
-            await _deliver_with_retry(client, wh.id, str(wh.url), body, headers)
+
+            delivery = WebhookDelivery(
+                id=uuid.uuid4(),
+                webhook_id=wh.id,
+                org_id=org_id,
+                event=event,
+                payload=payload,
+            )
+            session.add(delivery)
+            await session.flush()
+
+            status, http_status, last_error, attempts = await _deliver_with_retry(
+                client, wh.id, str(wh.url), body, headers
+            )
+
+            delivery.status = status
+            delivery.http_status = http_status
+            delivery.last_error = last_error
+            delivery.attempts = attempts
+
+
+async def retry_webhook_delivery(
+    session: AsyncSession,
+    webhook_id: uuid.UUID,
+    delivery_id: uuid.UUID,
+    org_id: uuid.UUID,
+) -> WebhookDelivery | None:
+    """Re-fire a failed delivery. Creates a new WebhookDelivery record.
+
+    Returns the new delivery, or None if the original delivery is not found
+    or does not belong to the org.
+    """
+    result = await session.execute(
+        select(WebhookDelivery, Webhook)
+        .join(Webhook, WebhookDelivery.webhook_id == Webhook.id)
+        .where(
+            WebhookDelivery.id == delivery_id,
+            WebhookDelivery.webhook_id == webhook_id,
+            Webhook.org_id == org_id,
+        )
+    )
+    row = result.one_or_none()
+    if row is None:
+        return None
+
+    orig_delivery, wh = row
+
+    body = json.dumps(orig_delivery.payload, default=str)
+    timestamp = int(time.time())
+    sig = _sign_payload(str(wh.secret), timestamp, body)
+    headers = {
+        "Content-Type": "application/json",
+        "X-AGR-Signature": f"t={timestamp},v1={sig}",
+        "X-AGR-Event": orig_delivery.event,
+    }
+
+    new_delivery = WebhookDelivery(
+        id=uuid.uuid4(),
+        webhook_id=wh.id,
+        org_id=org_id,
+        event=orig_delivery.event,
+        payload=orig_delivery.payload,
+    )
+    session.add(new_delivery)
+    await session.flush()
+
+    async with httpx.AsyncClient(timeout=_WEBHOOK_TIMEOUT) as client:
+        status, http_status, last_error, attempts = await _deliver_with_retry(
+            client, wh.id, str(wh.url), body, headers
+        )
+
+    new_delivery.status = status
+    new_delivery.http_status = http_status
+    new_delivery.last_error = last_error
+    new_delivery.attempts = attempts
+    return new_delivery
 
 
 async def _deliver_with_retry(
@@ -93,16 +177,20 @@ async def _deliver_with_retry(
     url: str,
     body: str,
     headers: dict[str, str],
-) -> None:
+) -> tuple[str, int | None, str | None, int]:
     """Attempt delivery up to _MAX_ATTEMPTS times with exponential backoff.
 
-    Backoff delays: 1s before attempt 2, 2s before attempt 3.
-    Errors are logged and never re-raised — caller is a BackgroundTask.
+    Returns (status, http_status, last_error, attempts).
+    status is "delivered" on success, "failed" after all retries exhausted.
     """
     delay = _BACKOFF_BASE
+    last_error: str | None = None
+    http_status: int | None = None
+
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
             resp = await client.post(url, content=body, headers=headers)
+            http_status = resp.status_code
             if resp.is_success:
                 logger.info(
                     "Webhook %s delivered to %s (status=%d, attempt=%d)",
@@ -111,7 +199,8 @@ async def _deliver_with_retry(
                     resp.status_code,
                     attempt,
                 )
-                return
+                return "delivered", http_status, None, attempt
+            last_error = f"HTTP {resp.status_code}"
             logger.warning(
                 "Webhook %s non-2xx response: %s %d (attempt=%d/%d)",
                 webhook_id,
@@ -121,6 +210,7 @@ async def _deliver_with_retry(
                 _MAX_ATTEMPTS,
             )
         except Exception as exc:
+            last_error = str(exc)
             logger.warning(
                 "Webhook %s delivery error to %s (attempt=%d/%d): %s",
                 webhook_id,
@@ -140,3 +230,4 @@ async def _deliver_with_retry(
         _MAX_ATTEMPTS,
         url,
     )
+    return "failed", http_status, last_error, _MAX_ATTEMPTS

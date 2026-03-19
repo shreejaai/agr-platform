@@ -8,8 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.models import Webhook
-from app.schemas import WebhookCreate, WebhookResponse
+from app.models import Webhook, WebhookDelivery
+from app.schemas import WebhookCreate, WebhookDeliveryResponse, WebhookResponse
+from app.services.webhook_service import retry_webhook_delivery
 
 router = APIRouter(prefix="/v1")
 
@@ -100,3 +101,60 @@ async def delete_webhook(
     if not wh:
         raise HTTPException(status_code=404, detail="Webhook not found.")
     await session.delete(wh)
+
+
+def _delivery_to_response(d: WebhookDelivery) -> WebhookDeliveryResponse:
+    return WebhookDeliveryResponse(
+        id=str(d.id),
+        webhook_id=str(d.webhook_id),
+        org_id=str(d.org_id),
+        event=d.event,
+        payload=dict(d.payload) if d.payload else {},
+        status=d.status,
+        http_status=d.http_status,
+        attempts=d.attempts,
+        last_error=d.last_error,
+        created_at=d.created_at,
+    )
+
+
+@router.get("/webhooks/{webhook_id}/deliveries", response_model=list[WebhookDeliveryResponse])
+async def list_deliveries(
+    webhook_id: uuid.UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> list[WebhookDeliveryResponse]:
+    """List the last 50 delivery attempts for a webhook (newest first)."""
+    org_id: uuid.UUID = request.state.org_id
+    # Verify webhook belongs to this org
+    wh_result = await session.execute(
+        select(Webhook).where(Webhook.id == webhook_id, Webhook.org_id == org_id)
+    )
+    if not wh_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Webhook not found.")
+
+    result = await session.execute(
+        select(WebhookDelivery)
+        .where(WebhookDelivery.webhook_id == webhook_id)
+        .order_by(WebhookDelivery.created_at.desc())
+        .limit(50)
+    )
+    return [_delivery_to_response(d) for d in result.scalars().all()]
+
+
+@router.post(
+    "/webhooks/{webhook_id}/deliveries/{delivery_id}/retry",
+    response_model=WebhookDeliveryResponse,
+)
+async def retry_delivery(
+    webhook_id: uuid.UUID,
+    delivery_id: uuid.UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> WebhookDeliveryResponse:
+    """Manually retry a failed webhook delivery. Creates a new delivery record."""
+    org_id: uuid.UUID = request.state.org_id
+    new_delivery = await retry_webhook_delivery(session, webhook_id, delivery_id, org_id)
+    if new_delivery is None:
+        raise HTTPException(status_code=404, detail="Delivery not found.")
+    return _delivery_to_response(new_delivery)

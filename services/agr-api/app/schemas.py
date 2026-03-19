@@ -125,6 +125,25 @@ class OrgMeResponse(BaseModel):
     created_at: datetime
 
 
+class ClerkApiKeyResponse(BaseModel):
+    api_key: str
+    org_id: str
+    org_name: str
+
+
+class WebhookDeliveryResponse(BaseModel):
+    id: str
+    webhook_id: str
+    org_id: str
+    event: str
+    payload: dict[str, object]
+    status: str
+    http_status: int | None
+    attempts: int
+    last_error: str | None
+    created_at: datetime
+
+
 class WebhookCreate(BaseModel):
     url: str = Field(..., min_length=8, max_length=512)
     events: list[str] = Field(

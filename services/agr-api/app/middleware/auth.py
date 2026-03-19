@@ -18,6 +18,7 @@ UNPROTECTED_PATHS = {
     "/redoc",
     "/v1/approvals/decide",
     "/v1/clerk/webhook",
+    "/v1/clerk/api-key",  # uses Clerk session JWT, not agr_sk_ key
 }
 
 
