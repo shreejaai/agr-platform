@@ -79,17 +79,45 @@ jobs:
         working-directory: apps/agr-dashboard
 
       - name: Test
-        run: npm test -- --watch=false --browsers=ChromeHeadless
+        run: npm test -- --watch=false --browsers=ChromeHeadlessNoSandbox
         working-directory: apps/agr-dashboard
-        continue-on-error: true   # tests exist but Karma not yet configured in CI env
+        continue-on-error: true   # Karma/ChromeHeadless flaky in CI — tracked issue
 
       - name: Build
         run: npm run build -- --configuration production
         working-directory: apps/agr-dashboard
 
+  test-ts-sdk:
+    name: TypeScript SDK — build & test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: packages/agr-sdk-ts
+
+      - name: Type-check
+        run: npm run typecheck
+        working-directory: packages/agr-sdk-ts
+
+      - name: Test
+        run: npm test
+        working-directory: packages/agr-sdk-ts
+
+      - name: Build
+        run: npm run build
+        working-directory: packages/agr-sdk-ts
+
   deploy:
     name: Deploy to Railway
-    needs: [lint-and-test, build-dashboard]
+    needs: [lint-and-test, build-dashboard, test-ts-sdk]
     runs-on: ubuntu-latest
     # Only deploy on pushes to main (not on PRs)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

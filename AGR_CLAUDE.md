@@ -122,6 +122,7 @@ agr-platform/
 │       │   │   ├── policies.py         # GET/POST/GET{id}/PATCH/DELETE /v1/policies
 │       │   │   ├── approvals.py        # Full approval endpoints + email one-click flow + escalate
 │       │   │   ├── audit.py            # GET /v1/audit (with filters) + GET /v1/audit/verify
+│       │   │   ├── org.py              # GET /v1/org/me — org profile + eval usage
 │       │   │   ├── agents.py           # POST /v1/agents/register, GET /v1/agents (DB-backed)
 │       │   │   ├── webhooks.py         # POST/GET/DELETE /v1/webhooks
 │       │   │   ├── clerk.py            # POST /v1/clerk/webhook (Clerk user.created → org + policies)
@@ -194,8 +195,8 @@ agr-platform/
 │       ├── 004_agents_table.sql        # agents table + RLS
 │       ├── 005_webhooks_table.sql      # webhooks table + RLS
 │       ├── 006_audit_partitioning.sql  # Convert audit_events to monthly RANGE partitions
-│       ├── 007_api_keys_table.sql      # api_keys table + RLS
-│       └── rollback/                   # Rollback scripts 001_down.sql – 007_down.sql
+│       ├── 007_pg_cron_audit_partitions.sql  # pg_cron job: create next month's audit partition
+│       └── rollback/                         # Rollback scripts 001_down.sql – 007_down.sql
 ├── .github/
 │   └── workflows/
 │       └── ci.yml

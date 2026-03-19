@@ -115,6 +115,16 @@ class AuditVerifyResponse(BaseModel):
     first_invalid_sequence: int | None = None
 
 
+class OrgMeResponse(BaseModel):
+    id: str
+    name: str
+    slug: str | None
+    plan: str
+    eval_count: int
+    eval_limit: int
+    created_at: datetime
+
+
 class WebhookCreate(BaseModel):
     url: str = Field(..., min_length=8, max_length=512)
     events: list[str] = Field(
