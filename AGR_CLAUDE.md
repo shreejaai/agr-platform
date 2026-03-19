@@ -160,7 +160,7 @@ agr-platform/
 │       │       ├── test_webhooks.py         # 11 tests: CRUD, isolation, auth
 │       │       └── test_clerk_webhook.py    # org creation, 5 default policies, idempotency
 │       ├── requirements.txt
-│       ├── Dockerfile
+│       ├── Dockerfile          # 3-stage: python:builder + rust:slim (Cedar CLI) + python:runtime
 │       └── Dockerfile.dev
 ├── packages/
 │   ├── agr-core/
@@ -196,11 +196,14 @@ agr-platform/
 │       ├── 005_webhooks_table.sql      # webhooks table + RLS
 │       ├── 006_audit_partitioning.sql  # Convert audit_events to monthly RANGE partitions
 │       ├── 007_pg_cron_audit_partitions.sql  # pg_cron job: create next month's audit partition
-│       └── rollback/                         # Rollback scripts 001_down.sql – 007_down.sql
+│       ├── 008_webhook_deliveries.sql  # webhook_deliveries DLQ table + RLS
+│       └── rollback/                         # Rollback scripts 001_down.sql – 008_down.sql
+├── infra/migrate.sh                    # Runs migrations 001–008 (used by docker-compose migrate service)
 ├── .github/
 │   └── workflows/
 │       └── ci.yml
-├── docker-compose.yml                  # postgres:16 + redis:7 + agr-api + agr-dashboard
+├── docker-compose.yml                  # postgres:16 + redis:7 + migrate + agr-api + agr-dashboard
+│                                       # profile "temporal": temporal-worker service
 ├── pyproject.toml                      # ruff + mypy + pytest config
 ├── .env.example
 └── README.md
@@ -214,17 +217,18 @@ agr-platform/
 |---|---|---|---|
 | Language | Python 3.12 | Live | Type hints everywhere, async throughout |
 | API framework | FastAPI 0.115 | Live | Async, OpenAPI auto-docs at /docs |
-| Policy engine | Cedar CLI → Python fallback | Live | `shutil.which("cedar")` first; Python regex if no binary |
+| Policy engine | Cedar CLI → Python fallback | Live | `shutil.which("cedar")` first; Python regex if no binary. Cedar binary compiled in Docker (rust:slim stage). |
 | ORM | SQLAlchemy 2.0 async | Live | AsyncSession, no sync queries |
 | DB | PostgreSQL 16 | Live | RLS on all 6 tables. Monthly partitioning on audit_events. |
 | Cache | Redis 7 (redis.asyncio) | Live | 60s eval cache, org-scoped invalidation on policy change |
 | Rate limiting | Redis INCR + DB fallback | Live | Atomic Redis counter; DB synced via BackgroundTask |
 | Approval workflows | Temporal (temporalio SDK) | Live | Graceful degradation if TEMPORAL_HOST unset |
 | Email notifications | Resend REST API | Live | No-ops if RESEND_API_KEY blank; one-click HMAC-signed links |
-| Webhook push | httpx + HMAC-SHA256 | Live | Fires on approve/reject; Stripe-style signature header |
-| Auth (dashboard) | Clerk webhook | Live | POST /v1/clerk/webhook → create org + seed policies |
+| Webhook push | httpx + HMAC-SHA256 | Live | Fires on approve/reject; Stripe-style signature header; every attempt recorded in webhook_deliveries |
+| Webhook DLQ | webhook_deliveries table | Live | Dead-letter queue; manual retry via POST /v1/webhooks/{id}/deliveries/{id}/retry |
+| Auth (dashboard) | Clerk webhook + Backend API | Live | POST /v1/clerk/webhook → create org; GET /v1/clerk/api-key → auto API key fetch |
 | Secrets | .env / Doppler (prod) | Live | pydantic_settings reads .env |
-| Deploy | Railway | Live | Auto-deploys from main |
+| Deploy | Docker Compose / manual | Live | No auto-deploy configured; merge to main, deploy manually |
 | Validation | Pydantic v2 | Live | All request/response models in schemas.py |
 | Linting | ruff 0.8 | Live | Line length 100 |
 | Type checking | mypy --strict | Live | Must pass on every PR. tests/ excluded. |
@@ -336,6 +340,23 @@ created_at  TIMESTAMPTZ
 RLS enabled
 ```
 
+### webhook_deliveries (append-only DLQ — migration 008)
+```
+id          UUID PK
+webhook_id  UUID FK → webhooks (CASCADE DELETE)
+org_id      UUID NOT NULL              -- for RLS; no FK (outlives webhook if needed)
+event       TEXT NOT NULL
+payload     JSONB NOT NULL             -- full payload that was sent
+status      TEXT NOT NULL              -- pending | delivered | failed
+http_status INTEGER NULLABLE           -- HTTP response code from receiver
+attempts    INTEGER NOT NULL DEFAULT 0
+last_error  TEXT NULLABLE              -- last exception or non-2xx description
+created_at  TIMESTAMPTZ NOT NULL
+
+Indexes: idx_webhook_deliveries_webhook_id, idx_webhook_deliveries_org_id
+RLS enabled
+```
+
 **RLS:** ALL SIX tables have RLS enabled. `set_rls_org()` in `auth.py` sets `SET LOCAL app.current_org = '<org_id>'`. Routes also explicitly filter by `org_id` in every SQLAlchemy query — RLS is the safety net, explicit `WHERE org_id = X` is the primary guard.
 
 **Default policies:** Migration 003 adds a PostgreSQL trigger `on_org_created`. `org_service.seed_default_policies()` provides the same seeding at the app layer for Clerk webhooks and SQLite tests.
@@ -440,6 +461,22 @@ Returns: WebhookResponse (404 if not found or wrong org)
 ### DELETE /v1/webhooks/{id}
 Returns: 204. Hard delete.
 
+### GET /v1/webhooks/{id}/deliveries
+Returns: list of WebhookDeliveryResponse — last 50 delivery attempts, newest first.
+404 if webhook not found or wrong org.
+
+### POST /v1/webhooks/{id}/deliveries/{delivery_id}/retry
+Re-fires a failed delivery. Creates a new WebhookDelivery record (preserves history).
+Returns: WebhookDeliveryResponse for the new attempt.
+404 if delivery not found or wrong org.
+
+### GET /v1/clerk/api-key (no agr_sk_ auth — uses Clerk session JWT)
+Body: `Authorization: Bearer <clerk_session_jwt>`
+Verifies the Clerk session via Clerk Backend API (requires `CLERK_SECRET_KEY`).
+Finds the org whose `slug = clerk_user_id`, returns the org's `api_key`.
+Used by the dashboard to auto-populate the API key after login.
+Returns 503 if `CLERK_SECRET_KEY` not configured; 404 if org not created yet.
+
 ### POST /v1/clerk/webhook (no auth)
 Handles Clerk `user.created` event. Creates Organization + seeds 5 default policies.
 Svix signature verified if `CLERK_WEBHOOK_SECRET` is set (skipped in dev if blank).
@@ -474,7 +511,7 @@ assert abs(int(ts) - time.time()) < 300  # 5-minute tolerance
 ## Auth Middleware (Actual Behavior)
 
 `AuthMiddleware` (Starlette `BaseHTTPMiddleware`) runs on every request:
-1. Skip auth for `UNPROTECTED_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/v1/approvals/decide", "/v1/clerk/webhook"}` and OPTIONS
+1. Skip auth for `UNPROTECTED_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/v1/approvals/decide", "/v1/clerk/webhook", "/v1/clerk/api-key"}` and OPTIONS
 2. Require `Authorization: Bearer agr_sk_...` header — 401 with actionable message if missing
 3. Look up `Organization` by `api_key` in DB
 4. Set `request.state.org_id: UUID` and `request.state.org: Organization`
@@ -588,6 +625,8 @@ All models in one file:
 - `AgentResponse` — id, org_id, agent_id, metadata, created_at, updated_at
 - `WebhookCreate` — url, events (list of valid event strings)
 - `WebhookResponse` — id, org_id, url, secret, events, active, created_at
+- `WebhookDeliveryResponse` — id, webhook_id, org_id, event, payload, status, http_status, attempts, last_error, created_at
+- `ClerkApiKeyResponse` — api_key, org_id, org_name
 - `HealthResponse` — status
 - `ErrorResponse` — error, message, upgrade_url?
 
