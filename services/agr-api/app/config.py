@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     temporal_namespace: str = "default"
     resend_api_key: str = ""
     slack_bot_token: str = ""
-    slack_channel_id: str = ""            # e.g. C0123456789 — channel to post approvals
+    slack_channel_id: str = ""  # e.g. C0123456789 — channel to post approvals
     clerk_webhook_secret: str = ""
     clerk_secret_key: str = ""
     clerk_publishable_key: str = ""

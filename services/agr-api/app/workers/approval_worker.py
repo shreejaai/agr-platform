@@ -31,7 +31,11 @@ async def main() -> None:
         logger.error("TEMPORAL_HOST is not set. Exiting.")
         sys.exit(1)
 
-    logger.info("Connecting to Temporal at %s (namespace=%s)", settings.temporal_host, settings.temporal_namespace)
+    logger.info(
+        "Connecting to Temporal at %s (namespace=%s)",
+        settings.temporal_host,
+        settings.temporal_namespace,
+    )
     client = await Client.connect(settings.temporal_host, namespace=settings.temporal_namespace)
 
     logger.info("Starting AGR approval worker on task queue '%s'", TASK_QUEUE)

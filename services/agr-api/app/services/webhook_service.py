@@ -24,9 +24,9 @@ from app.models import Webhook
 
 logger = logging.getLogger(__name__)
 
-_WEBHOOK_TIMEOUT = 10.0   # seconds per delivery attempt
-_MAX_ATTEMPTS = 3         # total tries before giving up
-_BACKOFF_BASE = 1.0       # seconds — doubled on each retry (1s, 2s)
+_WEBHOOK_TIMEOUT = 10.0  # seconds per delivery attempt
+_MAX_ATTEMPTS = 3  # total tries before giving up
+_BACKOFF_BASE = 1.0  # seconds — doubled on each retry (1s, 2s)
 
 
 def _sign_payload(secret: str, timestamp: int, body: str) -> str:
@@ -58,10 +58,7 @@ async def fire_approval_webhook(
     )
     webhooks = result.scalars().all()
 
-    matching = [
-        wh for wh in webhooks
-        if isinstance(wh.events, list) and event in wh.events
-    ]
+    matching = [wh for wh in webhooks if isinstance(wh.events, list) and event in wh.events]
 
     if not matching:
         return
@@ -109,17 +106,28 @@ async def _deliver_with_retry(
             if resp.is_success:
                 logger.info(
                     "Webhook %s delivered to %s (status=%d, attempt=%d)",
-                    webhook_id, url, resp.status_code, attempt,
+                    webhook_id,
+                    url,
+                    resp.status_code,
+                    attempt,
                 )
                 return
             logger.warning(
                 "Webhook %s non-2xx response: %s %d (attempt=%d/%d)",
-                webhook_id, url, resp.status_code, attempt, _MAX_ATTEMPTS,
+                webhook_id,
+                url,
+                resp.status_code,
+                attempt,
+                _MAX_ATTEMPTS,
             )
         except Exception as exc:
             logger.warning(
                 "Webhook %s delivery error to %s (attempt=%d/%d): %s",
-                webhook_id, url, attempt, _MAX_ATTEMPTS, exc,
+                webhook_id,
+                url,
+                attempt,
+                _MAX_ATTEMPTS,
+                exc,
             )
 
         if attempt < _MAX_ATTEMPTS:
@@ -128,5 +136,7 @@ async def _deliver_with_retry(
 
     logger.error(
         "Webhook %s permanently failed after %d attempts to %s",
-        webhook_id, _MAX_ATTEMPTS, url,
+        webhook_id,
+        _MAX_ATTEMPTS,
+        url,
     )

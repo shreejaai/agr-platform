@@ -105,7 +105,9 @@ class Webhook(Base):
     org_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("organizations.id"), nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     secret: Mapped[str] = mapped_column(Text, nullable=False)
-    events: Mapped[list] = mapped_column(JSONType, default=lambda: ["approval.approved", "approval.rejected"])  # type: ignore[assignment]
+    events: Mapped[list] = mapped_column(
+        JSONType, default=lambda: ["approval.approved", "approval.rejected"]
+    )  # type: ignore[assignment]
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

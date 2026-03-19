@@ -1,9 +1,8 @@
 """Integration tests for GET /v1/org/me."""
 
 import pytest
-from httpx import AsyncClient
-
 from app.models import Organization
+from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
