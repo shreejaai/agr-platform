@@ -8,6 +8,7 @@ Signature format (Stripe-style):
   Signed payload:  <timestamp>.<json_body>
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -24,6 +25,8 @@ from app.models import Webhook
 logger = logging.getLogger(__name__)
 
 _WEBHOOK_TIMEOUT = 10.0   # seconds per delivery attempt
+_MAX_ATTEMPTS = 3         # total tries before giving up
+_BACKOFF_BASE = 1.0       # seconds — doubled on each retry (1s, 2s)
 
 
 def _sign_payload(secret: str, timestamp: int, body: str) -> str:
@@ -84,11 +87,46 @@ async def fire_approval_webhook(
                 "X-AGR-Signature": f"t={timestamp},v1={sig}",
                 "X-AGR-Event": event,
             }
-            try:
-                resp = await client.post(str(wh.url), content=body, headers=headers)
-                if resp.is_success:
-                    logger.info("Webhook %s delivered to %s (status=%d)", wh.id, wh.url, resp.status_code)
-                else:
-                    logger.warning("Webhook %s delivery failed: %s %d", wh.id, wh.url, resp.status_code)
-            except Exception as exc:
-                logger.warning("Webhook %s delivery error to %s: %s", wh.id, wh.url, exc)
+            await _deliver_with_retry(client, wh.id, str(wh.url), body, headers)
+
+
+async def _deliver_with_retry(
+    client: httpx.AsyncClient,
+    webhook_id: object,
+    url: str,
+    body: str,
+    headers: dict[str, str],
+) -> None:
+    """Attempt delivery up to _MAX_ATTEMPTS times with exponential backoff.
+
+    Backoff delays: 1s before attempt 2, 2s before attempt 3.
+    Errors are logged and never re-raised — caller is a BackgroundTask.
+    """
+    delay = _BACKOFF_BASE
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            resp = await client.post(url, content=body, headers=headers)
+            if resp.is_success:
+                logger.info(
+                    "Webhook %s delivered to %s (status=%d, attempt=%d)",
+                    webhook_id, url, resp.status_code, attempt,
+                )
+                return
+            logger.warning(
+                "Webhook %s non-2xx response: %s %d (attempt=%d/%d)",
+                webhook_id, url, resp.status_code, attempt, _MAX_ATTEMPTS,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Webhook %s delivery error to %s (attempt=%d/%d): %s",
+                webhook_id, url, attempt, _MAX_ATTEMPTS, exc,
+            )
+
+        if attempt < _MAX_ATTEMPTS:
+            await asyncio.sleep(delay)
+            delay *= 2
+
+    logger.error(
+        "Webhook %s permanently failed after %d attempts to %s",
+        webhook_id, _MAX_ATTEMPTS, url,
+    )

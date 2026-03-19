@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ApprovalRequest
+from app.services.slack_service import send_approval_slack
 from app.services.temporal_service import start_approval_workflow
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,9 @@ async def create_approval_request(
     if workflow_id:
         approval.temporal_run_id = workflow_id
         await session.flush()
+
+    # Notify Slack (no-op if SLACK_BOT_TOKEN / SLACK_CHANNEL_ID not configured)
+    await send_approval_slack(approval)
 
     logger.info("Created approval request %s for %s/%s", approval.id, action, resource)
     return approval

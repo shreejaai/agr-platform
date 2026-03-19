@@ -356,6 +356,9 @@ Upserts on (org_id, agent_id). Returns: AgentResponse. DB-persisted.
 ### GET /v1/agents
 Returns: list of AgentResponse (scoped to org, ordered by created_at desc)
 
+### GET /v1/agents/{id}
+Returns: AgentResponse (404 if not found or wrong org). `id` is the UUID primary key.
+
 ### POST /v1/webhooks
 Body: `{ url, events?: ["approval.approved","approval.rejected"] }`
 Creates webhook subscription. Returns: WebhookResponse (201) — secret shown once.
@@ -535,7 +538,8 @@ api_base_url: str          # http://localhost:8000  (used in email links)
 temporal_host: str         # localhost:7233  (empty string = Temporal disabled)
 temporal_namespace: str    # default
 resend_api_key: str        # ""  (empty = email disabled)
-slack_bot_token: str       # ""  (not yet used in code)
+slack_bot_token: str       # Slack Bot Token — empty = disabled
+slack_channel_id: str      # Slack channel ID, e.g. C0123456789 — empty = disabled
 clerk_webhook_secret: str  # ""  (empty = Svix verification skipped in dev)
 clerk_secret_key: str      # ""  (for future dashboard auth)
 clerk_publishable_key: str # ""  (for future dashboard auth)
@@ -997,7 +1001,7 @@ CLERK_PUBLISHABLE_KEY=pk_test_...
 
 ### High Priority
 1. **`GET /v1/agents/{agent_id}`** — single agent lookup, for SDK + dashboard use
-2. **Slack notifications** — `slack_bot_token` is in config but not wired into any service
+2. **Slack retry on failure** — Slack notifications fire once; add retry if needed
 3. **Webhook retry logic** — `webhook_service.py` fires once and logs failure; no retry/dead-letter queue
 4. **`POST /v1/approvals/{id}/escalate`** — re-send email, change approver
 

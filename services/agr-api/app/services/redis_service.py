@@ -30,20 +30,37 @@ _EVAL_CACHE_TTL = 60          # seconds
 _RATE_KEY_TTL   = 60 * 60 * 24 * 31   # 31 days — reset handled at billing cycle
 
 _redis_client: "aioredis.Redis[str] | None" = None
+_redis_unavailable: bool = False   # set True after a failed init so we stop retrying
 
 
 def _get_redis() -> "aioredis.Redis[str] | None":
-    """Return the shared Redis client, lazily initialised. None if not configured."""
-    global _redis_client
+    """Return the module-level Redis connection pool, lazily initialised.
+
+    `aioredis.from_url()` creates a connection pool (not a single connection).
+    The pool is reused across all callers — no per-request reconnection.
+    Returns None if REDIS_URL is unset or if the initial setup failed.
+    """
+    global _redis_client, _redis_unavailable
+    if _redis_unavailable:
+        return None
     if _redis_client is None:
         if not settings.redis_url:
+            _redis_unavailable = True
             return None
         try:
             _redis_client = aioredis.from_url(
-                settings.redis_url, encoding="utf-8", decode_responses=True
+                settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+                # Connection pool settings — tune for your concurrency needs
+                max_connections=20,
+                socket_connect_timeout=2.0,
+                socket_timeout=2.0,
+                retry_on_timeout=False,
             )
         except Exception as exc:
             logger.warning("Redis client init failed: %s", exc)
+            _redis_unavailable = True
     return _redis_client
 
 

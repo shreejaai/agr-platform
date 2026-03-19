@@ -155,6 +155,59 @@ async def test_list_agents_requires_auth(client: AsyncClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# GET /v1/agents/{id}
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_agent_by_id(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    register_resp = await client.post(
+        "/v1/agents/register",
+        json={"agent_id": "coder-001", "metadata": {"env": "prod"}},
+        headers=auth_headers,
+    )
+    agent_uuid = register_resp.json()["id"]
+
+    resp = await client.get(f"/v1/agents/{agent_uuid}", headers=auth_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == agent_uuid
+    assert data["agent_id"] == "coder-001"
+    assert data["metadata"] == {"env": "prod"}
+
+
+@pytest.mark.asyncio
+async def test_get_agent_by_id_not_found(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    import uuid
+
+    resp = await client.get(f"/v1/agents/{uuid.uuid4()}", headers=auth_headers)
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_agent_by_id_wrong_org(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    test_org_b: Organization,
+) -> None:
+    """Org B cannot fetch an agent that belongs to org A."""
+    register_resp = await client.post(
+        "/v1/agents/register",
+        json={"agent_id": "coder-001"},
+        headers=auth_headers,
+    )
+    agent_uuid = register_resp.json()["id"]
+
+    headers_b = {"Authorization": f"Bearer {test_org_b.api_key}"}
+    resp = await client.get(f"/v1/agents/{agent_uuid}", headers=headers_b)
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # Unit: seed_default_policies
 # ---------------------------------------------------------------------------
 

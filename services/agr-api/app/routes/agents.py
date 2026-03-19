@@ -2,7 +2,7 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +55,22 @@ async def register_agent(
 
     await session.flush()
     await session.refresh(agent)
+    return _to_response(agent)
+
+
+@router.get("/agents/{agent_id}", response_model=AgentResponse)
+async def get_agent(
+    agent_id: uuid.UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> AgentResponse:
+    org_id: uuid.UUID = request.state.org_id
+    result = await session.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.org_id == org_id)
+    )
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found.")
     return _to_response(agent)
 
 

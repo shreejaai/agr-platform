@@ -55,3 +55,21 @@ jobs:
         run: |
           cd services/agr-api
           python -m pytest tests/integration -v
+
+  deploy:
+    name: Deploy to Railway
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    # Only deploy on pushes to main (not on PRs)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service agr-api --detach
