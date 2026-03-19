@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.middleware.auth import AuthMiddleware
-from app.routes import agents, approvals, audit, clerk, evaluate, health, policies
+from app.routes import agents, approvals, audit, clerk, evaluate, health, policies, webhooks
 
 logging.basicConfig(
     level=logging.INFO if settings.env == "production" else logging.DEBUG,
@@ -36,3 +36,4 @@ app.include_router(approvals.router)
 app.include_router(audit.router)
 app.include_router(agents.router)
 app.include_router(clerk.router)
+app.include_router(webhooks.router)

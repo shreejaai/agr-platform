@@ -105,6 +105,24 @@ class AgentResponse(BaseModel):
     updated_at: datetime
 
 
+class WebhookCreate(BaseModel):
+    url: str = Field(..., min_length=8, max_length=512)
+    events: list[str] = Field(
+        default=["approval.approved", "approval.rejected"],
+        min_length=1,
+    )
+
+
+class WebhookResponse(BaseModel):
+    id: str
+    org_id: str
+    url: str
+    secret: str
+    events: list[str]
+    active: bool
+    created_at: datetime
+
+
 class HealthResponse(BaseModel):
     status: str
 

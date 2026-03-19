@@ -41,6 +41,7 @@ class Organization(Base):
     policies: Mapped[list["Policy"]] = relationship(back_populates="organization")
     approval_requests: Mapped[list["ApprovalRequest"]] = relationship(back_populates="organization")
     agents: Mapped[list["Agent"]] = relationship(back_populates="organization")
+    webhooks: Mapped[list["Webhook"]] = relationship(back_populates="organization")
 
 
 class Policy(Base):
@@ -95,6 +96,20 @@ class Agent(Base):
     )
 
     organization: Mapped["Organization"] = relationship(back_populates="agents")
+
+
+class Webhook(Base):
+    __tablename__ = "webhooks"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("organizations.id"), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    secret: Mapped[str] = mapped_column(Text, nullable=False)
+    events: Mapped[list] = mapped_column(JSONType, default=lambda: ["approval.approved", "approval.rejected"])  # type: ignore[assignment]
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    organization: Mapped["Organization"] = relationship(back_populates="webhooks")
 
 
 class AuditEvent(Base):

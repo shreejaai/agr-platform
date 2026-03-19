@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.models import Policy
 from app.schemas import PolicyCreate, PolicyResponse, PolicyUpdate
+from app.services.redis_service import invalidate_org_eval_cache
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ async def create_policy(
     session.add(policy)
     await session.flush()
     await session.refresh(policy)
+    await invalidate_org_eval_cache(org_id)
     return _policy_to_response(policy)
 
 
@@ -111,6 +113,7 @@ async def update_policy(
 
     await session.flush()
     await session.refresh(policy)
+    await invalidate_org_eval_cache(org_id)
     return _policy_to_response(policy)
 
 
@@ -128,3 +131,4 @@ async def delete_policy(
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found.")
     await session.delete(policy)
+    await invalidate_org_eval_cache(org_id)

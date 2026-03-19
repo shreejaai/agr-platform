@@ -4,7 +4,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,8 @@ from app.models import ApprovalRequest
 from app.schemas import ApprovalDecideRequest, ApprovalDecisionRequest, ApprovalResponse
 from app.services.audit_service import create_audit_event
 from app.services.notification_service import verify_decision_token
+from app.services.temporal_service import signal_approval_workflow
+from app.services.webhook_service import fire_approval_webhook
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +140,7 @@ async def decide_via_email_get(
 @router.post("/approvals/decide")
 async def decide_via_email_post(
     token: str,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     """Execute one-click approve/reject from email link (no auth required)."""
@@ -180,6 +183,9 @@ async def decide_via_email_post(
     approval.decision_at = datetime.now(UTC)
     await session.flush()
 
+    if approval.temporal_run_id:
+        await signal_approval_workflow(approval.temporal_run_id, decision)
+
     await create_audit_event(
         session=session,
         org_id=approval.org_id,
@@ -190,6 +196,13 @@ async def decide_via_email_post(
         decision=decision,
         approval_id=approval.id,
         payload={"decided_by": "email_link", "reason": ""},
+    )
+
+    background_tasks.add_task(
+        fire_approval_webhook, session, approval.org_id,
+        f"approval.{decision}", approval.id,
+        approval.agent_id, approval.action, approval.resource,
+        "email_link", "",
     )
 
     label = "approved" if decision == "approved" else "rejected"
@@ -227,6 +240,7 @@ async def decide_approval(
     approval_id: uuid.UUID,
     body: ApprovalDecideRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ) -> ApprovalResponse:
     """Unified approve/reject endpoint."""
@@ -236,6 +250,9 @@ async def decide_approval(
     approval.status = body.decision
     approval.decision_at = datetime.now(UTC)
     await session.flush()
+
+    if approval.temporal_run_id:
+        await signal_approval_workflow(approval.temporal_run_id, body.decision)
 
     await create_audit_event(
         session=session,
@@ -249,6 +266,12 @@ async def decide_approval(
         payload={"decided_by": body.decided_by, "reason": body.reason},
     )
 
+    background_tasks.add_task(
+        fire_approval_webhook, session, org_id,
+        f"approval.{body.decision}", approval.id,
+        approval.agent_id, approval.action, approval.resource,
+        body.decided_by, body.reason,
+    )
     return _to_response(approval)
 
 
@@ -257,6 +280,7 @@ async def approve_request(
     approval_id: uuid.UUID,
     body: ApprovalDecisionRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ) -> ApprovalResponse:
     org_id: uuid.UUID = request.state.org_id
@@ -265,6 +289,9 @@ async def approve_request(
     approval.status = "approved"
     approval.decision_at = datetime.now(UTC)
     await session.flush()
+
+    if approval.temporal_run_id:
+        await signal_approval_workflow(approval.temporal_run_id, "approved")
 
     await create_audit_event(
         session=session,
@@ -278,6 +305,12 @@ async def approve_request(
         payload={"decided_by": body.decided_by, "reason": body.reason},
     )
 
+    background_tasks.add_task(
+        fire_approval_webhook, session, org_id,
+        "approval.approved", approval.id,
+        approval.agent_id, approval.action, approval.resource,
+        body.decided_by, body.reason,
+    )
     return _to_response(approval)
 
 
@@ -286,6 +319,7 @@ async def reject_request(
     approval_id: uuid.UUID,
     body: ApprovalDecisionRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ) -> ApprovalResponse:
     org_id: uuid.UUID = request.state.org_id
@@ -294,6 +328,9 @@ async def reject_request(
     approval.status = "rejected"
     approval.decision_at = datetime.now(UTC)
     await session.flush()
+
+    if approval.temporal_run_id:
+        await signal_approval_workflow(approval.temporal_run_id, "rejected")
 
     await create_audit_event(
         session=session,
@@ -307,6 +344,12 @@ async def reject_request(
         payload={"decided_by": body.decided_by, "reason": body.reason},
     )
 
+    background_tasks.add_task(
+        fire_approval_webhook, session, org_id,
+        "approval.rejected", approval.id,
+        approval.agent_id, approval.action, approval.resource,
+        body.decided_by, body.reason,
+    )
     return _to_response(approval)
 
 
