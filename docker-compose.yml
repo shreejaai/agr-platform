@@ -116,8 +116,11 @@ services:
       REDIS_URL: redis://redis:6379
       SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
       ENV: ${ENV:-development}
-      TEMPORAL_HOST: ${TEMPORAL_HOST:-}
+      # Use host.docker.internal:7233 (not localhost) when Temporal runs on your Mac/host
+      TEMPORAL_HOST: ${TEMPORAL_HOST:-host.docker.internal:7233}
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # resolves to host IP on Linux; no-op on Mac
     depends_on:
       agr-api:
         condition: service_healthy
