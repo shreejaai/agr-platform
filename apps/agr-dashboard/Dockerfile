@@ -5,8 +5,8 @@ WORKDIR /app
 # Accept Clerk key as build arg — baked into the Angular bundle at compile time
 ARG CLERK_PUBLISHABLE_KEY=pk_test_REPLACE_ME
 
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json package-lock.json* ./
+RUN npm install --legacy-peer-deps
 
 COPY . .
 

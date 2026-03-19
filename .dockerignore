@@ -1,0 +1,33 @@
+# Python
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+**/.venv
+**/venv
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+
+# Node
+**/node_modules
+**/dist
+**/.angular
+
+# Git / CI
+.git
+.github
+**/.gitignore
+
+# Docs / misc
+*.md
+*.txt
+!services/agr-api/requirements.txt
+
+# Local env files (never bake secrets into images)
+**/.env
+**/.env.*
+
+# IDE
+.vscode
+.idea
+**/*.swp

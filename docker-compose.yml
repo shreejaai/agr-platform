@@ -1,4 +1,7 @@
 services:
+
+  # ── Infrastructure ─────────────────────────────────────────────────────────
+
   postgres:
     image: postgres:16
     environment:
@@ -13,7 +16,7 @@ services:
       test: ["CMD-SHELL", "pg_isready -U agr -d agr_dev"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
 
   redis:
     image: redis:7-alpine
@@ -25,38 +28,70 @@ services:
       timeout: 3s
       retries: 5
 
+  # ── One-shot migration runner ───────────────────────────────────────────────
+  # Runs migrations 001–005 then exits. agr-api waits for this to complete.
+
+  migrate:
+    image: postgres:16
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./infra/migrations:/migrations:ro
+      - ./infra/migrate.sh:/migrate.sh:ro
+    entrypoint: ["sh", "/migrate.sh"]
+    restart: "no"
+
+  # ── AGR API ────────────────────────────────────────────────────────────────
+
   agr-api:
     build:
-      context: services/agr-api
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: services/agr-api/Dockerfile
+    image: agr-api:latest
     ports:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://agr:password@postgres:5432/agr_dev
       REDIS_URL: redis://redis:6379
-      SECRET_KEY: dev-secret-key-not-for-production
-      ENV: development
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
+      ENV: ${ENV:-development}
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_CHANNEL_ID: ${SLACK_CHANNEL_ID:-}
+      CLERK_WEBHOOK_SECRET: ${CLERK_WEBHOOK_SECRET:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./services/agr-api:/app
-      - ./packages:/packages
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # ── Angular Dashboard ──────────────────────────────────────────────────────
 
   agr-dashboard:
     build:
       context: apps/agr-dashboard
       dockerfile: Dockerfile
       args:
-        # Set CLERK_PUBLISHABLE_KEY in .env or pass inline:
-        # CLERK_PUBLISHABLE_KEY=pk_test_... docker compose up --build agr-dashboard
         CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-pk_test_REPLACE_ME}
+    image: agr-dashboard:latest
     ports:
       - "4200:80"
     depends_on:
-      - agr-api
+      agr-api:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:

@@ -10,7 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Policy
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "packages" / "agr-core"))
+# Resolve agr-core: walk up from this file looking for packages/agr-core,
+# then fall back to /packages/agr-core (Docker image path).
+_agr_core: str | None = None
+for _p in Path(__file__).resolve().parents:
+    _candidate = _p / "packages" / "agr-core"
+    if _candidate.exists():
+        _agr_core = str(_candidate)
+        break
+sys.path.insert(0, _agr_core or "/packages/agr-core")
 from policy_engine import EvaluationResult, evaluate_policies  # noqa: E402
 
 logger = logging.getLogger(__name__)

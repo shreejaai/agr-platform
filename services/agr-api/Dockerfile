@@ -1,24 +1,28 @@
 # Multi-stage production Dockerfile for agr-api
-# Stage 1: install dependencies
+# Build context: repo root  (docker compose sets context: .)
+#
+# Stage 1: install Python dependencies
 FROM python:3.12-slim AS builder
 WORKDIR /build
-COPY requirements.txt .
+COPY services/agr-api/requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # Stage 2: lean runtime image
 FROM python:3.12-slim
 
-# Run as non-root for security
+# Non-root user
 RUN groupadd --gid 1001 agr && useradd --uid 1001 --gid agr --no-create-home agr
 
 WORKDIR /app
 
-# Copy installed packages from builder
+# Installed packages from builder
 COPY --from=builder /install /usr/local
 
-# Copy source (packages dir lives at ../../packages relative to service context;
-# mount it at runtime or bake it in via docker-compose build context if needed)
-COPY --chown=agr:agr . .
+# API source
+COPY --chown=agr:agr services/agr-api/ .
+
+# agr-core package (cedar_service.py imports from here)
+COPY --chown=agr:agr packages/ /packages/
 
 USER agr
 
