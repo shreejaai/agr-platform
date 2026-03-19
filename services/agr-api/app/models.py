@@ -40,6 +40,7 @@ class Organization(Base):
 
     policies: Mapped[list["Policy"]] = relationship(back_populates="organization")
     approval_requests: Mapped[list["ApprovalRequest"]] = relationship(back_populates="organization")
+    agents: Mapped[list["Agent"]] = relationship(back_populates="organization")
 
 
 class Policy(Base):
@@ -79,6 +80,21 @@ class ApprovalRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     organization: Mapped["Organization"] = relationship(back_populates="approval_requests")
+
+
+class Agent(Base):
+    __tablename__ = "agents"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("organizations.id"), nullable=False)
+    agent_id: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata: Mapped[dict | None] = mapped_column(JSONType, nullable=True)  # type: ignore[assignment]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    organization: Mapped["Organization"] = relationship(back_populates="agents")
 
 
 class AuditEvent(Base):

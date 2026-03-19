@@ -96,6 +96,15 @@ class AgentRegisterRequest(BaseModel):
     metadata: dict[str, object] = Field(default_factory=dict)
 
 
+class AgentResponse(BaseModel):
+    id: str
+    org_id: str
+    agent_id: str
+    metadata: dict[str, object] | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class HealthResponse(BaseModel):
     status: str
 

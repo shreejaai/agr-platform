@@ -1,24 +1,42 @@
 """Cedar policy evaluation engine.
 
-Primary: calls cedar-policy CLI via subprocess.
-Fallback: simple Python evaluator for local dev without cedar CLI installed.
+Primary: cedar-policy CLI via subprocess (if `cedar` binary is on PATH).
+Fallback: Python regex evaluator for dev/CI without cedar CLI installed.
+
+Decision values: "ALLOW" | "DENY" | "APPROVAL_REQUIRED"
+
+APPROVAL_REQUIRED detection (both paths):
+  A `forbid ... unless { context.approval_status == "approved" }` pattern means the
+  action requires human sign-off. Detected by:
+    1. First eval with given context → DENY
+    2. Re-eval with approval_status="approved" injected → if ALLOW, return APPROVAL_REQUIRED
 """
 
+import json
 import logging
 import re
+import shutil
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class EvaluationResult:
-    decision: str  # "ALLOW" | "DENY"
+    decision: str  # "ALLOW" | "DENY" | "APPROVAL_REQUIRED"
     reason: str
     policy_id: str | None
     requires_approval: bool
     latency_ms: float
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
 
 
 def evaluate_policies(
@@ -28,10 +46,10 @@ def evaluate_policies(
     resource: str,
     context: dict[str, object],
 ) -> EvaluationResult:
-    """Evaluate Cedar policies using the Python fallback evaluator.
+    """Evaluate Cedar policies against a request.
 
+    Tries the cedar CLI subprocess first; falls back to Python evaluator.
     Each policy dict must have keys: id, cedar_rule.
-    Returns EvaluationResult with the decision.
     """
     start = time.perf_counter_ns()
 
@@ -45,10 +63,146 @@ def evaluate_policies(
             latency_ms=elapsed,
         )
 
+    cedar_binary = _find_cedar_cli()
+    if cedar_binary:
+        try:
+            result = _cedar_cli_evaluator(
+                cedar_binary, cedar_policies, agent_id, action, resource, context
+            )
+            result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
+            return result
+        except Exception as exc:
+            logger.warning(
+                "Cedar CLI evaluation failed, using Python fallback: %s", exc
+            )
+
     result = _python_evaluator(cedar_policies, agent_id, action, resource, context)
-    elapsed = (time.perf_counter_ns() - start) / 1_000_000
-    result.latency_ms = elapsed
+    result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
     return result
+
+
+# ---------------------------------------------------------------------------
+# Cedar CLI subprocess path
+# ---------------------------------------------------------------------------
+
+
+def _find_cedar_cli() -> str | None:
+    """Return path to the cedar binary, or None if not installed."""
+    return shutil.which("cedar")
+
+
+def _cedar_cli_authorize(
+    cedar_binary: str,
+    policies: list[dict[str, str]],
+    agent_id: str,
+    action: str,
+    resource_id: str,
+    context: dict[str, object],
+) -> str:
+    """Run `cedar authorize` and return 'ALLOW' or 'DENY'. Raises on error."""
+    policy_text = "\n\n".join(p["cedar_rule"] for p in policies)
+
+    # Context dict doubles as resource attributes so `resource.X` conditions work.
+    # This mirrors the Python evaluator which checks both `resource.X` and `context.X`
+    # from the same context dict.
+    entities = [
+        {"uid": {"type": "Agent", "id": agent_id}, "attrs": {}, "parents": []},
+        {
+            "uid": {"type": "Resource", "id": resource_id},
+            "attrs": {k: v for k, v in context.items() if v is not None},
+            "parents": [],
+        },
+    ]
+
+    request = {
+        "principal": {"type": "Agent", "id": agent_id},
+        "action": {"type": "Action", "id": action},
+        "resource": {"type": "Resource", "id": resource_id},
+        "context": context,
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        policies_path = Path(tmpdir) / "policies.cedar"
+        entities_path = Path(tmpdir) / "entities.json"
+        policies_path.write_text(policy_text, encoding="utf-8")
+        entities_path.write_text(json.dumps(entities), encoding="utf-8")
+
+        proc = subprocess.run(
+            [
+                cedar_binary,
+                "authorize",
+                "--policies",
+                str(policies_path),
+                "--entities",
+                str(entities_path),
+                "--request-json",
+                json.dumps(request),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+        )
+
+    output = proc.stdout.strip()
+    if output in ("ALLOW", "DENY"):
+        return output
+    raise RuntimeError(
+        f"Unexpected cedar output: stdout={proc.stdout!r} stderr={proc.stderr!r} "
+        f"exit={proc.returncode}"
+    )
+
+
+def _cedar_cli_evaluator(
+    cedar_binary: str,
+    policies: list[dict[str, str]],
+    agent_id: str,
+    action: str,
+    resource: str,
+    context: dict[str, object],
+) -> EvaluationResult:
+    """Evaluate using Cedar CLI with APPROVAL_REQUIRED detection via double-eval."""
+    decision = _cedar_cli_authorize(cedar_binary, policies, agent_id, action, resource, context)
+
+    if decision == "ALLOW":
+        return EvaluationResult(
+            decision="ALLOW",
+            reason=f"Action '{action}' on '{resource}' is allowed by policy.",
+            policy_id=None,  # Cedar CLI does not report which policy matched
+            requires_approval=False,
+            latency_ms=0,
+        )
+
+    # DENY — check if injecting approval_status=approved flips it to ALLOW.
+    # If yes, a forbid...unless pattern is in play → APPROVAL_REQUIRED.
+    if "approval_status" not in context:
+        ctx_approved = {**context, "approval_status": "approved"}
+        try:
+            with_approval = _cedar_cli_authorize(
+                cedar_binary, policies, agent_id, action, resource, ctx_approved
+            )
+            if with_approval == "ALLOW":
+                return EvaluationResult(
+                    decision="APPROVAL_REQUIRED",
+                    reason=f"Action '{action}' on '{resource}' requires human approval.",
+                    policy_id=None,
+                    requires_approval=True,
+                    latency_ms=0,
+                )
+        except Exception as exc:
+            logger.warning("Cedar CLI second-pass (approval check) failed: %s", exc)
+
+    return EvaluationResult(
+        decision="DENY",
+        reason=f"Action '{action}' on '{resource}' is denied by policy.",
+        policy_id=None,
+        requires_approval=False,
+        latency_ms=0,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Python regex fallback evaluator
+# ---------------------------------------------------------------------------
 
 
 def _python_evaluator(
@@ -58,10 +212,11 @@ def _python_evaluator(
     resource: str,
     context: dict[str, object],
 ) -> EvaluationResult:
-    """Simple Python-based Cedar policy evaluator for local dev.
+    """Python-based Cedar evaluator for dev/CI without cedar CLI.
 
-    Parses Cedar forbid/permit rules and evaluates them against the request.
-    Forbid rules take precedence over permit rules (deny-overrides).
+    Parses forbid/permit rules and evaluates them.
+    Forbid takes precedence over permit (deny-overrides).
+    policy_id is populated (unlike the Cedar CLI path).
     """
     forbid_match: dict[str, str] | None = None
     permit_match: dict[str, str] | None = None
@@ -69,13 +224,6 @@ def _python_evaluator(
 
     for policy in policies:
         rule = policy["cedar_rule"]
-
-        lines = rule.strip().split("\n")
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith("//"):
-                continue
-
         is_forbid = "forbid(" in rule
         is_permit = "permit(" in rule
 
@@ -139,25 +287,10 @@ def _matches_rule(
     resource: str,
     context: dict[str, object],
 ) -> bool:
-    """Check if a Cedar rule matches the given request.
-
-    Supports basic Cedar patterns:
-    - action == Action::"name"
-    - action in [Action::"a", Action::"b"]
-    - resource has field && resource.field == "value"
-    - resource.path like "pattern"
-    - context has field && context.field == "value"
-    """
-    action_match = _check_action_match(rule, action)
-    if not action_match:
-        return False
-
-    when_match = _check_when_clause(rule, resource, context)
-    return when_match
+    return _check_action_match(rule, action) and _check_when_clause(rule, resource, context)
 
 
 def _check_action_match(rule: str, action: str) -> bool:
-    """Check if the action matches the rule's action constraint."""
     all_actions_pattern = r"forbid\s*\(\s*principal\s*,\s*action\s*,"
     if re.search(all_actions_pattern, rule):
         action_specific = re.search(r"action\s*(==|in\s)", rule)
@@ -173,14 +306,13 @@ def _check_when_clause(
     resource: str,
     context: dict[str, object],
 ) -> bool:
-    """Check if when clause conditions are met."""
     when_match = re.search(r"when\s*\{([^}]+)\}", rule)
     if not when_match:
         return True
 
     conditions = when_match.group(1)
 
-    resource_attrs = _extract_resource_context(conditions, "resource")
+    resource_attrs = _extract_attr_pairs(conditions, "resource")
     for attr, expected in resource_attrs.items():
         actual = context.get(attr)
         if actual is None:
@@ -198,7 +330,7 @@ def _check_when_clause(
         if not re.match(regex_pattern, str(actual)):
             return False
 
-    context_attrs = _extract_resource_context(conditions, "context")
+    context_attrs = _extract_attr_pairs(conditions, "context")
     for attr, expected in context_attrs.items():
         actual = context.get(attr)
         if actual is None:
@@ -209,8 +341,8 @@ def _check_when_clause(
     return True
 
 
-def _extract_resource_context(conditions: str, prefix: str) -> dict[str, str]:
-    """Extract field == value pairs from conditions for a given prefix."""
+def _extract_attr_pairs(conditions: str, prefix: str) -> dict[str, str]:
+    """Extract `prefix.attr == "value"` pairs from a when-clause body."""
     result: dict[str, str] = {}
     pattern = rf'{prefix}\.(\w+)\s*==\s*"([^"]+)"'
     for match in re.finditer(pattern, conditions):

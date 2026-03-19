@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages" / "agr-core"))
 
 from app.database import get_session
-from app.models import Base, Organization, Policy
+from app.models import Agent, Base, Organization, Policy  # noqa: F401
 
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
