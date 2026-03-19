@@ -26,22 +26,22 @@ import { Agent, AgentRegister, agentName, agentDescription, agentFramework } fro
           <h2 class="text-base font-semibold text-slate-100 mb-4">Register Agent</h2>
           <div class="space-y-3">
             <div>
-              <label class="block text-xs text-slate-400 mb-1">Agent ID <span class="text-red-400">*</span></label>
-              <input [(ngModel)]="form.agent_id" class="input w-full font-mono"
+              <label for="agent-agent-id" class="block text-xs text-slate-400 mb-1">Agent ID <span class="text-red-400">*</span></label>
+              <input id="agent-agent-id" [(ngModel)]="form.agent_id" class="input w-full font-mono"
                      placeholder="my-langchain-agent-v1" />
             </div>
             <div>
-              <label class="block text-xs text-slate-400 mb-1">Display name <span class="text-red-400">*</span></label>
-              <input [(ngModel)]="form.name" class="input w-full" placeholder="Research Assistant" />
+              <label for="agent-name" class="block text-xs text-slate-400 mb-1">Display name <span class="text-red-400">*</span></label>
+              <input id="agent-name" [(ngModel)]="form.name" class="input w-full" placeholder="Research Assistant" />
             </div>
             <div>
-              <label class="block text-xs text-slate-400 mb-1">Description (optional)</label>
-              <input [(ngModel)]="form.description" class="input w-full"
+              <label for="agent-description" class="block text-xs text-slate-400 mb-1">Description (optional)</label>
+              <input id="agent-description" [(ngModel)]="form.description" class="input w-full"
                      placeholder="LangGraph agent for market research" />
             </div>
             <div>
-              <label class="block text-xs text-slate-400 mb-1">Framework</label>
-              <select [(ngModel)]="form.framework" class="input w-full">
+              <label for="agent-framework" class="block text-xs text-slate-400 mb-1">Framework</label>
+              <select id="agent-framework" [(ngModel)]="form.framework" class="input w-full">
                 <option value="">— Select —</option>
                 <option value="langgraph">LangGraph</option>
                 <option value="langchain">LangChain</option>

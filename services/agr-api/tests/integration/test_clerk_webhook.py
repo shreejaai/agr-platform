@@ -5,12 +5,10 @@ defaults to "" — the handler skips verification gracefully in that case.
 """
 
 import pytest
+from app.models import Organization, Policy
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.models import Organization, Policy
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -42,9 +40,7 @@ def _user_created_payload(
 
 
 @pytest.mark.asyncio
-async def test_user_created_returns_200(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_user_created_returns_200(client: AsyncClient, db_session: AsyncSession) -> None:
     resp = await client.post(_WEBHOOK_URL, json=_user_created_payload())
     assert resp.status_code == 200
 
@@ -78,9 +74,7 @@ async def test_user_created_seeds_5_default_policies(
     org = result.scalar_one_or_none()
     assert org is not None
 
-    pol_result = await db_session.execute(
-        select(Policy).where(Policy.org_id == org.id)
-    )
+    pol_result = await db_session.execute(select(Policy).where(Policy.org_id == org.id))
     policies = pol_result.scalars().all()
     names = {p.name for p in policies}
     assert "Block production DB drops" in names
@@ -99,9 +93,7 @@ async def test_user_created_name_derived_from_first_last(
         _WEBHOOK_URL,
         json=_user_created_payload(user_id="user_name1", first_name="Bob", last_name="Jones"),
     )
-    result = await db_session.execute(
-        select(Organization).where(Organization.slug == "user_name1")
-    )
+    result = await db_session.execute(select(Organization).where(Organization.slug == "user_name1"))
     org = result.scalar_one_or_none()
     assert org is not None
     assert org.name == "Bob Jones"
@@ -145,9 +137,7 @@ async def test_duplicate_user_id_is_idempotent(
     assert resp1.status_code == 200
     assert resp2.status_code == 200
 
-    result = await db_session.execute(
-        select(Organization).where(Organization.slug == "user_dup1")
-    )
+    result = await db_session.execute(select(Organization).where(Organization.slug == "user_dup1"))
     orgs = result.scalars().all()
     assert len(orgs) == 1  # only one org row despite two webhook calls
 

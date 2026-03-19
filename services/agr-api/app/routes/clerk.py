@@ -42,7 +42,7 @@ async def clerk_webhook(
     # --- Svix signature verification ---
     if settings.clerk_webhook_secret:
         try:
-            from svix.webhooks import Webhook, WebhookVerificationError  # type: ignore[import]
+            from svix.webhooks import Webhook  # type: ignore[import]
 
             wh = Webhook(settings.clerk_webhook_secret)
             headers = {
@@ -55,7 +55,10 @@ async def clerk_webhook(
             # Catch both WebhookVerificationError and import errors gracefully
             logger.warning("Svix webhook verification failed: %s", exc)
             return Response(
-                content='{"error":"invalid_signature","message":"Webhook signature verification failed."}',
+                content=(
+                    '{"error":"invalid_signature",'
+                    '"message":"Webhook signature verification failed."}'
+                ),
                 status_code=400,
                 media_type="application/json",
             )
@@ -66,7 +69,9 @@ async def clerk_webhook(
     try:
         payload = json.loads(raw_body)
     except json.JSONDecodeError:
-        return Response(status_code=400, content='{"error":"invalid_json"}', media_type="application/json")
+        return Response(
+            status_code=400, content='{"error":"invalid_json"}', media_type="application/json"
+        )
 
     event_type = payload.get("type")
     if event_type != "user.created":
@@ -92,20 +97,18 @@ async def clerk_webhook(
         org = Organization(
             id=uuid.uuid4(),
             name=name,
-            slug=clerk_user_id,   # stable, unique, safe for retries
+            slug=clerk_user_id,  # stable, unique, safe for retries
             plan="developer",
             api_key=api_key,
             eval_count=0,
             eval_limit=10000,
         )
         session.add(org)
-        await session.flush()   # get org.id before seeding
+        await session.flush()  # get org.id before seeding
 
         await seed_default_policies(session, org.id)
 
-        logger.info(
-            "Created org for Clerk user %s (org_id=%s)", clerk_user_id, org.id
-        )
+        logger.info("Created org for Clerk user %s (org_id=%s)", clerk_user_id, org.id)
     except IntegrityError:
         # Duplicate slug = same Clerk user already registered. Return 200 so
         # Clerk stops retrying.

@@ -81,7 +81,7 @@ async def send_approval_slack(approval: ApprovalRequest) -> None:
 
     payload: dict[str, object] = {
         "channel": settings.slack_channel_id,
-        "text": text,   # fallback for push notifications
+        "text": text,  # fallback for push notifications
         "blocks": blocks,
     }
     headers = {
@@ -98,17 +98,23 @@ async def send_approval_slack(approval: ApprovalRequest) -> None:
                 if data.get("ok"):
                     logger.info(
                         "Slack notification sent for approval %s (attempt %d)",
-                        approval.id, attempt,
+                        approval.id,
+                        attempt,
                     )
                     return
                 logger.warning(
                     "Slack API error for approval %s (attempt %d/%d): %s",
-                    approval.id, attempt, _MAX_RETRIES, data.get("error", "unknown"),
+                    approval.id,
+                    attempt,
+                    _MAX_RETRIES,
+                    data.get("error", "unknown"),
                 )
             except Exception:
                 logger.exception(
                     "Slack delivery exception for approval %s (attempt %d/%d)",
-                    approval.id, attempt, _MAX_RETRIES,
+                    approval.id,
+                    attempt,
+                    _MAX_RETRIES,
                 )
             if attempt < _MAX_RETRIES:
                 await asyncio.sleep(delay)
@@ -116,5 +122,6 @@ async def send_approval_slack(approval: ApprovalRequest) -> None:
 
     logger.error(
         "Slack notification permanently failed for approval %s after %d attempts",
-        approval.id, _MAX_RETRIES,
+        approval.id,
+        _MAX_RETRIES,
     )

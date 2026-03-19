@@ -1,9 +1,15 @@
 """Organization self-info endpoint."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter, Request
 
-from app.models import Organization
 from app.schemas import OrgMeResponse
+
+if TYPE_CHECKING:
+    from app.models import Organization
 
 router = APIRouter(prefix="/v1")
 

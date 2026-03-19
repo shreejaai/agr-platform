@@ -1,14 +1,13 @@
 """Integration tests for approval flow."""
 
 import pytest
-from httpx import AsyncClient
-
 from app.services.notification_service import make_decision_token, verify_decision_token
-
+from httpx import AsyncClient
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 async def _trigger_approval(client: AsyncClient, auth_headers: dict[str, str]) -> str:
     """Trigger an APPROVAL_REQUIRED evaluate and return the approval_id."""
@@ -30,6 +29,7 @@ async def _trigger_approval(client: AsyncClient, auth_headers: dict[str, str]) -
 # ---------------------------------------------------------------------------
 # Existing flow (kept, now via shared helper)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_approval_flow_evaluate_approve(
@@ -85,6 +85,7 @@ async def test_approval_double_approve_returns_409(
 # GET /v1/approvals/{id}
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_approval_by_id(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     approval_id = await _trigger_approval(client, auth_headers)
@@ -101,15 +102,15 @@ async def test_get_approval_by_id(client: AsyncClient, auth_headers: dict[str, s
 @pytest.mark.asyncio
 async def test_get_approval_not_found(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     import uuid
-    resp = await client.get(
-        f"/v1/approvals/{uuid.uuid4()}", headers=auth_headers
-    )
+
+    resp = await client.get(f"/v1/approvals/{uuid.uuid4()}", headers=auth_headers)
     assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
 # POST /v1/approvals/{id}/decide
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_decide_approve(client: AsyncClient, auth_headers: dict[str, str]) -> None:
@@ -176,6 +177,7 @@ async def test_decide_already_resolved_returns_409(
 # Email one-click token: GET/POST /v1/approvals/decide
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_email_decide_get_renders_confirmation(
     client: AsyncClient, auth_headers: dict[str, str]
@@ -208,9 +210,7 @@ async def test_email_decide_post_approves(
 
 
 @pytest.mark.asyncio
-async def test_email_decide_post_rejects(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_email_decide_post_rejects(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     approval_id = await _trigger_approval(client, auth_headers)
     token = make_decision_token(approval_id, "rejected")
 
@@ -245,6 +245,7 @@ async def test_email_decide_idempotent_on_already_resolved(
 # ---------------------------------------------------------------------------
 # Token unit tests (no HTTP needed)
 # ---------------------------------------------------------------------------
+
 
 def test_verify_decision_token_roundtrip() -> None:
     token = make_decision_token("some-uuid", "approved")

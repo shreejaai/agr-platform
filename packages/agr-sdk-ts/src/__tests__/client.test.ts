@@ -135,8 +135,8 @@ describe("evaluate()", () => {
   it("throws AGRAuthError on 401", async () => {
     mockFetch(401, { message: "Bad key" });
     await expect(client.evaluate("a", "b", "c")).rejects.toThrow(AGRAuthError);
-    await expect(client.evaluate("a", "b", "c")).rejects.toThrow("Bad key");
     mockFetch(401, { message: "Bad key" });
+    await expect(client.evaluate("a", "b", "c")).rejects.toThrow("Bad key");
   });
 
   it("throws AGRRateLimitError on 429", async () => {
@@ -172,14 +172,14 @@ describe("waitForApproval()", () => {
   });
 
   it("polls until resolved — pending then approved", async () => {
-    mockFetchMulti([
+    const spy = mockFetchMulti([
       { status: 200, body: { id: "appr-2", status: "pending" } },
       { status: 200, body: { id: "appr-2", status: "pending" } },
       { status: 200, body: { id: "appr-2", status: "approved" } },
     ]);
     const result = await client.waitForApproval("appr-2", { pollInterval: 0 });
     expect(result).toBe(true);
-    expect(jest.spyOn(globalThis, "fetch")).toHaveBeenCalledTimes(0); // already consumed by mockFetchMulti
+    expect(spy).toHaveBeenCalledTimes(3); // polled 3 times before approved
   });
 
   it("throws timeout error when not resolved in time", async () => {

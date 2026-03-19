@@ -29,12 +29,12 @@ const AVAILABLE_EVENTS: WebhookEvent[] = ['approval.approved', 'approval.rejecte
           <h2 class="text-base font-semibold text-slate-100 mb-4">New Webhook</h2>
           <div class="space-y-3">
             <div>
-              <label class="block text-xs text-slate-400 mb-1">Endpoint URL</label>
-              <input [(ngModel)]="formUrl" class="input w-full font-mono text-sm"
+              <label for="webhook-url" class="block text-xs text-slate-400 mb-1">Endpoint URL</label>
+              <input id="webhook-url" [(ngModel)]="formUrl" class="input w-full font-mono text-sm"
                      placeholder="https://your-server.com/agr-events" type="url" />
             </div>
             <div>
-              <label class="block text-xs text-slate-400 mb-2">Events to subscribe</label>
+              <p class="block text-xs text-slate-400 mb-2">Events to subscribe</p>
               <div class="flex gap-4">
                 @for (evt of availableEvents; track evt) {
                   <label class="flex items-center gap-2 cursor-pointer">

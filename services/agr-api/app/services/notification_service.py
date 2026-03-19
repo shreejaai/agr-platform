@@ -97,7 +97,8 @@ def _build_html(approval: ApprovalRequest, approve_url: str, reject_url: str) ->
     return f"""
 <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px">
   <h2 style="margin:0 0 16px;color:#111">Action requires your approval</h2>
-  <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px;margin-bottom:24px">
+  <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px;
+               margin-bottom:24px">
     <tr><td style="padding:8px 12px;color:#6b7280;width:100px">Agent</td>
         <td style="padding:8px 12px">{approval.agent_id}</td></tr>
     <tr><td style="padding:8px 12px;color:#6b7280">Action</td>

@@ -27,7 +27,8 @@ _DEFAULT_POLICIES: list[tuple[str, str]] = [
     (
         "Block writes to secrets/env files",
         'forbid(principal, action in [Action::"fs.write", Action::"fs.delete"], resource)\n'
-        'when { resource has path && (resource.path like "*.env*" || resource.path like "*secrets*") };',
+        "when { resource has path && "
+        '(resource.path like "*.env*" || resource.path like "*secrets*") };',
     ),
     (
         "Allow staging auto-deploy",
@@ -37,7 +38,8 @@ _DEFAULT_POLICIES: list[tuple[str, str]] = [
     (
         "Allow source code writes",
         'permit(principal, action == Action::"fs.write", resource)\n'
-        'when { resource has path && (resource.path like "/src/*" || resource.path like "/tests/*") };',
+        "when { resource has path && "
+        '(resource.path like "/src/*" || resource.path like "/tests/*") };',
     ),
 ]
 

@@ -113,9 +113,7 @@ async def decide_via_email_get(
         )
     if approval.status != "pending":
         return Response(
-            content=_html_page(
-                f"This request was already {approval.status}.", "info"
-            ),
+            content=_html_page(f"This request was already {approval.status}.", "info"),
             media_type="text/html",
             status_code=200,
         )
@@ -177,9 +175,7 @@ async def decide_via_email_post(
         )
     if approval.status != "pending":
         return Response(
-            content=_html_page(
-                f"This request was already {approval.status}.", "info"
-            ),
+            content=_html_page(f"This request was already {approval.status}.", "info"),
             media_type="text/html",
             status_code=200,
         )
@@ -204,10 +200,16 @@ async def decide_via_email_post(
     )
 
     background_tasks.add_task(
-        fire_approval_webhook, session, approval.org_id,
-        f"approval.{decision}", approval.id,
-        approval.agent_id, approval.action, approval.resource,
-        "email_link", "",
+        fire_approval_webhook,
+        session,
+        approval.org_id,
+        f"approval.{decision}",
+        approval.id,
+        approval.agent_id,
+        approval.action,
+        approval.resource,
+        "email_link",
+        "",
     )
 
     label = "approved" if decision == "approved" else "rejected"
@@ -272,10 +274,16 @@ async def decide_approval(
     )
 
     background_tasks.add_task(
-        fire_approval_webhook, session, org_id,
-        f"approval.{body.decision}", approval.id,
-        approval.agent_id, approval.action, approval.resource,
-        body.decided_by, body.reason,
+        fire_approval_webhook,
+        session,
+        org_id,
+        f"approval.{body.decision}",
+        approval.id,
+        approval.agent_id,
+        approval.action,
+        approval.resource,
+        body.decided_by,
+        body.reason,
     )
     return _to_response(approval)
 
@@ -311,10 +319,16 @@ async def approve_request(
     )
 
     background_tasks.add_task(
-        fire_approval_webhook, session, org_id,
-        "approval.approved", approval.id,
-        approval.agent_id, approval.action, approval.resource,
-        body.decided_by, body.reason,
+        fire_approval_webhook,
+        session,
+        org_id,
+        "approval.approved",
+        approval.id,
+        approval.agent_id,
+        approval.action,
+        approval.resource,
+        body.decided_by,
+        body.reason,
     )
     return _to_response(approval)
 
@@ -350,10 +364,16 @@ async def reject_request(
     )
 
     background_tasks.add_task(
-        fire_approval_webhook, session, org_id,
-        "approval.rejected", approval.id,
-        approval.agent_id, approval.action, approval.resource,
-        body.decided_by, body.reason,
+        fire_approval_webhook,
+        session,
+        org_id,
+        "approval.rejected",
+        approval.id,
+        approval.agent_id,
+        approval.action,
+        approval.resource,
+        body.decided_by,
+        body.reason,
     )
     return _to_response(approval)
 
@@ -396,8 +416,12 @@ async def escalate_approval(
 def _html_page(message: str, kind: str) -> str:
     colors = {"success": "#16a34a", "rejected": "#dc2626", "error": "#b91c1c", "info": "#2563eb"}
     color = colors.get(kind, "#111")
+    style = (
+        "font-family:sans-serif;max-width:480px;"
+        "margin:48px auto;padding:0 16px;text-align:center"
+    )
     return f"""
-<html><body style="font-family:sans-serif;max-width:480px;margin:48px auto;padding:0 16px;text-align:center">
+<html><body style="{style}">
   <p style="font-size:18px;color:{color}">{message}</p>
   <p style="color:#9ca3af;font-size:12px">You can close this window.</p>
 </body></html>"""

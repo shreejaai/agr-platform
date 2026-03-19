@@ -3,9 +3,8 @@
 import uuid
 
 import pytest
-from httpx import AsyncClient
-
 from app.models import Organization
+from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
@@ -117,9 +116,7 @@ async def test_delete_webhook(client: AsyncClient, auth_headers: dict[str, str])
 
 
 @pytest.mark.asyncio
-async def test_delete_webhook_not_found(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_delete_webhook_not_found(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     resp = await client.delete(f"/v1/webhooks/{uuid.uuid4()}", headers=auth_headers)
     assert resp.status_code == 404
 

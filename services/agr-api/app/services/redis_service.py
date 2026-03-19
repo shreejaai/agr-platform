@@ -26,11 +26,11 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_EVAL_CACHE_TTL = 60          # seconds
-_RATE_KEY_TTL   = 60 * 60 * 24 * 31   # 31 days — reset handled at billing cycle
+_EVAL_CACHE_TTL = 60  # seconds
+_RATE_KEY_TTL = 60 * 60 * 24 * 31  # 31 days — reset handled at billing cycle
 
 _redis_client: "aioredis.Redis[str] | None" = None
-_redis_unavailable: bool = False   # set True after a failed init so we stop retrying
+_redis_unavailable: bool = False  # set True after a failed init so we stop retrying
 
 
 def _get_redis() -> "aioredis.Redis[str] | None":
@@ -170,7 +170,7 @@ async def rate_limit_incr(
     """
     r = _get_redis()
     if r is None:
-        return False, db_count   # fall back: DB path in caller handles the check
+        return False, db_count  # fall back: DB path in caller handles the check
 
     try:
         key = _rate_key(org_id)
@@ -218,9 +218,7 @@ async def sync_eval_count_to_db(org_id: UUID) -> None:
 
         async with async_session_factory() as session:
             await session.execute(
-                sa_update(Organization)
-                .where(Organization.id == org_id)
-                .values(eval_count=count)
+                sa_update(Organization).where(Organization.id == org_id).values(eval_count=count)
             )
             await session.commit()
     except Exception as exc:
