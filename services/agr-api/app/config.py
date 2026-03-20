@@ -16,6 +16,18 @@ class Settings(BaseSettings):
     clerk_secret_key: str = ""
     clerk_publishable_key: str = ""
 
+    # Deployment mode
+    # "saas"    — multi-tenant, Clerk-managed orgs, hosted by Shreeja AI
+    # "onprem"  — single-tenant, license-key auth, self-hosted by client
+    deployment_mode: str = "saas"
+
+    # On-prem license key (Ed25519-signed, issued by Shreeja AI)
+    # Required when deployment_mode == "onprem". App refuses to start if invalid/expired.
+    license_key: str = ""
+
+    # On-prem: name shown in the dashboard and audit logs for the auto-bootstrapped org
+    onprem_org_name: str = "My Organization"
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

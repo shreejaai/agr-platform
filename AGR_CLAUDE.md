@@ -112,8 +112,9 @@ agr-platform/
 ├── services/
 │   └── agr-api/                        # The deployed FastAPI service
 │       ├── app/
-│       │   ├── main.py                 # FastAPI app + CORS + AuthMiddleware + all routers
-│       │   ├── config.py               # pydantic_settings.BaseSettings — reads .env
+│       │   ├── main.py                 # FastAPI app + CORS + AuthMiddleware + all routers; lifespan: onprem license check + org bootstrap
+│       │   ├── config.py               # pydantic_settings.BaseSettings — reads .env; includes deployment_mode / license_key / onprem_org_name
+│       │   ├── license.py              # Ed25519 license validator (onprem mode only) — validates AGR_LICENSE_KEY on startup
 │       │   ├── database.py             # Async SQLAlchemy engine (pool_size=20) + get_session()
 │       │   ├── models.py               # ORM: Organization, Policy, ApprovalRequest, AuditEvent, Agent, Webhook
 │       │   ├── schemas.py              # ALL Pydantic v2 request/response models (single file)
@@ -141,7 +142,7 @@ agr-platform/
 │       │   ├── workers/
 │       │   │   └── approval_worker.py  # Standalone Temporal worker process
 │       │   └── middleware/
-│       │       └── auth.py             # Bearer token → org lookup → request.state.org + request.state.org_id
+│       │       └── auth.py             # Bearer token → org lookup → request.state.org + request.state.org_id; error messages adapt to deployment_mode
 │       ├── scripts/
 │       │   └── migrate.py
 │       ├── tests/
@@ -161,6 +162,8 @@ agr-platform/
 │       │       └── test_clerk_webhook.py    # org creation, 5 default policies, idempotency
 │       ├── requirements.txt
 │       ├── Dockerfile          # 3-stage: python:builder + rust:slim (Cedar CLI) + python:runtime
+│       ├── Dockerfile.onprem   # 4-stage: deps + cedar-builder + cython-build + runtime (no .py source)
+│       ├── setup_cython.py     # Cython compilation config (used by Dockerfile.onprem)
 │       └── Dockerfile.dev
 ├── packages/
 │   ├── agr-core/
@@ -201,11 +204,16 @@ agr-platform/
 ├── infra/migrate.sh                    # Runs migrations 001–008 (used by docker-compose migrate service)
 ├── .github/
 │   └── workflows/
-│       └── ci.yml
+│       └── ci.yml                      # 4 jobs: lint-and-test, build-dashboard, test-ts-sdk, publish (ghcr.io on merge to main)
 ├── docker-compose.yml                  # postgres:16 + redis:7 + migrate + agr-api + agr-dashboard
 │                                       # profile "temporal": temporal-worker service
+├── docker-compose.onprem.yml           # On-prem self-hosted deployment (uses ghcr.io images, single-tenant)
+├── tools/
+│   ├── generate_keypair.py             # One-time Ed25519 key pair generator (run once, store private key in vault)
+│   └── generate_license.py            # Issue signed license keys per customer
 ├── pyproject.toml                      # ruff + mypy + pytest config
 ├── .env.example
+├── .env.onprem.example                 # Template for on-prem client deployments
 └── README.md
 ```
 
@@ -228,7 +236,9 @@ agr-platform/
 | Webhook DLQ | webhook_deliveries table | Live | Dead-letter queue; manual retry via POST /v1/webhooks/{id}/deliveries/{id}/retry |
 | Auth (dashboard) | Clerk webhook + Backend API | Live | POST /v1/clerk/webhook → create org; GET /v1/clerk/api-key → auto API key fetch |
 | Secrets | .env / Doppler (prod) | Live | pydantic_settings reads .env |
-| Deploy | Docker Compose / manual | Live | No auto-deploy configured; merge to main, deploy manually |
+| Deploy (SaaS) | Docker Compose / manual | Live | No auto-deploy configured; merge to main, deploy manually |
+| Deploy (On-Prem) | ghcr.io private images + docker-compose.onprem.yml | Live | CI publishes :latest and :onprem-latest to ghcr.io on every merge to main |
+| On-Prem licensing | Ed25519 signed license keys | Live | `app/license.py` validates on startup; `tools/generate_license.py` issues keys; `DEPLOYMENT_MODE=onprem` activates single-tenant bootstrap |
 | Validation | Pydantic v2 | Live | All request/response models in schemas.py |
 | Linting | ruff 0.8 | Live | Line length 100 |
 | Type checking | mypy --strict | Live | Must pass on every PR. tests/ excluded. |
@@ -513,8 +523,9 @@ assert abs(int(ts) - time.time()) < 300  # 5-minute tolerance
 `AuthMiddleware` (Starlette `BaseHTTPMiddleware`) runs on every request:
 1. Skip auth for `UNPROTECTED_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/v1/approvals/decide", "/v1/clerk/webhook", "/v1/clerk/api-key"}` and OPTIONS
 2. Require `Authorization: Bearer agr_sk_...` header — 401 with actionable message if missing
-3. Look up `Organization` by `api_key` in DB
-4. Set `request.state.org_id: UUID` and `request.state.org: Organization`
+3. Error messages adapt to `settings.deployment_mode`: saas messages reference `dashboard.agr.dev`; onprem messages say "Contact your AGR administrator"
+4. Look up `Organization` by `api_key` in DB
+5. Set `request.state.org_id: UUID` and `request.state.org: Organization`
 
 Routes access org via `request.state.org_id` — there is **no** `Depends(get_current_org)` dependency.
 `set_rls_org()` exists in `auth.py` but is not called automatically — routes can call it if needed.
@@ -649,6 +660,9 @@ slack_channel_id: str      # Slack channel ID, e.g. C0123456789 — empty = no S
 clerk_webhook_secret: str  # ""  (empty = Svix verification skipped in dev)
 clerk_secret_key: str      # ""  (for future dashboard auth)
 clerk_publishable_key: str # ""  (for future dashboard auth)
+deployment_mode: str       # "saas" (default) | "onprem" — controls license check + bootstrap + auth error messages
+license_key: str           # ""  — required when deployment_mode=="onprem"; Ed25519-signed token issued by Shreeja AI
+onprem_org_name: str       # "My Organization" — org name shown in dashboard/logs for auto-bootstrapped onprem org
 ```
 
 ---
@@ -1167,7 +1181,7 @@ When you add or change a feature, ALL of the following must be updated in the SA
 |---|---|
 | New API endpoint | Schema in `schemas.py` · ORM model if new columns · Integration test · `openapi.json` if maintained · `AGR_CLAUDE.md` endpoints section |
 | New DB column | New migration file (`00N_name.sql`) · ORM model (`models.py`) · Schema (`schemas.py`) · Rollback script (`rollback/00N_down.sql`) · Tests |
-| New config var | `config.py` (pydantic field with default) · `.env.example` · `AGR_CLAUDE.md` env var reference · `docker-compose.yml` if used at runtime |
+| New config var | `config.py` (pydantic field with default) · `.env.example` · `AGR_CLAUDE.md` env var reference · `docker-compose.yml` if used at runtime · `docker-compose.onprem.yml` if relevant to on-prem |
 | New Python dependency | `requirements.txt` · verify no `pip install --user` pollution |
 | New TS SDK public method | Type in `types.ts` · Export in `index.ts` · Test in `__tests__/client.test.ts` |
 | New Angular page/service | Route in `app.routes.ts` · Nav link in `sidebar.component.ts` · Model in `core/models/` |
@@ -1195,15 +1209,16 @@ When you add or change a feature, ALL of the following must be updated in the SA
 
 ### Rule 6 — CI Must Pass Before Merge
 
-The CI pipeline has three mandatory jobs. **All three must be green before merging to `main`.**
+The CI pipeline has three mandatory jobs + one publish job. **All three test jobs must be green before merging to `main`.**
 
-| Job | What it checks |
-|---|---|
-| `lint-and-test` | ruff lint + format · Python unit tests · Python integration tests |
-| `build-dashboard` | Angular ESLint · Angular production build |
-| `test-ts-sdk` | TS typecheck · Jest tests · TS SDK build |
+| Job | Trigger | What it checks |
+|---|---|---|
+| `lint-and-test` | PR + push to main | ruff lint + format · Python unit tests · Python integration tests |
+| `build-dashboard` | PR + push to main | Angular ESLint · Angular production build |
+| `test-ts-sdk` | PR + push to main | TS typecheck · Jest tests · TS SDK build |
+| `publish` | push to main only (after tests pass) | Builds + pushes `agr-api:latest`, `agr-api:onprem-latest`, `agr-dashboard:latest` to `ghcr.io/shreejaai/` |
 
-**Deploy job** runs automatically on merge to `main` (Railway). It is blocked until all three pass.
+The `publish` job is **not** a merge gate — it runs after merge, not before.
 
 If CI fails:
 1. Read the error output carefully — do not guess
@@ -1242,39 +1257,49 @@ PR description must include:
 
 ### Rule 8 — Deployment Process
 
-**Deployment is fully automated. The only manual step is merging to `main`.**
+**SaaS deployment is manual. Images are built automatically by CI and pushed to ghcr.io.**
 
 ```
-Branch → PR → CI passes (all 3 jobs) → Merge to main → Railway auto-deploys agr-api
+Branch → PR → CI passes (all 3 test jobs) → Merge to main
+  → CI publish job pushes:
+      ghcr.io/shreejaai/agr-api:latest          (SaaS image)
+      ghcr.io/shreejaai/agr-api:onprem-latest   (on-prem Cython-compiled image)
+      ghcr.io/shreejaai/agr-dashboard:latest
+  → Pull and deploy manually on your server
 ```
 
-Railway config:
-- Service: `agr-api`
-- Build: `docker build -f services/agr-api/Dockerfile .` (repo root context)
-- Start command: `uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2`
-- Auto-deploy: yes, on push to `main`
-
-**After merging, verify the deploy:**
+**SaaS — deploy to your server:**
 ```bash
-# Check Railway deploy status
-railway status --service agr-api
+# On your production server
+docker pull ghcr.io/shreejaai/agr-api:latest
+docker pull ghcr.io/shreejaai/agr-dashboard:latest
+docker compose up -d --no-build agr-api agr-dashboard
+```
 
-# Smoke test production
-curl https://<your-railway-url>/health
-curl -X POST https://<your-railway-url>/v1/evaluate \
-  -H "Authorization: Bearer agr_sk_..." \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id":"smoke-test","action":"read","resource":"healthcheck","context":{}}'
+**On-prem — ship to a client:**
+```bash
+# Client receives: docker-compose.onprem.yml + .env.onprem (with their LICENSE_KEY)
+# Client runs:
+docker compose -f docker-compose.onprem.yml --env-file .env.onprem up -d
+# Client copies API key from first-boot logs:
+docker compose -f docker-compose.onprem.yml logs agr-api | grep "API Key"
+```
+
+**Issuing a license key for a new client:**
+```bash
+# From repo root (private key from 1Password)
+python tools/generate_license.py \
+  --private-key "<b64_private_key>" \
+  --org "Client Name" \
+  --expiry 2027-03-20 \
+  --evals 1000000
 ```
 
 **Database migrations on production:**
 Migrations do NOT run automatically. After merging a migration:
 ```bash
-# Connect to production DB via Railway
-railway connect postgres
-\i infra/migrations/00N_name.sql
+psql $DATABASE_URL -f infra/migrations/00N_name.sql
 ```
-Or via psql with the production `DATABASE_URL` from Railway env vars.
 
 ---
 
@@ -1366,6 +1391,11 @@ SLACK_BOT_TOKEN=xoxb-...                  # empty = Slack notifications disabled
 CLERK_WEBHOOK_SECRET=whsec_...            # empty = Svix verification skipped (dev-safe)
 CLERK_SECRET_KEY=sk_test_...
 CLERK_PUBLISHABLE_KEY=pk_test_...
+
+# On-prem mode (ignored in saas mode)
+DEPLOYMENT_MODE=onprem                    # "saas" (default) | "onprem"
+LICENSE_KEY=<issued by generate_license.py>  # required when DEPLOYMENT_MODE=onprem; app refuses to start without it
+ONPREM_ORG_NAME=Acme Corp                # org name for auto-bootstrapped org (shown in dashboard + logs)
 ```
 
 ---
@@ -1384,20 +1414,84 @@ CLERK_PUBLISHABLE_KEY=pk_test_...
 
 ---
 
+---
+
+## On-Prem Deployment (Enterprise Tier)
+
+### How It Works
+
+`DEPLOYMENT_MODE=onprem` activates single-tenant mode. Each client gets one isolated deployment (their own Postgres, their own org).
+
+```
+Client server:
+  docker compose -f docker-compose.onprem.yml --env-file .env.onprem up -d
+    ↓
+  AGR API starts → app/license.py validates LICENSE_KEY (Ed25519 signature + expiry)
+    ↓ (first boot only)
+  _onprem_bootstrap() creates one Organization + seeds 5 default policies
+  Prints API key to Docker logs ONCE — ops team copies it
+    ↓
+  Client uses AGR normally via API key
+```
+
+### License Key System
+
+```
+You (Shreeja AI):
+  1. Generated key pair once with tools/generate_keypair.py
+     → Private key: stored in 1Password (NEVER committed)
+     → Public key:  baked into services/agr-api/app/license.py as AGR_PUBLIC_KEY_B64
+
+  2. Issue per-client license with tools/generate_license.py:
+       python tools/generate_license.py --private-key <b64> --org "Acme" --expiry 2027-01-01
+     → Sends client a string like: eyJvcmciOi....<sig>
+
+Client:
+  Sets LICENSE_KEY=eyJvcmciOi... in .env.onprem
+  App validates on startup — refuses to start if expired or tampered
+```
+
+### On-Prem vs SaaS Differences
+
+| Behaviour | SaaS (`DEPLOYMENT_MODE=saas`) | On-Prem (`DEPLOYMENT_MODE=onprem`) |
+|---|---|---|
+| Org creation | Clerk webhook POST /v1/clerk/webhook | Auto-bootstrapped on first start |
+| Auth errors | "Check https://dashboard.agr.dev/settings" | "Contact your AGR administrator" |
+| Clerk dependency | Required for dashboard login | Not required |
+| DB tenancy | Multi-tenant (many orgs per DB) | Single-tenant (one org per deployment) |
+| Startup check | None | License validation (hard stop if invalid) |
+| Docker image | `ghcr.io/shreejaai/agr-api:latest` | `ghcr.io/shreejaai/agr-api:onprem-latest` |
+| Source code | `.py` files in image | Compiled to `.so` (Cython), `.py` removed |
+
+### Code Protection
+
+`Dockerfile.onprem` uses a 4-stage build:
+1. `deps` — install Python packages
+2. `cedar-builder` — compile Cedar CLI from Rust
+3. `cython-build` — compile `app/**/*.py` → `.so` native binaries (except `__init__.py`, `main.py`, `config.py`, workers, workflows)
+4. `runtime` — lean final image with `.so` files only; `.py` source is not present
+
+The public key (`AGR_PUBLIC_KEY_B64` in `license.py`) is safe to bake into the image — it can only verify signatures, not create them.
+
+---
+
 ## Future Scope (Planned, Not Built)
 
 ### Architecture Hardening
 1. **PyO3 Cedar bindings** — replace CLI subprocess with Python bindings when available
-2. **Clerk dashboard full integration** — `clerk_secret_key` is in config but not used beyond webhook ingestion
-3. **Webhook dead-letter queue** — `webhook_service.py` retries 3× with exponential backoff (1s, 2s); permanently-failed events are logged but not queued for manual replay
 
 ## Recently Implemented (formerly Future Scope)
 
+- **On-prem enterprise tier** — `DEPLOYMENT_MODE=onprem` activates single-tenant self-hosted mode with Ed25519 license validation, auto org bootstrap, Cython-compiled distribution image, and `docker-compose.onprem.yml` for clients.
+- **Webhook DLQ** — `webhook_deliveries` table records every delivery attempt; manual retry via `POST /v1/webhooks/{id}/deliveries/{delivery_id}/retry`.
+- **Clerk Backend API verification** — `GET /v1/clerk/api-key` verifies Clerk session JWT via Clerk Backend API; auto-populates API key in dashboard after login.
+- **Temporal worker in docker-compose** — `temporal-worker` service added under `profiles: ["temporal"]`; uses `host.docker.internal:7233` to reach host Temporal.
+- **Cedar CLI in Docker** — `rust:slim` build stage compiles `cedar-policy-cli`; binary available at `/usr/local/bin/cedar` in the runtime image.
+- **ghcr.io CI publish** — CI `publish` job builds and pushes `agr-api:latest`, `agr-api:onprem-latest`, `agr-dashboard:latest` to `ghcr.io/shreejaai/` on every merge to main.
 - **`POST /v1/approvals/{id}/escalate`** — updates `approver_email`, resends notification email. Returns 409 if not pending.
 - **`GET /v1/audit/verify`** — walks all audit events in sequence order, re-computes SHA-256 hashes, returns `{valid, total, first_invalid_sequence}`.
-- **Slack retry on failure** — `send_approval_slack()` now retries 3× with exponential backoff (1s, 2s delays). Uses real HMAC tokens (not placeholder) for approve/reject buttons.
-- **Dashboard unit tests** — 4 Angular test files written: `relative-time.pipe.spec.ts`, `api-key.service.spec.ts`, `auth.guard.spec.ts`, `api-key.guard.spec.ts`.
-- **Rollback migrations** — `infra/migrations/rollback/001_down.sql` through `007_down.sql` written.
+- **Slack retry on failure** — `send_approval_slack()` retries 3× with exponential backoff (1s, 2s delays). Uses real HMAC tokens for approve/reject buttons.
+- **Rollback migrations** — `infra/migrations/rollback/001_down.sql` through `008_down.sql` written.
 
 ---
 

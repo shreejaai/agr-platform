@@ -1,0 +1,110 @@
+# AGR On-Premises Deployment
+# ─────────────────────────────────────────────────────────────────────────────
+# Self-hosted single-tenant deployment for enterprise clients.
+#
+# Prerequisites:
+#   1. Obtain a license key from support@agr.dev
+#   2. Pull the private image:
+#        echo $GHCR_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
+#        docker pull ghcr.io/shreejaai/agr-api:${AGR_VERSION}
+#        docker pull ghcr.io/shreejaai/agr-dashboard:${AGR_VERSION}
+#
+# Quick start:
+#   cp .env.onprem.example .env.onprem
+#   # Edit .env.onprem with your license key and secrets
+#   docker compose -f docker-compose.onprem.yml --env-file .env.onprem up -d
+#
+# On first start, AGR prints your API key to logs — copy it immediately:
+#   docker compose -f docker-compose.onprem.yml logs agr-api | grep "API Key"
+
+services:
+
+  # ── Infrastructure ───────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: agr
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: agr
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agr -d agr"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ── One-shot migration runner ─────────────────────────────────────────────
+
+  migrate:
+    image: ghcr.io/shreejaai/agr-api:${AGR_VERSION:-latest}
+    command: ["sh", "/app/infra/migrate.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: agr
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: agr
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # ── AGR API ───────────────────────────────────────────────────────────────
+
+  agr-api:
+    image: ghcr.io/shreejaai/agr-api:${AGR_VERSION:-latest}
+    environment:
+      DEPLOYMENT_MODE: onprem
+      LICENSE_KEY: ${AGR_LICENSE_KEY}
+      DATABASE_URL: postgresql+asyncpg://agr:${DB_PASSWORD}@postgres:5432/agr
+      REDIS_URL: redis://redis:6379
+      SECRET_KEY: ${SECRET_KEY}
+      ENV: production
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
+      ONPREM_ORG_NAME: ${ORG_NAME:-My Organization}
+      # Optional: Slack approvals
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_CHANNEL_ID: ${SLACK_CHANNEL_ID:-}
+      # Optional: Email approvals
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  # ── AGR Dashboard ─────────────────────────────────────────────────────────
+
+  agr-dashboard:
+    image: ghcr.io/shreejaai/agr-dashboard:${AGR_VERSION:-latest}
+    ports:
+      - "${DASHBOARD_PORT:-80}:80"
+    depends_on:
+      agr-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
