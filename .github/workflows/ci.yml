@@ -117,3 +117,71 @@ jobs:
         run: npm run build
         working-directory: packages/agr-sdk-ts
 
+  # ── Publish Docker images to GitHub Container Registry ────────────────────
+  # Runs on every push to main (after all tests pass).
+  # Pushes two tags: :latest and :<short-sha>
+  # Images are private (packages visibility set to private in repo settings).
+  #
+  # Required secrets (set in repo Settings → Secrets → Actions):
+  #   GHCR_TOKEN — a GitHub PAT with packages:write scope
+  #                (GITHUB_TOKEN also works for same-repo packages)
+
+  publish:
+    name: Publish images to ghcr.io
+    runs-on: ubuntu-latest
+    # Only publish on pushes to main, not on PRs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint-and-test, build-dashboard, test-ts-sdk]
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      # ── AGR API (SaaS image — standard Dockerfile) ──────────────────────
+      - name: Build and push agr-api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/agr-api/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/agr-api:latest
+            ghcr.io/${{ github.repository_owner }}/agr-api:${{ steps.sha.outputs.short }}
+
+      # ── AGR API (on-prem image — Cython-compiled, no source) ────────────
+      - name: Build and push agr-api (on-prem)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/agr-api/Dockerfile.onprem
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/agr-api:onprem-latest
+            ghcr.io/${{ github.repository_owner }}/agr-api:onprem-${{ steps.sha.outputs.short }}
+
+      # ── AGR Dashboard ────────────────────────────────────────────────────
+      - name: Build and push agr-dashboard
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/agr-dashboard
+          file: apps/agr-dashboard/Dockerfile
+          push: true
+          build-args: |
+            CLERK_PUBLISHABLE_KEY=${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/agr-dashboard:latest
+            ghcr.io/${{ github.repository_owner }}/agr-dashboard:${{ steps.sha.outputs.short }}
+
