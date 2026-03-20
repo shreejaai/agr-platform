@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # Generated with: python tools/generate_keypair.py
 # Replace this placeholder with your real public key before distributing.
 # The private key must NEVER be committed or included in any build artifact.
-AGR_PUBLIC_KEY_B64 = "REPLACE_WITH_YOUR_PUBLIC_KEY_RUN_tools/generate_keypair.py"
+AGR_PUBLIC_KEY_B64 = "m3HWC3YbeihSPYQ84JfzjpF03krhI0B3GOKNwHle2/M="
 
 
 def validate_license(license_key: str) -> dict:
