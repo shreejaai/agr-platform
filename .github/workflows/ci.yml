@@ -89,7 +89,7 @@ jobs:
         run: ruff check packages/agr-sdk-python/
 
       - name: Type-check
-        run: python -m mypy packages/agr-sdk-python/agr/ --ignore-missing-imports --no-plugins
+        run: python -m mypy packages/agr-sdk-python/agr/ --ignore-missing-imports --config-file=/dev/null
 
   build-dashboard:
     name: Build Angular Dashboard
