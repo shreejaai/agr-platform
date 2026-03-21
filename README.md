@@ -35,6 +35,46 @@ Compliance hooks (advisory — EU AI Act, SOC2, ISO 42001)
 
 ---
 
+## Quick Start
+
+```bash
+# 1. Start AGR
+docker compose up --build
+
+# 2. Sign in at http://localhost:4200 — your API key is auto-provisioned
+#    Or for headless/CI setup:
+source examples/curl/00_setup.sh
+
+# 3. Run all demo scenarios
+bash examples/curl/12_full_demo.sh
+```
+
+See [examples/](examples/) for Python SDK, TypeScript SDK, and policy pack examples.
+
+## Policy Packs
+
+Import pre-built governance rules for common scenarios:
+
+```bash
+# Preview what will be imported (dry run)
+bash examples/curl/08_import_policies_yaml.sh
+
+# Commit the import
+bash examples/curl/08_import_policies_yaml.sh --commit
+```
+
+Available packs in [examples/policy_packs/](examples/policy_packs/):
+
+| Pack | Policies | Use Case |
+|------|----------|----------|
+| `finance_controls.yaml` | 6 | Transfer limits, international blocks, vendor approval |
+| `devops_controls.yaml` | 5 | Production deploy gates, DB deletion protection |
+| `data_access_controls.yaml` | 5 | Export bans, confidential data approval |
+| `security_signals.yaml` | 4 | Prompt injection defense, anomaly detection |
+| `starter_pack.yaml` | 20 | All packs combined — import this to get started |
+
+---
+
 ## Quick start
 
 ### 1. Clone and configure
@@ -287,6 +327,19 @@ See [`.env.example`](.env.example) for the full reference.
 | `RISK_SCORING_ENABLED` | — | Enable risk scoring engine (default: `true`) |
 | `RISK_THRESHOLDS_ALLOW_MAX` | — | Max score for ALLOW (default: `30`) |
 | `RISK_THRESHOLDS_APPROVAL_MAX` | — | Max score before DENY (default: `70`) |
+
+---
+
+## Examples
+
+Runnable examples in [examples/](examples/):
+
+| Directory | Description |
+|-----------|-------------|
+| `examples/curl/` | 12 curl scripts covering all major scenarios |
+| `examples/python/` | Python SDK examples: quickstart, approvals, risk scoring, LangGraph, CrewAI |
+| `examples/node/` | TypeScript SDK examples |
+| `examples/policy_packs/` | Ready-to-import policy collections |
 
 ---
 
