@@ -1,0 +1,36 @@
+version: "3.9"
+
+# PostgreSQL integration test environment
+# Runs on separate ports so it can coexist with the dev stack.
+#
+# Usage:
+#   docker compose -f docker-compose.test.yml up -d
+#   python -m pytest tests/postgres/ -v
+#   docker compose -f docker-compose.test.yml down -v
+
+services:
+  postgres-test:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: agr_test
+      POSTGRES_PASSWORD: agr_test_password
+      POSTGRES_DB: agr_test
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agr_test -d agr_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    tmpfs:
+      - /var/lib/postgresql/data  # in-memory — fast, no cleanup needed
+
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
