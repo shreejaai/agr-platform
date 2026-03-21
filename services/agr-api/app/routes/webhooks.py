@@ -174,9 +174,13 @@ async def list_deliveries(
     if not wh_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Webhook not found.")
 
+    # C3: also filter by org_id to prevent cross-tenant delivery disclosure
     result = await session.execute(
         select(WebhookDelivery)
-        .where(WebhookDelivery.webhook_id == webhook_id)
+        .where(
+            WebhookDelivery.webhook_id == webhook_id,
+            WebhookDelivery.org_id == org_id,
+        )
         .order_by(WebhookDelivery.created_at.desc())
         .limit(50)
     )

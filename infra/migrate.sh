@@ -22,4 +22,6 @@ $PSQL -f /migrations/010_eval_week.sql
 echo "  010 done"
 $PSQL -f /migrations/011_indexes.sql
 echo "  011 done"
+$PSQL -f /migrations/012_token_version.sql
+echo "  012 done"
 echo "All migrations complete."

@@ -1,15 +1,24 @@
+import urllib.parse
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class EvaluateRequest(BaseModel):
     agent_id: str = Field(..., min_length=1, max_length=256)
     action: str = Field(..., min_length=1, max_length=256)
     resource: str = Field(..., min_length=1, max_length=512)
+    # M6: limit context to 50 keys to prevent DoS via huge payloads
     context: dict[str, object] = Field(default_factory=dict)
     approver_email: str | None = Field(default=None, max_length=256)
+
+    @field_validator("context")
+    @classmethod
+    def context_size_limit(cls, v: dict) -> dict:
+        if len(v) > 50:
+            raise ValueError("context must have at most 50 keys.")
+        return v
 
 
 class EvaluateResponse(BaseModel):
@@ -153,10 +162,27 @@ class WebhookDeliveryResponse(BaseModel):
     created_at: datetime
 
 
+def _validate_webhook_url(url: str) -> str:
+    """M2: Ensure webhook URL uses http/https only — reject javascript:, data:, etc."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Webhook URL must use http or https scheme.")
+    if not parsed.netloc:
+        raise ValueError("Webhook URL must have a valid host.")
+    return url
+
+
 class WebhookUpdate(BaseModel):
     url: str | None = Field(default=None, min_length=8, max_length=512)
     events: list[str] | None = None
     active: bool | None = None
+
+    @field_validator("url")
+    @classmethod
+    def url_scheme(cls, v: str | None) -> str | None:
+        if v is not None:
+            _validate_webhook_url(v)
+        return v
 
 
 class WebhookCreate(BaseModel):
@@ -165,6 +191,11 @@ class WebhookCreate(BaseModel):
         default=["approval.approved", "approval.rejected"],
         min_length=1,
     )
+
+    @field_validator("url")
+    @classmethod
+    def url_scheme(cls, v: str) -> str:
+        return _validate_webhook_url(v)
 
 
 class WebhookResponse(BaseModel):

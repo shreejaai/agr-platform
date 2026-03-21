@@ -1,3 +1,4 @@
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from uuid import UUID
@@ -51,10 +52,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
             hint = _HINT_MISSING.get(mode, _HINT_MISSING["saas"])
+            # M1: use json.dumps so hint text never breaks the JSON structure
             return Response(
-                content=(
-                    '{"error":"unauthorized","message":"Missing or invalid Authorization '
-                    f'header. Provide a Bearer token. {hint}"}}'
+                content=json.dumps(
+                    {
+                        "error": "unauthorized",
+                        "message": (
+                            "Missing or invalid Authorization header. "
+                            f"Provide a Bearer token. {hint}"
+                        ),
+                    }
                 ),
                 status_code=401,
                 media_type="application/json",
@@ -64,7 +71,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not api_key.startswith("agr_sk_"):
             hint = _HINT_FORMAT.get(mode, _HINT_FORMAT["saas"])
             return Response(
-                content=(f'{{"error":"unauthorized","message":"Invalid API key format. {hint}"}}'),
+                content=json.dumps(
+                    {
+                        "error": "unauthorized",
+                        "message": f"Invalid API key format. {hint}",
+                    }
+                ),
                 status_code=401,
                 media_type="application/json",
             )
@@ -73,7 +85,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if org is None:
             hint = _HINT_NOT_FOUND.get(mode, _HINT_NOT_FOUND["saas"])
             return Response(
-                content=f'{{"error":"unauthorized","message":"{hint}"}}',
+                content=json.dumps({"error": "unauthorized", "message": hint}),
                 status_code=401,
                 media_type="application/json",
             )

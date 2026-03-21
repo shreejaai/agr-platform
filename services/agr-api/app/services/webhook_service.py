@@ -36,6 +36,10 @@ _WEBHOOK_TIMEOUT = 10.0  # seconds per delivery attempt
 _MAX_ATTEMPTS = 3  # total tries before giving up
 _BACKOFF_BASE = 1.0  # seconds — doubled on each retry (1s, 2s)
 
+# M7: 4xx responses (except 429 Too Many Requests) are permanent failures —
+# retrying won't help if the endpoint returns 401/403/404.
+_PERMANENT_FAILURE_CODES = frozenset(range(400, 500)) - {429}
+
 
 def _sign_payload(secret: str, timestamp: int, body: str) -> str:
     """Compute HMAC-SHA256 signature for a webhook payload."""
@@ -217,6 +221,14 @@ async def _deliver_with_retry(
                 attempt,
                 _MAX_ATTEMPTS,
             )
+            # M7: don't retry permanent client errors (4xx except 429)
+            if resp.status_code in _PERMANENT_FAILURE_CODES:
+                logger.error(
+                    "Webhook %s permanent failure (HTTP %d) — not retrying",
+                    webhook_id,
+                    resp.status_code,
+                )
+                return "failed", http_status, last_error, attempt
         except Exception as exc:
             last_error = str(exc)
             logger.warning(

@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from sqlalchemy import update as sa_update
 
 if TYPE_CHECKING:
@@ -46,7 +46,7 @@ async def evaluate(
     response: Response,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
-) -> EvaluateResponse | Response:
+) -> EvaluateResponse:
     org: Organization = request.state.org
     org_id: uuid.UUID = request.state.org_id
 
@@ -85,15 +85,19 @@ async def evaluate(
         rate_limited = True
 
     if rate_limited:
-        return Response(
-            content=(
-                '{"error":"eval_limit_exceeded",'
-                f'"message":"You have reached your evaluation limit of {org.eval_limit}. '
-                'Upgrade your plan for more evaluations.",'
-                '"upgrade_url":"https://agr.dev/pricing"}'
-            ),
+        # H2: raise HTTPException so response_model=EvaluateResponse is accurate
+        # FastAPI serialises HTTPException detail as {"detail": ...}; clients should
+        # check for status 429 rather than a specific body shape.
+        raise HTTPException(
             status_code=429,
-            media_type="application/json",
+            detail={
+                "error": "eval_limit_exceeded",
+                "message": (
+                    f"You have reached your evaluation limit of {org.eval_limit}. "
+                    "Upgrade your plan for more evaluations."
+                ),
+                "upgrade_url": "https://agr.dev/pricing",
+            },
         )
 
     # -------------------------------------------------------------------------
