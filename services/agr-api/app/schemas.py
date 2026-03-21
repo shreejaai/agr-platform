@@ -43,6 +43,9 @@ class EvaluateResponse(BaseModel):
     approval_id: str | None = None
     latency_ms: float
     eval_id: str
+    risk_score: int | None = None
+    risk_level: str | None = None
+    risk_factors: dict[str, int] | None = None
 
 
 def _validate_cedar_rule(rule: str) -> str:

@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     # On-prem: name shown in the dashboard and audit logs for the auto-bootstrapped org
     onprem_org_name: str = "My Organization"
 
+    # Risk scoring thresholds — scores are 0-100 (higher = riskier)
+    # score <= allow_max  → decision stays ALLOW
+    # score <= approval_max → ALLOW is upgraded to APPROVAL_REQUIRED
+    # score > approval_max → ALLOW is upgraded to DENY
+    risk_thresholds_allow_max: int = 30
+    risk_thresholds_approval_max: int = 70
+    risk_scoring_enabled: bool = True
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 
