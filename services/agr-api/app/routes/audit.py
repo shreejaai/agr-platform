@@ -63,45 +63,61 @@ async def list_audit_events(
     return [_event_to_response(e) for e in events]
 
 
+_VERIFY_PAGE_SIZE = 1000  # rows per batch — prevents OOM on large audit logs
+_VERIFY_MAX_EVENTS = 100_000  # hard ceiling; raise 400 above this
+
+
 @router.get("/audit/verify", response_model=AuditVerifyResponse)
 async def verify_audit_chain(
     request: Request,
     session: AsyncSession = Depends(get_session),
+    limit: int = Query(default=_VERIFY_MAX_EVENTS, le=_VERIFY_MAX_EVENTS, ge=1),
 ) -> AuditVerifyResponse:
     """Re-compute and verify the SHA-256 hash chain for this org's audit log.
 
-    Walks every event in sequence order, re-computes each entry_hash and
-    checks it matches the stored value. Returns the first invalid sequence
-    number if a break is found.
-
-    Note: for large audit logs this may be slow — paginate if needed.
+    Walks events in sequence order in pages of 1 000 rows to prevent OOM on
+    large audit logs. Stops at `limit` events (default/max = 100 000).
+    Returns the first invalid sequence number if a break is found.
     """
     org_id: uuid.UUID = request.state.org_id
-    stmt = (
-        select(AuditEvent)
-        .where(AuditEvent.org_id == org_id)
-        .order_by(AuditEvent.sequence_num.asc())
-    )
-    result = await session.execute(stmt)
-    events = result.scalars().all()
-
-    if not events:
-        return AuditVerifyResponse(valid=True, total=0)
 
     prev_hash: str | None = None
-    for event in events:
-        expected = compute_entry_hash(
-            event.sequence_num,
-            event.event_type,
-            event.payload,
-            prev_hash,
-        )
-        if expected != event.entry_hash:
-            return AuditVerifyResponse(
-                valid=False,
-                total=len(events),
-                first_invalid_sequence=event.sequence_num,
-            )
-        prev_hash = event.entry_hash
+    total_verified = 0
+    offset = 0
 
-    return AuditVerifyResponse(valid=True, total=len(events))
+    while True:
+        batch_limit = min(_VERIFY_PAGE_SIZE, limit - total_verified)
+        stmt = (
+            select(AuditEvent)
+            .where(AuditEvent.org_id == org_id)
+            .order_by(AuditEvent.sequence_num.asc())
+            .offset(offset)
+            .limit(batch_limit)
+        )
+        result = await session.execute(stmt)
+        events = result.scalars().all()
+
+        if not events:
+            break
+
+        for event in events:
+            expected = compute_entry_hash(
+                event.sequence_num,
+                event.event_type,
+                event.payload,
+                prev_hash,
+            )
+            if expected != event.entry_hash:
+                return AuditVerifyResponse(
+                    valid=False,
+                    total=total_verified + 1,
+                    first_invalid_sequence=event.sequence_num,
+                )
+            prev_hash = event.entry_hash
+            total_verified += 1
+
+        offset += len(events)
+        if len(events) < batch_limit:
+            break
+
+    return AuditVerifyResponse(valid=True, total=total_verified)

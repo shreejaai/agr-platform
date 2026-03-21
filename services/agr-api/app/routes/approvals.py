@@ -5,7 +5,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -147,6 +147,9 @@ async def decide_via_email_get(
     safe_agent = _html.escape(str(approval.agent_id))
     safe_action = _html.escape(str(approval.action))
     safe_resource = _html.escape(str(approval.resource))
+    # S4: token is placed in a hidden POST field, NOT in the action URL.
+    # URL query params appear in server logs, browser history, and Referer headers —
+    # putting a bearer token there leaks it. Hidden form fields are not logged.
     return Response(
         content=f"""
 <html><body style="font-family:sans-serif;max-width:480px;margin:48px auto;padding:0 16px">
@@ -154,7 +157,8 @@ async def decide_via_email_get(
   <p><strong>Agent:</strong> {safe_agent}</p>
   <p><strong>Action:</strong> {safe_action}</p>
   <p><strong>Resource:</strong> {safe_resource}</p>
-  <form method="POST" action="/v1/approvals/decide?token={_html.escape(token)}">
+  <form method="POST" action="/v1/approvals/decide">
+    <input type="hidden" name="token" value="{_html.escape(token)}">
     <button type="submit"
       style="background:{color};color:#fff;padding:12px 28px;border:none;
              border-radius:6px;font-size:16px;font-weight:600;cursor:pointer">
@@ -169,11 +173,26 @@ async def decide_via_email_get(
 
 @router.post("/approvals/decide")
 async def decide_via_email_post(
-    token: str,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
+    # S4: accept token from POST body (hidden form field) to keep it out of
+    # server logs and browser history. Also accept query param for backward
+    # compat with Slack button URLs already in the wild.
+    token_body: str | None = Form(default=None, alias="token"),
+    token_query: str | None = None,
+    request: Request = None,  # type: ignore[assignment]
 ) -> Response:
     """Execute one-click approve/reject from email link (no auth required)."""
+    # Prefer form body token; fall back to query param for Slack button links
+    token = token_body or token_query
+    if token is None and request is not None:
+        token = request.query_params.get("token")
+    if not token:
+        return Response(
+            content=_html_page("Missing token.", "error"),
+            media_type="text/html",
+            status_code=400,
+        )
     parsed = verify_decision_token(token)
     if parsed is None:
         return Response(

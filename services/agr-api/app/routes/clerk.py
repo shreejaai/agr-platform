@@ -30,10 +30,39 @@ from app.database import get_session
 from app.models import Organization
 from app.schemas import ClerkApiKeyResponse
 from app.services.org_service import seed_default_policies
+from app.services.redis_service import _get_redis  # noqa: PLC2701
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1")
+
+
+_CLERK_API_KEY_RATE_WINDOW = 60  # 1-minute window
+_CLERK_API_KEY_RATE_MAX = 10  # max 10 lookups per IP per minute
+
+
+async def _clerk_api_key_rate_limit(ip: str) -> bool:
+    """Return True (blocked) if the IP has exceeded the rate limit.
+
+    S5: /v1/clerk/api-key is unauthenticated — without rate limiting an
+    attacker can enumerate Clerk user IDs to harvest AGR API keys.
+    Fails open if Redis is unavailable.
+    """
+    r = _get_redis()
+    if r is None:
+        return False
+    try:
+        key = f"clerk_apikey_limit:{ip}"
+        count: int = await r.incr(key)
+        if count == 1:
+            await r.expire(key, _CLERK_API_KEY_RATE_WINDOW)
+        if count > _CLERK_API_KEY_RATE_MAX:
+            logger.warning("Clerk API key rate limit exceeded for IP %s (count=%d)", ip, count)
+            return True
+        return False
+    except Exception as exc:
+        logger.debug("Clerk API key rate limit check failed (allowing through): %s", exc)
+        return False
 
 
 @router.get("/clerk/api-key", response_model=ClerkApiKeyResponse)
@@ -49,6 +78,18 @@ async def get_api_key_from_clerk_session(
     Requires CLERK_SECRET_KEY to be configured. Returns 401 if the
     Clerk session is invalid or the org does not exist yet.
     """
+    # S5: rate-limit by client IP to prevent API key enumeration
+    client_ip = request.client.host if request.client else "unknown"
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        client_ip = forwarded.split(",")[0].strip()
+    if await _clerk_api_key_rate_limit(client_ip):
+        return Response(
+            content='{"error":"rate_limited","message":"Too many requests. Try again later."}',
+            status_code=429,
+            media_type="application/json",
+        )
+
     if not settings.clerk_secret_key:
         return Response(
             content='{"error":"clerk_not_configured","message":"CLERK_SECRET_KEY is not set."}',
@@ -66,8 +107,12 @@ async def get_api_key_from_clerk_session(
 
     token = auth_header.removeprefix("Bearer ").strip()
 
-    # Decode JWT payload (base64url) — we don't verify the signature here;
-    # instead we verify the session_id with the Clerk Backend API.
+    # L7: JWT signature is intentionally NOT verified locally. We extract
+    # session_id from the payload and then verify it with the Clerk Backend API
+    # (GET /v1/sessions/{session_id}). The API call is the auth mechanism —
+    # Clerk rejects invalid/expired sessions server-side. Local signature
+    # verification would require caching Clerk's JWKS and handling key rotation,
+    # adding complexity with no security benefit since we call Clerk anyway.
     try:
         parts = token.split(".")
         if len(parts) != 3:
@@ -222,11 +267,30 @@ async def clerk_webhook(
         await seed_default_policies(session, org.id)
 
         logger.info("Created org for Clerk user %s (org_id=%s)", clerk_user_id, org.id)
-    except IntegrityError:
-        # Duplicate slug = same Clerk user already registered. Return 200 so
-        # Clerk stops retrying.
+    except IntegrityError as exc:
         await session.rollback()
-        logger.info("Duplicate Clerk user %s — org already exists, ignoring.", clerk_user_id)
-        return Response(status_code=200)
+        # H8: only silently ignore a unique-constraint violation on the slug
+        # column. Any other integrity error (e.g. api_key collision, which
+        # would signal a secrets.token_hex PRNG failure) must be re-raised.
+        #
+        # Detection strategy works for both PostgreSQL (pgcode=23505) and
+        # SQLite (error message contains "UNIQUE constraint failed" + "slug").
+        orig = getattr(exc, "orig", None)
+        pgcode = getattr(orig, "pgcode", None)
+        orig_str = str(orig or exc).lower()
+        is_unique_violation = pgcode == "23505" or (
+            "unique constraint" in orig_str or "unique" in orig_str
+        )
+        is_slug_column = "slug" in orig_str
+        if is_unique_violation and is_slug_column:
+            logger.info("Duplicate Clerk user %s — org already exists, ignoring.", clerk_user_id)
+            return Response(status_code=200)
+        # Unexpected integrity error — log and re-raise
+        logger.error(
+            "Unexpected IntegrityError creating org for Clerk user %s: %s",
+            clerk_user_id,
+            exc,
+        )
+        raise
 
     return Response(status_code=200)

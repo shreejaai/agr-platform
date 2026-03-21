@@ -19,14 +19,20 @@ TASK_QUEUE = "agr-approvals"
 
 _temporal_client: object | None = None
 _client_initialised = False
+_client_connected = False  # True only if connection actually succeeded
 
 
 async def _get_client() -> object | None:
-    """Return a lazily initialised Temporal client, or None if unavailable."""
-    global _temporal_client, _client_initialised
-    if _client_initialised:
-        return _temporal_client
+    """Return a lazily initialised Temporal client, or None if unavailable.
 
+    L5: if the initial connection failed (_client_connected=False), we retry
+    on the next call instead of caching the failure permanently. This allows
+    the app to reconnect after a Temporal restart without a process restart.
+    """
+    global _temporal_client, _client_initialised, _client_connected
+    if _client_initialised and _client_connected:
+        return _temporal_client
+    # Either first call or previous attempt failed — try to connect
     _client_initialised = True
     if not settings.temporal_host:
         return None
@@ -37,10 +43,14 @@ async def _get_client() -> object | None:
         _temporal_client = await Client.connect(
             settings.temporal_host, namespace=settings.temporal_namespace
         )
+        _client_connected = True
         logger.info("Connected to Temporal at %s", settings.temporal_host)
     except Exception as exc:
         logger.warning("Could not connect to Temporal (%s): %s", settings.temporal_host, exc)
         _temporal_client = None
+        _client_connected = False
+        # Reset so the next call retries (allows reconnect after Temporal restart)
+        _client_initialised = False
 
     return _temporal_client
 

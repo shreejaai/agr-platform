@@ -32,7 +32,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_WEBHOOK_TIMEOUT = 10.0  # seconds per delivery attempt
+
+# L3: timeout is configurable via settings.webhook_timeout (default 10s)
+# Import lazily to avoid circular imports at module level
+def _webhook_timeout() -> float:
+    from app.config import settings
+
+    return settings.webhook_timeout
+
+
 _MAX_ATTEMPTS = 3  # total tries before giving up
 _BACKOFF_BASE = 1.0  # seconds — doubled on each retry (1s, 2s)
 
@@ -87,12 +95,23 @@ async def fire_approval_webhook(
                 )
             )
             webhooks = result.scalars().all()
-            matching = [wh for wh in webhooks if isinstance(wh.events, list) and event in wh.events]
+            # H7: log any webhook whose events column is not a list (DB corruption)
+            matching = []
+            for wh in webhooks:
+                if not isinstance(wh.events, list):
+                    logger.warning(
+                        "Webhook %s has malformed events column (type=%s) — skipping",
+                        wh.id,
+                        type(wh.events).__name__,
+                    )
+                    continue
+                if event in wh.events:
+                    matching.append(wh)
 
             if not matching:
                 return
 
-            async with httpx.AsyncClient(timeout=_WEBHOOK_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=_webhook_timeout()) as client:
                 for wh in matching:
                     sig = _sign_payload(str(wh.secret), timestamp, body)
                     headers = {
@@ -171,7 +190,7 @@ async def retry_webhook_delivery(
     session.add(new_delivery)
     await session.flush()
 
-    async with httpx.AsyncClient(timeout=_WEBHOOK_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=_webhook_timeout()) as client:
         status, http_status, last_error, attempts = await _deliver_with_retry(
             client, wh.id, str(wh.url), body, headers
         )

@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AuditEvent
 
+_MAX_PAYLOAD_BYTES = 64_000  # ~64 KB — prevents unbounded JSONB growth
+
 logger = logging.getLogger(__name__)
 
 
@@ -62,6 +64,21 @@ async def create_audit_event(
     last_event = await get_last_audit_event(session, org_id)
     prev_hash = last_event.entry_hash if last_event else None
     sequence_num = (last_event.sequence_num + 1) if last_event else 1
+
+    # L8: cap payload size to prevent unbounded JSONB growth in audit_events
+    if payload is not None:
+        payload_bytes = json.dumps(payload, default=str).encode()
+        if len(payload_bytes) > _MAX_PAYLOAD_BYTES:
+            payload = {
+                "_truncated": True,
+                "_original_size_bytes": len(payload_bytes),
+                "eval_id": payload.get("eval_id"),
+            }
+            logger.warning(
+                "Audit event payload truncated (%d bytes > %d limit)",
+                len(payload_bytes),
+                _MAX_PAYLOAD_BYTES,
+            )
 
     entry_hash = compute_entry_hash(sequence_num, event_type, payload, prev_hash)
 

@@ -125,7 +125,7 @@ async def get_policy(
 ) -> PolicyResponse:
     org_id: uuid.UUID = request.state.org_id
     result = await session.execute(
-        select(Policy).where(Policy.id == policy_id, Policy.org_id == org_id)
+        select(Policy).where(Policy.id == policy_id, Policy.org_id == org_id, Policy.active == True)  # noqa: E712
     )
     policy = result.scalar_one_or_none()
     if not policy:
@@ -142,7 +142,7 @@ async def update_policy(
 ) -> PolicyResponse:
     org_id: uuid.UUID = request.state.org_id
     result = await session.execute(
-        select(Policy).where(Policy.id == policy_id, Policy.org_id == org_id)
+        select(Policy).where(Policy.id == policy_id, Policy.org_id == org_id, Policy.active == True)  # noqa: E712
     )
     policy = result.scalar_one_or_none()
     if not policy:
@@ -168,6 +168,13 @@ async def delete_policy(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> None:
+    """Soft-delete a policy by setting active=False.
+
+    M3: audit_events.policy_id holds historical references to policies;
+    hard-deleting would leave stale foreign keys in the immutable audit trail.
+    Soft-delete preserves the row (and audit integrity) while stopping the
+    policy from being evaluated in future requests.
+    """
     org_id: uuid.UUID = request.state.org_id
     result = await session.execute(
         select(Policy).where(Policy.id == policy_id, Policy.org_id == org_id)
@@ -175,5 +182,7 @@ async def delete_policy(
     policy = result.scalar_one_or_none()
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found.")
-    await session.delete(policy)
+    # Soft-delete: deactivate rather than removing the row
+    policy.active = False
+    await session.flush()
     await invalidate_org_eval_cache(org_id)

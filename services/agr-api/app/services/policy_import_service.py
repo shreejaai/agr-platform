@@ -28,11 +28,21 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 
+_YAML_MAX_BYTES = 1_000_000  # 1 MB — prevents billion-laughs DoS via huge inputs
+
+
 def parse_yaml_import(raw: str) -> PolicyImportRequest:
     """Parse a YAML string into a PolicyImportRequest.
 
     Raises ValueError on bad YAML or schema validation errors.
     """
+    # M8: reject large inputs before parsing to prevent YAML DoS attacks
+    if len(raw.encode()) > _YAML_MAX_BYTES:
+        raise ValueError(
+            f"Policy file too large ({len(raw.encode()):,} bytes). "
+            f"Maximum allowed: {_YAML_MAX_BYTES:,} bytes."
+        )
+
     try:
         import yaml  # optional dep — only needed for YAML path
     except ImportError as exc:

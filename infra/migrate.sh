@@ -30,4 +30,6 @@ $PSQL -f /migrations/012_token_version.sql
 echo "  012 done"
 $PSQL -f /migrations/013_status_check.sql
 echo "  013 done"
+$PSQL -f /migrations/014_audit_sequence_per_org.sql
+echo "  014 done"
 echo "All migrations complete."

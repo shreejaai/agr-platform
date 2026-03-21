@@ -81,6 +81,9 @@ async def _onprem_bootstrap() -> None:
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    # S2/M5: fail fast on dangerous production misconfigurations
+    settings.validate_production_settings()
+
     if settings.deployment_mode == "onprem":
         await _onprem_bootstrap()
 

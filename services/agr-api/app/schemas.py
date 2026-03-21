@@ -223,6 +223,9 @@ class WebhookDeliveryResponse(BaseModel):
     created_at: datetime
 
 
+_VALID_WEBHOOK_EVENTS = frozenset(["approval.approved", "approval.rejected"])
+
+
 def _validate_webhook_url(url: str) -> str:
     """M2: Ensure webhook URL uses http/https only — reject javascript:, data:, etc."""
     parsed = urllib.parse.urlparse(url)
@@ -231,6 +234,16 @@ def _validate_webhook_url(url: str) -> str:
     if not parsed.netloc:
         raise ValueError("Webhook URL must have a valid host.")
     return url
+
+
+def _validate_webhook_events(events: list[str]) -> list[str]:
+    """M7/H7: Validate event types in schema so they appear in OpenAPI spec as a 422."""
+    unknown = set(events) - _VALID_WEBHOOK_EVENTS
+    if unknown:
+        raise ValueError(
+            f"Unknown event types: {sorted(unknown)}. " f"Valid: {sorted(_VALID_WEBHOOK_EVENTS)}"
+        )
+    return events
 
 
 class WebhookUpdate(BaseModel):
@@ -245,6 +258,13 @@ class WebhookUpdate(BaseModel):
             _validate_webhook_url(v)
         return v
 
+    @field_validator("events")
+    @classmethod
+    def validate_events(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            _validate_webhook_events(v)
+        return v
+
 
 class WebhookCreate(BaseModel):
     url: str = Field(..., min_length=8, max_length=512)
@@ -257,6 +277,11 @@ class WebhookCreate(BaseModel):
     @classmethod
     def url_scheme(cls, v: str) -> str:
         return _validate_webhook_url(v)
+
+    @field_validator("events")
+    @classmethod
+    def validate_events(cls, v: list[str]) -> list[str]:
+        return _validate_webhook_events(v)
 
 
 class WebhookResponse(BaseModel):
