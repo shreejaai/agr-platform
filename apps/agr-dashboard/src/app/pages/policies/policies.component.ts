@@ -121,11 +121,18 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
       @if (showImport()) {
         <div
           class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          tabindex="-1"
           (click)="onOverlayClick($event)"
+          (keydown.escape)="closeImport()"
         >
           <div
             class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Import Policies"
+            tabindex="-1"
             (click)="$event.stopPropagation()"
+            (keydown)="$event.stopPropagation()"
           >
             <!-- Modal header -->
             <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700">
@@ -146,7 +153,12 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
               <!-- File drop zone -->
               <div
                 class="border-2 border-dashed border-slate-600 rounded-lg p-8 text-center cursor-pointer hover:border-indigo-500 hover:bg-indigo-500/5 transition-colors"
+                role="button"
+                tabindex="0"
+                aria-label="Upload policy file"
                 (click)="fileInput.click()"
+                (keydown.enter)="fileInput.click()"
+                (keydown.space)="fileInput.click()"
                 (dragover)="$event.preventDefault()"
                 (drop)="onDrop($event)"
               >
@@ -184,8 +196,9 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
 
               <!-- Paste area -->
               <div>
-                <label class="block text-xs text-slate-400 mb-1">Or paste JSON / YAML content</label>
+                <label for="import-textarea" class="block text-xs text-slate-400 mb-1">Or paste JSON / YAML content</label>
                 <textarea
+                  id="import-textarea"
                   [(ngModel)]="importText"
                   class="input w-full font-mono text-xs"
                   rows="6"

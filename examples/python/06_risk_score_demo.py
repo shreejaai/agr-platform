@@ -1,5 +1,6 @@
 """AGR Risk Score Demo — 5 scenarios showing escalating risk scores."""
 import os
+
 from agr import AGRClient
 
 API_KEY = os.environ.get("AGR_API_KEY", "agr_sk_YOUR_KEY_HERE")

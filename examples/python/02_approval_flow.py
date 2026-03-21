@@ -1,7 +1,8 @@
 """AGR Approval Flow — full lifecycle with background auto-approve."""
 import os
-import time
 import threading
+import time
+
 import httpx
 from agr import AGRClient
 

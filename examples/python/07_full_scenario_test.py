@@ -4,8 +4,9 @@ Exit code 0 if all tests pass, 1 if any fail.
 """
 import os
 import sys
-import time
 import threading
+import time
+
 import httpx
 from agr import AGRClient
 

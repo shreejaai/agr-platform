@@ -6,6 +6,7 @@ run this script standalone.
 """
 import os
 from typing import Any
+
 from agr import AGRClient
 
 API_KEY = os.environ.get("AGR_API_KEY", "agr_sk_YOUR_KEY_HERE")
@@ -52,7 +53,7 @@ def governed_search_web(agent_id: str, query: str, context: dict[str, Any] | Non
             print("  [AGR] ✅ Approved — executing tool")
             return search_web(query)
         else:
-            raise PermissionError(f"search_web blocked: approval rejected or timed out")
+            raise PermissionError("search_web blocked: approval rejected or timed out")
     else:
         raise PermissionError(f"search_web blocked by AGR policy: {result.reason}")
 

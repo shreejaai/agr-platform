@@ -5,7 +5,9 @@ reusable wrapper class. No actual CrewAI import is needed — the pattern
 mirrors how you would use it in a real CrewAI agent.
 """
 import os
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
+
 from agr import AGRClient
 
 API_KEY = os.environ.get("AGR_API_KEY", "agr_sk_YOUR_KEY_HERE")
@@ -51,7 +53,7 @@ class AGRToolWrapper:
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         ctx = dict(self.base_context)
         # Merge any keyword args that look like context signals
-        ctx.update({k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool))})
+        ctx.update({k: v for k, v in kwargs.items() if isinstance(v, str | int | float | bool)})
 
         result = agr.evaluate(
             agent=self.agent_id,
