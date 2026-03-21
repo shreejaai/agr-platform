@@ -14,3 +14,9 @@ export interface WebhookCreate {
   url: string;
   events: WebhookEvent[];
 }
+
+export interface WebhookUpdate {
+  url?: string;
+  events?: WebhookEvent[];
+  active?: boolean;
+}

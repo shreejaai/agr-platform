@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { Webhook, WebhookCreate } from '../core/models/webhook.model';
+import { Webhook, WebhookCreate, WebhookUpdate } from '../core/models/webhook.model';
 
 export interface WebhookListParams {
   limit?: number;
@@ -23,6 +23,10 @@ export class WebhookService {
 
   create(body: WebhookCreate): Observable<Webhook> {
     return this.http.post<Webhook>('/v1/webhooks', body);
+  }
+
+  update(id: string, body: WebhookUpdate): Observable<Webhook> {
+    return this.http.patch<Webhook>(`/v1/webhooks/${id}`, body);
   }
 
   delete(id: string): Observable<void> {

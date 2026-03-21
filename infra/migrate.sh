@@ -16,4 +16,8 @@ $PSQL -f /migrations/005_webhooks_table.sql
 echo "  005 done"
 $PSQL -f /migrations/008_webhook_deliveries.sql
 echo "  008 done"
+$PSQL -f /migrations/009_agent_active.sql
+echo "  009 done"
+$PSQL -f /migrations/010_eval_week.sql
+echo "  010 done"
 echo "All migrations complete."

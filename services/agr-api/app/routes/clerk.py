@@ -212,7 +212,7 @@ async def clerk_webhook(
             plan="developer",
             api_key=api_key,
             eval_count=0,
-            eval_limit=10000,
+            eval_limit=100,
         )
         session.add(org)
         await session.flush()  # get org.id before seeding

@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { WebhookService } from '../../services/webhook.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { RelativeTimePipe } from '../../shared/pipes/relative-time.pipe';
-import { Webhook, WebhookCreate, WebhookEvent } from '../../core/models/webhook.model';
+import { Webhook, WebhookCreate, WebhookEvent, WebhookUpdate } from '../../core/models/webhook.model';
 
 /** Events the AGR webhook system actually fires. */
 const AVAILABLE_EVENTS: WebhookEvent[] = ['approval.approved', 'approval.rejected'];
@@ -20,11 +20,11 @@ const AVAILABLE_EVENTS: WebhookEvent[] = ['approval.approved', 'approval.rejecte
           <h1 class="text-2xl font-bold text-slate-100">Webhooks</h1>
           <p class="text-sm text-slate-400 mt-1">Push approval events to your systems via HMAC-signed HTTP.</p>
         </div>
-        <button (click)="showForm.set(true)" class="btn-primary text-sm">+ New webhook</button>
+        <button (click)="openCreate()" class="btn-primary text-sm">+ New webhook</button>
       </div>
 
       <!-- Create form -->
-      @if (showForm()) {
+      @if (showForm() && !editingWebhook()) {
         <div class="card border border-indigo-500/30">
           <h2 class="text-base font-semibold text-slate-100 mb-4">New Webhook</h2>
           <div class="space-y-3">
@@ -75,6 +75,49 @@ const AVAILABLE_EVENTS: WebhookEvent[] = ['approval.approved', 'approval.rejecte
         </div>
       }
 
+      <!-- Edit form -->
+      @if (editingWebhook()) {
+        <div class="card border border-amber-500/30">
+          <h2 class="text-base font-semibold text-slate-100 mb-4">Edit Webhook</h2>
+          <div class="space-y-3">
+            <div>
+              <label for="edit-webhook-url" class="block text-xs text-slate-400 mb-1">Endpoint URL</label>
+              <input id="edit-webhook-url" [(ngModel)]="editUrl" class="input w-full font-mono text-sm" type="url" />
+            </div>
+            <div>
+              <p class="block text-xs text-slate-400 mb-2">Events to subscribe</p>
+              <div class="flex gap-4">
+                @for (evt of availableEvents; track evt) {
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      [checked]="editEvents.includes(evt)"
+                      (change)="toggleEditEvent(evt)"
+                      class="w-3.5 h-3.5 accent-indigo-500"
+                    />
+                    <span class="text-xs font-mono text-slate-300">{{ evt }}</span>
+                  </label>
+                }
+              </div>
+            </div>
+
+            @if (formError()) {
+              <p class="text-sm text-red-400">{{ formError() }}</p>
+            }
+
+            <div class="flex gap-2">
+              <button (click)="saveEdit()" [disabled]="saving()" class="btn-primary text-sm">
+                {{ saving() ? 'Saving…' : 'Save changes' }}
+              </button>
+              <button (click)="cancelForm()"
+                      class="px-3 py-1.5 text-sm text-slate-400 hover:text-slate-200 transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      }
+
       <!-- Signature verification reference -->
       <div class="card bg-slate-900/50">
         <h2 class="text-xs font-semibold text-slate-400 mb-2">Verifying signatures</h2>
@@ -111,10 +154,20 @@ Signed content:  "&#123;timestamp&#125;.&#123;json_body&#125;"</pre>
                     }
                   </div>
                 </div>
-                <button
-                  (click)="remove(w.id)"
-                  class="text-xs text-red-500/70 hover:text-red-400 shrink-0 transition-colors"
-                >Delete</button>
+                <div class="flex items-center gap-3 shrink-0">
+                  <button
+                    (click)="openEdit(w)"
+                    class="text-xs text-slate-500 hover:text-slate-200 transition-colors"
+                  >Edit</button>
+                  <button
+                    (click)="toggleActive(w)"
+                    class="text-xs text-slate-500 hover:text-slate-200 transition-colors"
+                  >{{ w.active ? 'Disable' : 'Enable' }}</button>
+                  <button
+                    (click)="remove(w.id)"
+                    class="text-xs text-red-500/70 hover:text-red-400 transition-colors"
+                  >Delete</button>
+                </div>
               </div>
             </div>
           }
@@ -133,9 +186,12 @@ export class WebhooksComponent implements OnInit {
   readonly formError = signal('');
   readonly createdSecret = signal('');
   readonly items = signal<Webhook[]>([]);
+  readonly editingWebhook = signal<Webhook | null>(null);
 
   formUrl = '';
   formEvents: WebhookEvent[] = [...AVAILABLE_EVENTS];
+  editUrl = '';
+  editEvents: WebhookEvent[] = [...AVAILABLE_EVENTS];
 
   ngOnInit(): void {
     this.loadList();
@@ -151,11 +207,36 @@ export class WebhooksComponent implements OnInit {
     });
   }
 
+  openCreate(): void {
+    this.editingWebhook.set(null);
+    this.formUrl = '';
+    this.formEvents = [...AVAILABLE_EVENTS];
+    this.formError.set('');
+    this.createdSecret.set('');
+    this.showForm.set(true);
+  }
+
+  openEdit(w: Webhook): void {
+    this.editingWebhook.set(w);
+    this.editUrl = w.url;
+    this.editEvents = [...w.events];
+    this.formError.set('');
+    this.showForm.set(true);
+  }
+
   toggleEvent(evt: WebhookEvent): void {
     if (this.formEvents.includes(evt)) {
       this.formEvents = this.formEvents.filter((e) => e !== evt);
     } else {
       this.formEvents = [...this.formEvents, evt];
+    }
+  }
+
+  toggleEditEvent(evt: WebhookEvent): void {
+    if (this.editEvents.includes(evt)) {
+      this.editEvents = this.editEvents.filter((e) => e !== evt);
+    } else {
+      this.editEvents = [...this.editEvents, evt];
     }
   }
 
@@ -184,6 +265,39 @@ export class WebhooksComponent implements OnInit {
     });
   }
 
+  saveEdit(): void {
+    const w = this.editingWebhook();
+    if (!w) return;
+    if (!this.editUrl.trim()) {
+      this.formError.set('Endpoint URL is required.');
+      return;
+    }
+    if (this.editEvents.length === 0) {
+      this.formError.set('Select at least one event.');
+      return;
+    }
+    this.saving.set(true);
+    this.formError.set('');
+    const body: WebhookUpdate = { url: this.editUrl.trim(), events: [...this.editEvents] };
+    this.svc.update(w.id, body).subscribe({
+      next: (updated) => {
+        this.items.update((list) => list.map((x) => (x.id === w.id ? updated : x)));
+        this.saving.set(false);
+        this.cancelForm();
+      },
+      error: () => {
+        this.formError.set('Failed to save changes. Please try again.');
+        this.saving.set(false);
+      },
+    });
+  }
+
+  toggleActive(w: Webhook): void {
+    this.svc.update(w.id, { active: !w.active }).subscribe({
+      next: (updated) => this.items.update((list) => list.map((x) => (x.id === w.id ? updated : x))),
+    });
+  }
+
   remove(id: string): void {
     this.svc.delete(id).subscribe({
       next: () => this.items.update((list) => list.filter((w) => w.id !== id)),
@@ -192,8 +306,11 @@ export class WebhooksComponent implements OnInit {
 
   cancelForm(): void {
     this.showForm.set(false);
+    this.editingWebhook.set(null);
     this.formUrl = '';
     this.formEvents = [...AVAILABLE_EVENTS];
+    this.editUrl = '';
+    this.editEvents = [...AVAILABLE_EVENTS];
     this.formError.set('');
     this.createdSecret.set('');
   }

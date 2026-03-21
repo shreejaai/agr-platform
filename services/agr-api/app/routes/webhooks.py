@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models import Webhook, WebhookDelivery
-from app.schemas import WebhookCreate, WebhookDeliveryResponse, WebhookResponse
+from app.schemas import WebhookCreate, WebhookDeliveryResponse, WebhookResponse, WebhookUpdate
 from app.services.webhook_service import retry_webhook_delivery
 
 router = APIRouter(prefix="/v1")
@@ -84,6 +84,40 @@ async def get_webhook(
     wh = result.scalar_one_or_none()
     if not wh:
         raise HTTPException(status_code=404, detail="Webhook not found.")
+    return _to_response(wh)
+
+
+@router.patch("/webhooks/{webhook_id}", response_model=WebhookResponse)
+async def update_webhook(
+    webhook_id: uuid.UUID,
+    body: WebhookUpdate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> WebhookResponse:
+    """Update a webhook's URL, subscribed events, or active status."""
+    org_id: uuid.UUID = request.state.org_id
+    result = await session.execute(
+        select(Webhook).where(Webhook.id == webhook_id, Webhook.org_id == org_id)
+    )
+    wh = result.scalar_one_or_none()
+    if not wh:
+        raise HTTPException(status_code=404, detail="Webhook not found.")
+
+    if body.url is not None:
+        wh.url = body.url
+    if body.events is not None:
+        unknown = set(body.events) - _VALID_EVENTS
+        if unknown:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown event types: {sorted(unknown)}. Valid: {sorted(_VALID_EVENTS)}",
+            )
+        wh.events = body.events
+    if body.active is not None:
+        wh.active = body.active
+
+    await session.flush()
+    await session.refresh(wh)
     return _to_response(wh)
 
 

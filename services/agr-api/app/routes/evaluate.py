@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
+from sqlalchemy import update as sa_update
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +47,25 @@ async def evaluate(
 ) -> EvaluateResponse | Response:
     org: Organization = request.state.org
     org_id: uuid.UUID = request.state.org_id
+
+    # -------------------------------------------------------------------------
+    # Weekly reset — if the current week has expired, reset eval_count to 0
+    # -------------------------------------------------------------------------
+    now_utc = datetime.now(UTC)
+    if org.eval_limit > 0 and (
+        org.eval_week_start is None
+        or now_utc - org.eval_week_start.replace(tzinfo=UTC) >= timedelta(days=7)
+    ):
+        from app.models import Organization as OrgModel
+
+        await session.execute(
+            sa_update(OrgModel)
+            .where(OrgModel.id == org_id)
+            .values(eval_count=0, eval_week_start=now_utc)
+        )
+        await session.flush()
+        org.eval_count = 0
+        org.eval_week_start = now_utc
 
     # -------------------------------------------------------------------------
     # Rate limit — Redis INCR (fast path); falls back to DB check if Redis down

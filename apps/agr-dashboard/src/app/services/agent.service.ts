@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { Agent, AgentRegister, AgentRegisterRequest } from '../core/models/agent.model';
+import { Agent, AgentRegister, AgentRegisterRequest, AgentUpdate } from '../core/models/agent.model';
 
 export interface AgentListParams {
   limit?: number;
@@ -32,5 +32,13 @@ export class AgentService {
       },
     };
     return this.http.post<Agent>('/v1/agents/register', body);
+  }
+
+  update(id: string, body: AgentUpdate): Observable<Agent> {
+    return this.http.patch<Agent>(`/v1/agents/${id}`, body);
+  }
+
+  delete(id: string): Observable<void> {
+    return this.http.delete<void>(`/v1/agents/${id}`);
   }
 }

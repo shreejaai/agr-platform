@@ -25,5 +25,6 @@ async def get_org_me(request: Request) -> OrgMeResponse:
         plan=org.plan,
         eval_count=org.eval_count,
         eval_limit=org.eval_limit,
+        eval_week_start=org.eval_week_start,
         created_at=org.created_at,
     )
