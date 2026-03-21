@@ -1,0 +1,28 @@
+# AGR Policy Pack: Data Access Controls
+# Policies for PII export prevention, department scoping, and read access controls.
+
+policies:
+  - name: deny-export-customer-db
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"export_customer_db\", resource);"
+    active: true
+
+  - name: require-approval-confidential-data
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"read_data\", resource) when { context has sensitivity && context.sensitivity == \"high\" } unless { context has approval_status && context.approval_status == \"approved\" };"
+    active: true
+
+  - name: deny-read-data-outside-department
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"read_data\", resource) when { context has department_match && context.department_match == false };"
+    active: true
+
+  - name: deny-hr-salary-write
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"write_salary_record\", resource);"
+    active: true
+
+  - name: allow-read-ticket-status
+    level: org
+    cedar_rule: "permit(principal, action == Action::\"read_ticket_status\", resource);"
+    active: true

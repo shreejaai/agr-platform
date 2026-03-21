@@ -1,0 +1,2 @@
+agr-sdk @ file:../../packages/agr-sdk-python
+httpx>=0.27

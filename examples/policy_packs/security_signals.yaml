@@ -1,0 +1,24 @@
+# AGR Policy Pack: Security Signals
+# Policies that respond to runtime security signals: prompt injection, geo anomaly,
+# repeated denials, and suspicious export attempts.
+
+policies:
+  - name: deny-prompt-injection-high
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"execute_tool\", resource) when { context has prompt_injection_score && context.prompt_injection_score >= 80 };"
+    active: true
+
+  - name: require-approval-geo-anomaly
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"execute_tool\", resource) when { context has geo_anomaly && context.geo_anomaly == true } unless { context has approval_status && context.approval_status == \"approved\" };"
+    active: true
+
+  - name: require-approval-repeated-denials
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"execute_tool\", resource) when { context has recent_denials && context.recent_denials >= 5 } unless { context has approval_status && context.approval_status == \"approved\" };"
+    active: true
+
+  - name: deny-export-with-injection
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"export_customer_db\", resource) when { context has prompt_injection_score };"
+    active: true

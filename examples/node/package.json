@@ -1,0 +1,15 @@
+{
+  "name": "agr-node-examples",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "npx tsx 03_import_policies.ts"
+  },
+  "dependencies": {
+    "@agr/sdk": "file:../../packages/agr-sdk-ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

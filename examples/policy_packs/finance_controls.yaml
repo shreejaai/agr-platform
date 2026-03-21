@@ -1,0 +1,33 @@
+# AGR Policy Pack: Finance Controls
+# Policies for payment approval, transfer limits, vendor checks, and access control.
+
+policies:
+  - name: require-approval-large-transfer
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"transfer_funds\", resource) when { context has amount && context.amount > 25000 } unless { context has approval_status && context.approval_status == \"approved\" };"
+    active: true
+
+  - name: deny-international-transfer
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"transfer_funds\", resource) when { context has destination_country && context.destination_country != \"IN\" };"
+    active: true
+
+  - name: allow-small-internal-transfer
+    level: org
+    cedar_rule: "permit(principal, action == Action::\"transfer_funds\", resource) when { context has amount && context.amount <= 5000 };"
+    active: true
+
+  - name: deny-transfer-unapproved-vendor
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"transfer_funds\", resource) when { context has vendor_status && context.vendor_status != \"APPROVED\" };"
+    active: true
+
+  - name: require-approval-after-hours-transfer
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"transfer_funds\", resource) when { context has is_after_hours && context.is_after_hours == true } unless { context has approval_status && context.approval_status == \"approved\" };"
+    active: true
+
+  - name: deny-write-finance-without-role
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"write_finance_record\", resource);"
+    active: true

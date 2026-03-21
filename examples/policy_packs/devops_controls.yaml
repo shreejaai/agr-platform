@@ -1,0 +1,28 @@
+# AGR Policy Pack: DevOps Controls
+# Policies for production deploy gates, database protection, and infrastructure changes.
+
+policies:
+  - name: deny-deploy-prod-by-default
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"deploy\", resource) when { context has environment && context.environment == \"production\" };"
+    active: true
+
+  - name: require-approval-deploy-prod-release-manager
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"deploy\", resource) when { context has environment && context.environment == \"production\" } unless { context has approval_status && context.approval_status == \"approved\" };"
+    active: true
+
+  - name: deny-delete-prod-database
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"delete_database\", resource) when { context has environment && context.environment == \"prod\" };"
+    active: true
+
+  - name: require-approval-scale-prod-cluster
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"scale_cluster\", resource) when { context has environment && context.environment == \"prod\" } unless { context has approval_status && context.approval_status == \"approved\" };"
+    active: true
+
+  - name: deny-modify-prod-config
+    level: org
+    cedar_rule: "forbid(principal, action == Action::\"modify_config\", resource) when { context has environment && context.environment == \"prod\" } unless { context has approval_status && context.approval_status == \"approved\" };"
+    active: true
