@@ -1,0 +1,9 @@
+# AGR Policy Pack: Deny-All Default
+# Start with maximum restriction — add permit rules incrementally.
+# CAUTION: Importing this without additional permit policies will block all agent actions.
+
+policies:
+  - name: "Default: Deny all actions (override with specific permits)"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action, resource);

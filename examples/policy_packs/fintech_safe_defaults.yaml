@@ -1,0 +1,38 @@
+# AGR Policy Pack: FinTech Safe Defaults
+# Suitable for: Payment processors, lending platforms, fraud detection systems
+# Import: POST /v1/policies/import with Content-Type: application/json
+#         (convert this YAML with: python3 -c "import yaml,json,sys; print(json.dumps(yaml.safe_load(sys.stdin)))" < fintech_safe_defaults.yaml)
+
+policies:
+  - name: "FinTech: Block production funds transfer without approval"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"funds.transfer", resource)
+      when { context has environment && context.environment == "production" }
+      unless { context has approval_status && context.approval_status == "approved" };
+
+  - name: "FinTech: Deny account deletion in production"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"account.delete", resource)
+      when { context has environment && context.environment == "production" };
+
+  - name: "FinTech: Allow read-only operations everywhere"
+    level: org
+    cedar_rule: >-
+      permit(principal, action in
+        [Action::"account.read", Action::"transaction.read", Action::"report.generate"],
+        resource);
+
+  - name: "FinTech: Require approval for bulk data exports"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"data.export", resource)
+      when { context has bulk && context.bulk == "true" }
+      unless { context has approval_status && context.approval_status == "approved" };
+
+  - name: "FinTech: Block PII access outside business hours"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"pii.read", resource)
+      when { context has off_hours && context.off_hours == "true" };

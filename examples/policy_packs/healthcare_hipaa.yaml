@@ -1,0 +1,33 @@
+# AGR Policy Pack: Healthcare / HIPAA Guardrails
+# Suitable for: EHR systems, health data platforms, telehealth agents
+
+policies:
+  - name: "HIPAA: Require approval for PHI bulk export"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"phi.export", resource)
+      unless { context has approval_status && context.approval_status == "approved" };
+
+  - name: "HIPAA: Block PHI deletion without authorization"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"phi.delete", resource)
+      unless { context has authorized && context.authorized == "true" };
+
+  - name: "HIPAA: Allow read-only PHI access for care providers"
+    level: org
+    cedar_rule: >-
+      permit(principal, action == Action::"phi.read", resource)
+      when { context has role && context.role == "care_provider" };
+
+  - name: "HIPAA: Block cross-patient data access"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"phi.read", resource)
+      when { context has cross_patient && context.cross_patient == "true" };
+
+  - name: "HIPAA: Require audit context on all PHI writes"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"phi.write", resource)
+      unless { context has audit_ref && context has operator_id };

@@ -1,0 +1,29 @@
+# AGR Policy Pack: EU AI Act Minimal Compliance
+# Covers Art. 13 (transparency), Art. 14 (human oversight), Art. 26 (deployer obligations)
+# Suitable for: Any EU-deployed high-risk AI system
+
+policies:
+  - name: "EU AI Act: Require human oversight for high-risk decisions"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"decision.high_risk", resource)
+      unless { context has human_reviewed && context.human_reviewed == "true" };
+
+  - name: "EU AI Act: Block automated adverse decisions without explanation"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"decision.adverse", resource)
+      unless { context has explanation && context has decision_basis };
+
+  - name: "EU AI Act: Require audit trail for biometric processing"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"biometric.process", resource)
+      unless { context has audit_ref && context has data_basis };
+
+  - name: "EU AI Act: Allow informational / advisory AI outputs"
+    level: org
+    cedar_rule: >-
+      permit(principal,
+        action in [Action::"advisory.generate", Action::"summary.create", Action::"report.draft"],
+        resource);
