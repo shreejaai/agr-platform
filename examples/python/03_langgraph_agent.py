@@ -4,8 +4,10 @@ This example shows how to protect a LangGraph tool using AGR. No actual LLM
 calls are made — the agent decision is mocked with hardcoded values so you can
 run this script standalone.
 """
+
 import os
 from typing import Any
+
 from agr import AGRClient
 
 API_KEY = os.environ.get("AGR_API_KEY", "agr_sk_YOUR_KEY_HERE")
@@ -18,6 +20,7 @@ agr = AGRClient(api_key=API_KEY, base_url=BASE_URL)
 # Mock tool — in a real LangGraph agent this would be a @tool decorated fn
 # ---------------------------------------------------------------------------
 
+
 def search_web(query: str) -> str:
     """Search the web and return a summary."""
     # Real implementation would call a search API
@@ -27,6 +30,7 @@ def search_web(query: str) -> str:
 # ---------------------------------------------------------------------------
 # AGR-governed wrapper
 # ---------------------------------------------------------------------------
+
 
 def governed_search_web(agent_id: str, query: str, context: dict[str, Any] | None = None) -> str:
     """Call search_web only if AGR permits it."""
@@ -52,7 +56,7 @@ def governed_search_web(agent_id: str, query: str, context: dict[str, Any] | Non
             print("  [AGR] ✅ Approved — executing tool")
             return search_web(query)
         else:
-            raise PermissionError(f"search_web blocked: approval rejected or timed out")
+            raise PermissionError("search_web blocked: approval rejected or timed out")
     else:
         raise PermissionError(f"search_web blocked by AGR policy: {result.reason}")
 
@@ -60,6 +64,7 @@ def governed_search_web(agent_id: str, query: str, context: dict[str, Any] | Non
 # ---------------------------------------------------------------------------
 # Simulated LangGraph agent decisions
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     print("=== AGR + LangGraph Governance Demo ===\n")

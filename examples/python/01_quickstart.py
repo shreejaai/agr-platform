@@ -1,5 +1,7 @@
 """AGR Quickstart — protect any AI agent tool call in 3 lines."""
+
 import os
+
 from agr import AGRClient
 
 api_key = os.environ.get("AGR_API_KEY", "agr_sk_YOUR_KEY_HERE")

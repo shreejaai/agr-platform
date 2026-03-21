@@ -208,9 +208,7 @@ async def get_api_key_from_clerk_session(
         except IntegrityError:
             await session.rollback()
             # Another request raced us — re-fetch the row that was just created
-            result = await session.execute(
-                select(Organization).where(Organization.slug == user_id)
-            )
+            result = await session.execute(select(Organization).where(Organization.slug == user_id))
             org = result.scalar_one_or_none()
             if org is None:
                 return Response(

@@ -1,5 +1,7 @@
 """AGR Risk Score Demo — 5 scenarios showing escalating risk scores."""
+
 import os
+
 from agr import AGRClient
 
 API_KEY = os.environ.get("AGR_API_KEY", "agr_sk_YOUR_KEY_HERE")
@@ -85,7 +87,9 @@ def main() -> None:
 
     print()
     print("Note: Risk scores and decisions depend on active policies in your org.")
-    print("Import starter pack to see varied results: bash ../curl/09_import_policies_json.sh --commit")
+    print(
+        "Import starter pack to see varied results: bash ../curl/09_import_policies_json.sh --commit"
+    )
     print()
     print("✅ Risk score demo complete")
 

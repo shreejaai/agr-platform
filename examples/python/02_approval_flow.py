@@ -1,7 +1,9 @@
 """AGR Approval Flow — full lifecycle with background auto-approve."""
+
 import os
-import time
 import threading
+import time
+
 import httpx
 from agr import AGRClient
 
@@ -49,7 +51,9 @@ def main() -> None:
 
     if not result.requires_approval:
         print(f"\n  ⚠️  Expected APPROVAL_REQUIRED, got {result.decision}")
-        print("  Import finance_controls policies first: bash ../curl/08_import_policies_yaml.sh --commit")
+        print(
+            "  Import finance_controls policies first: bash ../curl/08_import_policies_yaml.sh --commit"
+        )
         return
 
     print("\n✅ APPROVAL_REQUIRED — waiting for human (auto-approve in 3s)...")
@@ -76,6 +80,7 @@ def main() -> None:
     # Step 4: Verify audit trail
     print("\n--- Step 4: Recent audit events ---")
     import httpx as _httpx
+
     audit_resp = _httpx.get(
         f"{BASE_URL}/v1/audit?limit=5",
         headers={"Authorization": f"Bearer {API_KEY}"},
@@ -85,7 +90,9 @@ def main() -> None:
     events = audit_resp.json()
     items = events if isinstance(events, list) else events.get("items", [])
     for event in items[:5]:
-        print(f"  [{event.get('event_type','?'):25s}] agent={event.get('agent_id','?')} action={event.get('action','?')}")
+        print(
+            f"  [{event.get('event_type','?'):25s}] agent={event.get('agent_id','?')} action={event.get('action','?')}"
+        )
 
     print("\n✅ Approval lifecycle complete")
 

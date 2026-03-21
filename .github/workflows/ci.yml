@@ -83,13 +83,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -e packages/agr-sdk-python httpx
+        run: pip install -e packages/agr-sdk-python httpx ruff mypy
 
       - name: Lint
         run: ruff check packages/agr-sdk-python/
 
       - name: Type-check
-        run: python -m mypy packages/agr-sdk-python/agr/ --ignore-missing-imports
+        run: python -m mypy packages/agr-sdk-python/agr/ --ignore-missing-imports --config-file=/dev/null
 
   build-dashboard:
     name: Build Angular Dashboard
