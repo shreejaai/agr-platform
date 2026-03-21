@@ -41,6 +41,10 @@ class EvaluationResult:
     approval_id: str | None
     latency_ms: float
     eval_id: str
+    risk_score: int | None = None
+    risk_level: str | None = None
+    risk_factors: dict[str, int] | None = None
+    compliance_findings: list[dict[str, object]] | None = None
 
     @property
     def allowed(self) -> bool:
@@ -124,6 +128,10 @@ class AGRClient:
             approval_id=data.get("approval_id"),
             latency_ms=data["latency_ms"],
             eval_id=data["eval_id"],
+            risk_score=data.get("risk_score"),
+            risk_level=data.get("risk_level"),
+            risk_factors=data.get("risk_factors"),
+            compliance_findings=data.get("compliance_findings"),
         )
 
     def wait_for_approval(
@@ -166,6 +174,52 @@ class AGRClient:
         if response.status_code >= 400:
             raise AGRError(
                 f"Failed to register agent ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
+    def import_policies(
+        self,
+        *,
+        policies: list[dict[str, object]] | None = None,
+        overwrite: bool = False,
+        dry_run: bool = False,
+    ) -> dict[str, object]:
+        """Bulk-import policies from a list of PolicyImportItem dicts.
+
+        Each item must have: name (str), level (str), cedar_rule (str).
+        Optional: active (bool), agent_id (str), project_id (str).
+
+        Returns a PolicyImportResponse dict with keys: dry_run, total,
+        created, updated, skipped, errors, results.
+        """
+        if not policies:
+            raise AGRError("policies list is required and must not be empty.")
+        body: dict[str, object] = {
+            "policies": policies,
+            "overwrite": overwrite,
+            "dry_run": dry_run,
+        }
+        response = self._client.post("/v1/policies/import", json=body)
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Failed to import policies ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
+    def export_policies(self, *, active_only: bool = True) -> list[dict[str, object]]:
+        """Export all org policies as a list of PolicyImportItem dicts.
+
+        Suitable for backup or re-import via import_policies().
+        """
+        response = self._client.get(
+            "/v1/policies/export",
+            params={"active_only": str(active_only).lower()},
+        )
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Failed to export policies ({response.status_code}): {response.text}",
                 status_code=response.status_code,
             )
         return response.json()  # type: ignore[no-any-return]

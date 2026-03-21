@@ -271,3 +271,132 @@ describe("EvaluationResult computed booleans", () => {
     }
   );
 });
+
+// ---------------------------------------------------------------------------
+// risk_score / compliance_findings fields
+// ---------------------------------------------------------------------------
+
+describe("evaluate() — risk and compliance fields", () => {
+  const client = new AGRClient({ apiKey: "agr_sk_test" });
+
+  it("maps risk_score, risk_level, risk_factors from API response", async () => {
+    mockFetch(200, {
+      decision: "DENY",
+      reason: "high risk",
+      policy_id: "pol-1",
+      approval_id: null,
+      latency_ms: 1.0,
+      eval_id: "eval-risk",
+      risk_score: 85,
+      risk_level: "HIGH",
+      risk_factors: { action_severity: 50, environment: 35 },
+      compliance_findings: null,
+    });
+    const result = await client.evaluate("a", "deploy", "prod");
+    expect(result.riskScore).toBe(85);
+    expect(result.riskLevel).toBe("HIGH");
+    expect(result.riskFactors).toEqual({ action_severity: 50, environment: 35 });
+    expect(result.complianceFindings).toBeNull();
+  });
+
+  it("maps compliance_findings array", async () => {
+    mockFetch(200, {
+      decision: "ALLOW",
+      reason: "ok",
+      policy_id: null,
+      approval_id: null,
+      latency_ms: 1.0,
+      eval_id: "eval-compliance",
+      risk_score: 10,
+      risk_level: "LOW",
+      risk_factors: {},
+      compliance_findings: [
+        { plugin: "audit_trail_check", compliant: true, findings: [], framework: "internal" }
+      ],
+    });
+    const result = await client.evaluate("a", "read", "file");
+    expect(result.complianceFindings).toHaveLength(1);
+    expect(result.complianceFindings![0].plugin).toBe("audit_trail_check");
+    expect(result.complianceFindings![0].compliant).toBe(true);
+  });
+
+  it("handles null risk fields gracefully (older API)", async () => {
+    mockFetch(200, {
+      decision: "ALLOW",
+      reason: "ok",
+      policy_id: null,
+      approval_id: null,
+      latency_ms: 1.0,
+      eval_id: "eval-no-risk",
+      // no risk fields in response
+    });
+    const result = await client.evaluate("a", "read", "file");
+    expect(result.riskScore).toBeNull();
+    expect(result.riskLevel).toBeNull();
+    expect(result.riskFactors).toBeNull();
+    expect(result.complianceFindings).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// importPolicies()
+// ---------------------------------------------------------------------------
+
+describe("importPolicies()", () => {
+  const client = new AGRClient({ apiKey: "agr_sk_test" });
+
+  it("posts to /v1/policies/import and returns response", async () => {
+    const importResponse = {
+      dry_run: false,
+      total: 1,
+      created: 1,
+      updated: 0,
+      skipped: 0,
+      errors: 0,
+      results: [{ name: "test-policy", status: "created", policy_id: "pol-new", error: null }],
+    };
+    const spy = mockFetch(200, importResponse);
+    const result = await client.importPolicies({
+      policies: [{ name: "test-policy", level: "org", cedar_rule: 'permit(principal, action == Action::"read", resource);' }],
+    });
+    expect(result.created).toBe(1);
+    expect(result.results[0].status).toBe("created");
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/v1/policies/import");
+    expect((init.method as string).toUpperCase()).toBe("POST");
+  });
+
+  it("supports dry_run flag", async () => {
+    const spy = mockFetch(200, { dry_run: true, total: 1, created: 1, updated: 0, skipped: 0, errors: 0, results: [] });
+    await client.importPolicies({
+      policies: [{ name: "p", level: "org", cedar_rule: 'permit(principal, action == Action::"x", resource);' }],
+      dry_run: true,
+    });
+    const body = JSON.parse((spy.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(body.dry_run).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// exportPolicies()
+// ---------------------------------------------------------------------------
+
+describe("exportPolicies()", () => {
+  const client = new AGRClient({ apiKey: "agr_sk_test" });
+
+  it("fetches /v1/policies/export with active_only=true by default", async () => {
+    const spy = mockFetch(200, [{ name: "p1", level: "org", cedar_rule: "...", active: true }]);
+    const result = await client.exportPolicies();
+    expect(result).toHaveLength(1);
+    const [url] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/v1/policies/export");
+    expect(url).toContain("active_only=true");
+  });
+
+  it("passes active_only=false when requested", async () => {
+    const spy = mockFetch(200, []);
+    await client.exportPolicies(false);
+    const [url] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("active_only=false");
+  });
+});
