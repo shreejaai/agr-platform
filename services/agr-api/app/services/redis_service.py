@@ -29,11 +29,11 @@ logger = logging.getLogger(__name__)
 _EVAL_CACHE_TTL = 60  # seconds
 _RATE_KEY_TTL = 60 * 60 * 24 * 31  # 31 days — reset handled at billing cycle
 
-_redis_client: "aioredis.Redis[str] | None" = None
+_redis_client: "aioredis.Redis[str] | None" = None  # type: ignore[type-arg]
 _redis_unavailable: bool = False  # set True after a failed init so we stop retrying
 
 
-def _get_redis() -> "aioredis.Redis[str] | None":
+def _get_redis() -> "aioredis.Redis[str] | None":  # type: ignore[type-arg]
     """Return the module-level Redis connection pool, lazily initialised.
 
     `aioredis.from_url()` creates a connection pool (not a single connection).
@@ -48,7 +48,7 @@ def _get_redis() -> "aioredis.Redis[str] | None":
             _redis_unavailable = True
             return None
         try:
-            _redis_client = aioredis.from_url(
+            _redis_client = aioredis.from_url(  # type: ignore[no-untyped-call]
                 settings.redis_url,
                 encoding="utf-8",
                 decode_responses=True,

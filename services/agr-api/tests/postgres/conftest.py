@@ -40,7 +40,7 @@ pg_session_factory = async_sessionmaker(pg_engine, class_=AsyncSession, expire_o
 # ---------------------------------------------------------------------------
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[5]
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 _MIGRATIONS_DIR = _REPO_ROOT / "infra" / "migrations"
 
 _MIGRATION_FILES = [
@@ -74,7 +74,9 @@ async def _run_migrations(conn: AsyncConnection) -> None:
         if not path.exists():
             raise FileNotFoundError(f"Migration file not found: {path}")
         sql = path.read_text()
-        await conn.execute(text(sql))
+        # Use exec_driver_sql so multi-statement DDL files are sent as-is to
+        # asyncpg without SQLAlchemy trying to parse/prepare each statement.
+        await conn.exec_driver_sql(sql)
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
@@ -132,7 +134,12 @@ async def pg_org_b(pg_session: AsyncSession) -> dict[str, str]:
             INSERT INTO organizations (id, name, slug, plan, api_key, eval_count, eval_limit)
             VALUES (:id, :name, :slug, 'developer', :api_key, 0, 1000)
         """),
-        {"id": org_id, "name": "PG Test Org B", "slug": f"pg-test-b-{org_id[:8]}", "api_key": api_key},
+        {
+            "id": org_id,
+            "name": "PG Test Org B",
+            "slug": f"pg-test-b-{org_id[:8]}",
+            "api_key": api_key,
+        },
     )
     await pg_session.flush()
     return {"id": org_id, "api_key": api_key}

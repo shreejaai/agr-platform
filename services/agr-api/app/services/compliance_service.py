@@ -122,9 +122,7 @@ class ComplianceRegistry:
                 findings = await plugin.check(ctx)
                 all_findings.extend(findings)
             except Exception as exc:
-                logger.warning(
-                    "Compliance plugin %s raised (skipping): %s", plugin.name, exc
-                )
+                logger.warning("Compliance plugin %s raised (skipping): %s", plugin.name, exc)
 
         return ComplianceResult(findings=all_findings)
 

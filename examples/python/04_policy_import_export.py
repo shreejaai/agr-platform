@@ -47,11 +47,11 @@ with httpx.Client(base_url=AGR_BASE_URL, headers=headers, timeout=10) as client:
 
     # Step 2: Real import
     print("\nStep 2: Real import...")
-    r = client.post(
-        "/v1/policies/import", json={"policies": POLICIES, "overwrite": True}
-    )
+    r = client.post("/v1/policies/import", json={"policies": POLICIES, "overwrite": True})
     result = r.json()
-    print(f"  Created: {result['created']}, Updated: {result['updated']}, Errors: {result['errors']}")
+    print(
+        f"  Created: {result['created']}, Updated: {result['updated']}, Errors: {result['errors']}"
+    )
 
     # Step 3: Export
     print("\nStep 3: Export all policies...")

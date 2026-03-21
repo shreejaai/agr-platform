@@ -29,7 +29,12 @@ async def test_agent_metadata_jsonb_storage(
             INSERT INTO agents (id, org_id, agent_id, metadata)
             VALUES (:id, :org_id, :agent_id, :metadata::jsonb)
         """),
-        {"id": agent_id, "org_id": pg_org["id"], "agent_id": "test-agent-001", "metadata": metadata},
+        {
+            "id": agent_id,
+            "org_id": pg_org["id"],
+            "agent_id": "test-agent-001",
+            "metadata": metadata,
+        },
     )
     await pg_session.flush()
 

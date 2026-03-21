@@ -146,9 +146,7 @@ async def import_policies(
                 existing.version += 1
                 await session.flush()
                 results.append(
-                    PolicyImportResult(
-                        name=item.name, status="updated", policy_id=str(existing.id)
-                    )
+                    PolicyImportResult(name=item.name, status="updated", policy_id=str(existing.id))
                 )
                 updated += 1
             else:
@@ -165,9 +163,7 @@ async def import_policies(
                 session.add(policy)
                 await session.flush()
                 results.append(
-                    PolicyImportResult(
-                        name=item.name, status="created", policy_id=str(policy.id)
-                    )
+                    PolicyImportResult(name=item.name, status="created", policy_id=str(policy.id))
                 )
                 created += 1
 
