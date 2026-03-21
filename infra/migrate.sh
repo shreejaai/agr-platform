@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-PSQL="psql postgresql://agr:password@postgres:5432/agr_dev"
+PSQL="psql postgresql://agr_svc_usr:gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl@postgres:5432/agr_platform"
 
 echo "Running migrations..."
 $PSQL -f /migrations/001_initial_schema.sql

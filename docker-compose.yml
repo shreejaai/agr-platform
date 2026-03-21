@@ -5,15 +5,15 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: agr
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: agr_dev
+      POSTGRES_USER: agr_svc_usr
+      POSTGRES_PASSWORD: gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl
+      POSTGRES_DB: agr_platform
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agr -d agr_dev"]
+      test: ["CMD-SHELL", "pg_isready -U agr_svc_usr -d agr_platform"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -29,7 +29,7 @@ services:
       retries: 5
 
   # ── One-shot migration runner ───────────────────────────────────────────────
-  # Runs migrations 001–005 then exits. agr-api waits for this to complete.
+  # Runs migrations 001–015 then exits. agr-api waits for this to complete.
 
   migrate:
     image: postgres:16
@@ -52,9 +52,9 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://agr:password@postgres:5432/agr_dev
+      DATABASE_URL: postgresql+asyncpg://agr_svc_usr:gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl@postgres:5432/agr_platform
       REDIS_URL: redis://redis:6379
-      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
+      SECRET_KEY: ${SECRET_KEY:-4e993a8cbcb458e9823be7cc7215d42a57e1e56a3f90e8cdaa9334e9930d8dbf}
       ENV: ${ENV:-development}
       API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
@@ -112,9 +112,9 @@ services:
     image: agr-api:latest
     command: ["python", "-m", "app.workers.approval_worker"]
     environment:
-      DATABASE_URL: postgresql+asyncpg://agr:password@postgres:5432/agr_dev
+      DATABASE_URL: postgresql+asyncpg://agr_svc_usr:gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl@postgres:5432/agr_platform
       REDIS_URL: redis://redis:6379
-      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
+      SECRET_KEY: ${SECRET_KEY:-4e993a8cbcb458e9823be7cc7215d42a57e1e56a3f90e8cdaa9334e9930d8dbf}
       ENV: ${ENV:-development}
       # Use host.docker.internal:7233 (not localhost) when Temporal runs on your Mac/host
       TEMPORAL_HOST: ${TEMPORAL_HOST:-host.docker.internal:7233}

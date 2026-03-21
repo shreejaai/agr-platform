@@ -11,6 +11,10 @@ export interface ClerkUser {
   fullName: string;
 }
 
+export type FetchKeyResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_signed_in' | 'clerk_not_configured' | 'org_not_found' | 'error' };
+
 @Injectable({ providedIn: 'root' })
 export class ClerkService {
   private clerk: any = null;
@@ -33,27 +37,68 @@ export class ClerkService {
       this._syncUser();
       // Auto-fetch AGR API key from Clerk session (if not already stored)
       if (this.clerk?.user && !this.apiKeySvc.hasKey()) {
-        await this._fetchApiKey();
+        await this.fetchApiKey();
       }
     } catch (err) {
       console.error('ClerkService: failed to initialise Clerk', err);
     }
   }
 
-  private async _fetchApiKey(): Promise<void> {
-    try {
-      const token: string = await this.clerk.session.getToken();
-      const res = await firstValueFrom(
-        this.http.get<{ api_key: string }>('/v1/clerk/api-key', {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-      );
-      if (res?.api_key) {
-        this.apiKeySvc.setKey(res.api_key);
-      }
-    } catch {
-      // Silently ignore — user can paste key manually in Settings
+  /**
+   * Fetch the AGR API key from the backend using the current Clerk session.
+   *
+   * Retries up to 3 times with a 2-second delay to handle the race between
+   * first login and the Clerk webhook creating the org row. Returns a result
+   * object so callers can surface failures to the user.
+   */
+  async fetchApiKey(): Promise<FetchKeyResult> {
+    if (!this.clerk?.session) {
+      return { ok: false, reason: 'not_signed_in' };
     }
+
+    const maxAttempts = 3;
+    const retryDelayMs = 2000;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const token: string = await this.clerk.session.getToken();
+        const res = await firstValueFrom(
+          this.http.get<{ api_key: string }>('/v1/clerk/api-key', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+        );
+        if (res?.api_key) {
+          this.apiKeySvc.setKey(res.api_key);
+          return { ok: true };
+        }
+      } catch (err: any) {
+        const status: number = err?.status ?? 0;
+
+        if (status === 503) {
+          // CLERK_SECRET_KEY not configured on backend — retrying won't help
+          return { ok: false, reason: 'clerk_not_configured' };
+        }
+
+        if (status === 404 && attempt < maxAttempts) {
+          // Org not created yet — Clerk webhook may still be in flight. Retry.
+          console.warn(`ClerkService: org not found (attempt ${attempt}/${maxAttempts}), retrying in ${retryDelayMs}ms…`);
+          await new Promise(r => setTimeout(r, retryDelayMs));
+          continue;
+        }
+
+        if (status === 404) {
+          return { ok: false, reason: 'org_not_found' };
+        }
+
+        console.warn('ClerkService: fetchApiKey failed', err);
+        if (attempt === maxAttempts) {
+          return { ok: false, reason: 'error' };
+        }
+        await new Promise(r => setTimeout(r, retryDelayMs));
+      }
+    }
+
+    return { ok: false, reason: 'error' };
   }
 
   private _syncUser(): void {

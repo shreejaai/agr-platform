@@ -3,6 +3,7 @@ import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiKeyService } from '../../services/api-key.service';
 import { OrgService, OrgMe } from '../../services/org.service';
+import { ClerkService } from '../../core/auth/clerk.service';
 
 @Component({
   selector: 'agr-settings',
@@ -73,9 +74,46 @@ import { OrgService, OrgMe } from '../../services/org.service';
           </div>
         }
 
+        @if (fetchSuccess()) {
+          <div class="mb-3 px-3 py-2 rounded-lg bg-green-500/10 border border-green-500/20">
+            <p class="text-sm text-green-400">API key retrieved automatically from your account.</p>
+          </div>
+        }
+
+        @if (fetchError()) {
+          <div class="mb-3 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+            <p class="text-sm text-amber-400">{{ fetchError() }}</p>
+          </div>
+        }
+
         @if (error()) {
           <div class="mb-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
             <p class="text-sm text-red-400">{{ error() }}</p>
+          </div>
+        }
+
+        <!-- Auto-fetch button (shown when no key is set) -->
+        @if (!hasKey() && !fetching()) {
+          <button
+            (click)="fetchFromClerk()"
+            class="mb-4 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
+                   bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium
+                   transition-colors border border-indigo-500"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Fetch API Key Automatically
+          </button>
+        }
+
+        @if (fetching()) {
+          <div class="mb-4 flex items-center gap-2 px-3 py-2.5 rounded-lg bg-slate-800 border border-slate-700">
+            <svg class="w-4 h-4 animate-spin text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <span class="text-sm text-slate-400">Fetching API key from your account…</span>
           </div>
         }
 
@@ -125,6 +163,14 @@ import { OrgService, OrgMe } from '../../services/org.service';
             <button (click)="save()" class="btn-primary">Save key</button>
             @if (hasKey()) {
               <button
+                (click)="fetchFromClerk()"
+                [disabled]="fetching()"
+                class="px-3 py-1.5 text-sm text-indigo-400 border border-indigo-500/30
+                       rounded-lg hover:bg-indigo-500/10 transition-colors disabled:opacity-50"
+              >
+                Refresh from Clerk
+              </button>
+              <button
                 (click)="clear()"
                 class="px-3 py-1.5 text-sm text-red-400 border border-red-500/30
                        rounded-lg hover:bg-red-500/10 transition-colors"
@@ -159,18 +205,55 @@ import { OrgService, OrgMe } from '../../services/org.service';
 export class SettingsComponent implements OnInit {
   private apiKey = inject(ApiKeyService);
   private orgSvc = inject(OrgService);
+  private clerkSvc = inject(ClerkService);
 
   keyInput = this.apiKey.getKey() ?? '';
   readonly hasKey = this.apiKey.hasKey.bind(this.apiKey);
   readonly saved = signal(false);
   readonly error = signal('');
+  readonly fetchError = signal('');
+  readonly fetchSuccess = signal(false);
+  readonly fetching = signal(false);
   readonly org = signal<OrgMe | null>(null);
   readonly showKey = signal(false);
 
   ngOnInit(): void {
     if (this.hasKey()) {
       this.orgSvc.getMe().subscribe({ next: (o) => this.org.set(o) });
+    } else {
+      // No key in storage — attempt auto-fetch so the user doesn't have to manually paste it
+      this.fetchFromClerk();
     }
+  }
+
+  async fetchFromClerk(): Promise<void> {
+    this.fetching.set(true);
+    this.fetchError.set('');
+    this.fetchSuccess.set(false);
+
+    const result = await this.clerkSvc.fetchApiKey();
+
+    this.fetching.set(false);
+
+    if (result.ok) {
+      this.keyInput = this.apiKey.getKey() ?? '';
+      this.fetchSuccess.set(true);
+      setTimeout(() => this.fetchSuccess.set(false), 4000);
+      this.orgSvc.getMe().subscribe({ next: (o) => this.org.set(o) });
+      return;
+    }
+
+    const messages: Record<string, string> = {
+      not_signed_in: 'You must be signed in to fetch your API key automatically.',
+      clerk_not_configured:
+        'Automatic key retrieval is not configured on this server. ' +
+        'Copy your API key from the server and paste it below.',
+      org_not_found:
+        'Your account was not found yet — your registration may still be processing. ' +
+        'Wait a moment and click "Fetch API Key Automatically" again.',
+      error: 'Could not fetch API key automatically. Paste your key below.',
+    };
+    this.fetchError.set(messages[result.reason] ?? messages['error']);
   }
 
   usagePct(): number {
@@ -215,6 +298,8 @@ export class SettingsComponent implements OnInit {
     this.apiKey.clearKey();
     this.keyInput = '';
     this.saved.set(false);
+    this.fetchSuccess.set(false);
+    this.fetchError.set('');
     this.org.set(null);
     this.showKey.set(false);
   }

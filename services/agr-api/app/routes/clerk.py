@@ -165,16 +165,59 @@ async def get_api_key_from_clerk_session(
     # Look up org by Clerk user_id (stored as slug)
     result = await session.execute(select(Organization).where(Organization.slug == user_id))
     org = result.scalar_one_or_none()
+
     if org is None:
-        return Response(
-            content=(
-                '{"error":"org_not_found",'
-                '"message":"No AGR organisation found for this Clerk user. '
-                'Sign up at https://dashboard.agr.dev"}'
-            ),
-            status_code=404,
-            media_type="application/json",
-        )
+        # Org not found — webhook may not have fired yet (common in local dev where
+        # localhost is unreachable from Clerk's servers). Auto-provision the org now
+        # using the verified Clerk user data so the user can proceed immediately.
+        logger.info("Auto-provisioning org for verified Clerk user %s", user_id)
+        try:
+            # Fetch user profile from Clerk to get name/email for the org
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                user_resp = await client.get(
+                    f"https://api.clerk.com/v1/users/{user_id}",
+                    headers={"Authorization": f"Bearer {settings.clerk_secret_key}"},
+                )
+            if user_resp.status_code == 200:
+                user_data = user_resp.json()
+                email_addresses = user_data.get("email_addresses", [])
+                email = email_addresses[0]["email_address"] if email_addresses else ""
+                first_name = user_data.get("first_name") or ""
+                last_name = user_data.get("last_name") or ""
+                name = f"{first_name} {last_name}".strip() or email or user_id
+            else:
+                name = user_id
+        except httpx.RequestError:
+            name = user_id
+
+        try:
+            org = Organization(
+                id=uuid.uuid4(),
+                name=name,
+                slug=user_id,
+                plan="developer",
+                api_key="agr_sk_" + secrets.token_hex(24),
+                eval_count=0,
+                eval_limit=100,
+                eval_week_start=datetime.now(UTC),
+            )
+            session.add(org)
+            await session.flush()
+            await seed_default_policies(session, org.id)
+            logger.info("Auto-provisioned org %s for Clerk user %s", org.id, user_id)
+        except IntegrityError:
+            await session.rollback()
+            # Another request raced us — re-fetch the row that was just created
+            result = await session.execute(
+                select(Organization).where(Organization.slug == user_id)
+            )
+            org = result.scalar_one_or_none()
+            if org is None:
+                return Response(
+                    content='{"error":"org_error","message":"Failed to provision organisation."}',
+                    status_code=500,
+                    media_type="application/json",
+                )
 
     return ClerkApiKeyResponse(
         api_key=org.api_key,
