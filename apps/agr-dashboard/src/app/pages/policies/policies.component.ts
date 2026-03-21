@@ -1,6 +1,6 @@
 import { Component, inject, OnInit, ChangeDetectionStrategy, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { PolicyService } from '../../services/policy.service';
+import { PolicyService, PolicyImportResponse, PolicyImportResult } from '../../services/policy.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { Policy, PolicyCreate } from '../../core/models/policy.model';
 
@@ -55,6 +55,48 @@ function deriveAction(cedar_rule: string): string {
   return m?.[1] ?? '—';
 }
 
+const SAMPLE_POLICIES_JSON = JSON.stringify(
+  {
+    policies: [
+      {
+        name: 'allow-web-search',
+        level: 'org',
+        cedar_rule: 'permit(principal, action == Action::"web_search", resource);',
+        active: true,
+      },
+      {
+        name: 'deny-file-delete',
+        level: 'org',
+        cedar_rule: 'forbid(principal, action == Action::"file_delete", resource);',
+        active: true,
+      },
+      {
+        name: 'require-approval-production-deploy',
+        level: 'org',
+        cedar_rule:
+          'forbid(principal, action == Action::"deploy", resource)\nwhen { resource has environment && resource.environment == "production" }\nunless { context has approval_status && context.approval_status == "approved" };',
+        active: true,
+      },
+      {
+        name: 'allow-read-only-db',
+        level: 'project',
+        cedar_rule: 'permit(principal, action == Action::"db_query", resource);',
+        active: true,
+      },
+      {
+        name: 'deny-external-api-calls',
+        level: 'agent',
+        cedar_rule: 'forbid(principal, action == Action::"http_request", resource)\nwhen { resource has domain && resource.domain == "external" };',
+        active: false,
+      },
+    ],
+    dry_run: false,
+    overwrite: false,
+  },
+  null,
+  2,
+);
+
 @Component({
   selector: 'agr-policies',
   standalone: true,
@@ -67,8 +109,112 @@ function deriveAction(cedar_rule: string): string {
           <h1 class="text-2xl font-bold text-slate-100">Policies</h1>
           <p class="text-sm text-slate-400 mt-1">Cedar-based governance rules evaluated on every tool call.</p>
         </div>
-        <button (click)="openCreate()" class="btn-primary text-sm">+ New policy</button>
+        <div class="flex items-center gap-2">
+          <button (click)="exportAll()" class="btn-secondary text-sm">Export JSON</button>
+          <button (click)="openImport()" class="btn-secondary text-sm">Import</button>
+          <button (click)="openCreate()" class="btn-primary text-sm">+ New policy</button>
+        </div>
       </div>
+
+      <!-- Import panel -->
+      @if (showImport()) {
+        <div class="card border border-sky-500/30 space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-base font-semibold text-slate-100">Import Policies</h2>
+            <button (click)="downloadSample()" class="text-xs text-sky-400 hover:text-sky-300 underline transition-colors">
+              Download sample JSON
+            </button>
+          </div>
+
+          <p class="text-xs text-slate-400">
+            Paste a JSON object with a <code class="bg-slate-800 px-1 rounded">policies</code> array, or upload a
+            <code class="bg-slate-800 px-1 rounded">.json</code> file.
+            Supports three formats: JSON object, YAML, or raw Cedar rules (blank-line separated).
+          </p>
+
+          <!-- File upload -->
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Upload file (.json / .yaml / .cedar)</label>
+            <input
+              type="file"
+              accept=".json,.yaml,.yml,.cedar,.txt"
+              (change)="onFileSelected($event)"
+              class="block text-xs text-slate-300 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0
+                     file:text-xs file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600 cursor-pointer"
+            />
+          </div>
+
+          <!-- Paste area -->
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Or paste JSON / YAML content</label>
+            <textarea
+              [(ngModel)]="importText"
+              class="input w-full font-mono text-xs"
+              rows="8"
+              placeholder="{{ samplePlaceholder }}"
+            ></textarea>
+          </div>
+
+          <!-- Options -->
+          <div class="flex items-center gap-6 text-sm">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" [(ngModel)]="importDryRun" class="rounded" />
+              <span class="text-slate-300">Dry run <span class="text-slate-500 text-xs">(preview without saving)</span></span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" [(ngModel)]="importOverwrite" class="rounded" />
+              <span class="text-slate-300">Overwrite duplicates</span>
+            </label>
+          </div>
+
+          @if (importError()) {
+            <p class="text-sm text-red-400">{{ importError() }}</p>
+          }
+
+          <!-- Dry run preview results -->
+          @if (importResult()) {
+            <div class="rounded border border-slate-700 overflow-hidden text-xs">
+              <div class="px-3 py-2 bg-slate-800 flex items-center gap-4 text-slate-300">
+                <span>Total: <strong>{{ importResult()!.total }}</strong></span>
+                <span class="text-emerald-400">Created: {{ importResult()!.created }}</span>
+                <span class="text-amber-400">Updated: {{ importResult()!.updated }}</span>
+                <span class="text-slate-400">Skipped: {{ importResult()!.skipped }}</span>
+                @if (importResult()!.errors > 0) {
+                  <span class="text-red-400">Errors: {{ importResult()!.errors }}</span>
+                }
+                @if (importResult()!.dry_run) {
+                  <span class="ml-auto text-sky-400 font-medium">DRY RUN — nothing was saved</span>
+                }
+              </div>
+              <table class="w-full">
+                @for (r of importResult()!.results; track r.name) {
+                  <tr class="border-t border-slate-700/50">
+                    <td class="px-3 py-1.5 text-slate-300">{{ r.name }}</td>
+                    <td class="px-3 py-1.5">
+                      <span [class]="statusClass(r.status)">{{ r.status }}</span>
+                    </td>
+                    <td class="px-3 py-1.5 text-slate-500">{{ r.error ?? '' }}</td>
+                  </tr>
+                }
+              </table>
+            </div>
+          }
+
+          <div class="flex gap-2">
+            <button
+              (click)="runImport()"
+              [disabled]="importing()"
+              class="btn-primary text-sm"
+            >
+              {{ importing() ? 'Importing…' : (importDryRun ? 'Preview' : 'Import') }}
+            </button>
+            <button
+              (click)="closeImport()"
+              class="px-3 py-1.5 text-sm text-slate-400 hover:text-slate-200 transition-colors"
+            >Cancel</button>
+          </div>
+        </div>
+      }
 
       <!-- Create form -->
       @if (showForm() && !editingPolicy()) {
@@ -245,6 +391,25 @@ export class PoliciesComponent implements OnInit {
   readonly items = signal<Policy[]>([]);
   readonly editingPolicy = signal<Policy | null>(null);
 
+  // Import state
+  readonly showImport = signal(false);
+  readonly importing = signal(false);
+  readonly importError = signal('');
+  readonly importResult = signal<PolicyImportResponse | null>(null);
+  importText = '';
+  importDryRun = false;
+  importOverwrite = false;
+
+  readonly samplePlaceholder = `{
+  "policies": [
+    {
+      "name": "allow-web-search",
+      "level": "org",
+      "cedar_rule": "permit(principal, action == Action::\\"web_search\\", resource);"
+    }
+  ]
+}`;
+
   form: PolicyForm = this.emptyForm();
   editForm: PolicyEditForm = { name: '', cedar_rule: '' };
 
@@ -356,6 +521,112 @@ export class PoliciesComponent implements OnInit {
     if (e === 'allow') return 'success';
     if (e === 'approval') return 'warning';
     return 'danger';
+  }
+
+  // --- Import / Export ---
+
+  openImport(): void {
+    this.showImport.set(true);
+    this.importText = '';
+    this.importDryRun = false;
+    this.importOverwrite = false;
+    this.importError.set('');
+    this.importResult.set(null);
+  }
+
+  closeImport(): void {
+    this.showImport.set(false);
+    this.importResult.set(null);
+    this.importError.set('');
+    this.importText = '';
+  }
+
+  onFileSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      this.importText = (e.target?.result as string) ?? '';
+    };
+    reader.readAsText(file);
+  }
+
+  runImport(): void {
+    const raw = this.importText.trim();
+    if (!raw) {
+      this.importError.set('Paste or upload a JSON / YAML file first.');
+      return;
+    }
+    this.importError.set('');
+    this.importResult.set(null);
+    this.importing.set(true);
+
+    let body: object;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      this.importError.set('Invalid JSON. Check your input and try again.');
+      this.importing.set(false);
+      return;
+    }
+
+    const req = {
+      ...(body as object),
+      dry_run: this.importDryRun,
+      overwrite: this.importOverwrite,
+    };
+
+    this.svc.importPolicies(req as Parameters<PolicyService['importPolicies']>[0]).subscribe({
+      next: (res) => {
+        this.importResult.set(res);
+        this.importing.set(false);
+        // If not a dry run and no errors, reload the list
+        if (!res.dry_run && res.errors === 0) {
+          this.loadList();
+        }
+      },
+      error: (err) => {
+        const msg = err?.error?.detail ?? err?.error?.message ?? 'Import failed. Check your file and try again.';
+        this.importError.set(msg);
+        this.importing.set(false);
+      },
+    });
+  }
+
+  exportAll(): void {
+    this.svc.exportPolicies().subscribe({
+      next: (policies) => {
+        const payload = JSON.stringify({ policies }, null, 2);
+        const blob = new Blob([payload], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'agr_policies_export.json';
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+    });
+  }
+
+  downloadSample(): void {
+    const blob = new Blob([SAMPLE_POLICIES_JSON], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'agr_policies_sample.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  statusClass(status: PolicyImportResult['status']): string {
+    const map: Record<string, string> = {
+      created: 'text-emerald-400',
+      updated: 'text-amber-400',
+      skipped: 'text-slate-400',
+      error: 'text-red-400',
+    };
+    return map[status] ?? 'text-slate-400';
   }
 
   private emptyForm(): PolicyForm {
