@@ -117,6 +117,47 @@ jobs:
         run: npm run build
         working-directory: packages/agr-sdk-ts
 
+  # ── PostgreSQL integration tests ──────────────────────────────────────────
+  # Runs against a real PostgreSQL 16 instance with all 13 migrations applied.
+  # continue-on-error: true — these tests require Docker services; failures are
+  # reported but do not block the publish step.
+  test-postgres:
+    name: PostgreSQL integration tests
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres-test:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agr_test
+          POSTGRES_PASSWORD: agr_test_password
+          POSTGRES_DB: agr_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5433:5432
+    env:
+      PG_TEST_URL: postgresql+asyncpg://agr_test:agr_test_password@localhost:5433/agr_test
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r services/agr-api/requirements.txt
+
+      - name: PostgreSQL integration tests
+        run: |
+          cd services/agr-api
+          python -m pytest tests/postgres/ -v --tb=short
+
   # ── Publish Docker images to GitHub Container Registry ────────────────────
   # Runs on every push to main (after all tests pass).
   # Pushes two tags: :latest and :<short-sha>
