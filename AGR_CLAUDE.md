@@ -260,7 +260,7 @@ slug        TEXT UNIQUE (nullable)
 plan        TEXT DEFAULT 'developer'   -- developer|startup|business|enterprise
 api_key     TEXT UNIQUE NOT NULL       -- agr_sk_ + 48 hex chars
 eval_count  BIGINT DEFAULT 0
-eval_limit  BIGINT DEFAULT 10000       -- 0 = unlimited
+eval_limit  BIGINT DEFAULT 100         -- 0 = unlimited; developer plan = 100/week
 created_at  TIMESTAMPTZ
 updated_at  TIMESTAMPTZ
 
@@ -1402,15 +1402,18 @@ ONPREM_ORG_NAME=Acme Corp                # org name for auto-bootstrapped org (s
 
 ## Pricing Tiers
 
-| Plan | Monthly Evals | Price |
-|---|---|---|
-| developer | 10,000 | Free |
-| startup | 1,000,000 | $49/mo |
-| business | unlimited | $199/mo |
-| enterprise | unlimited | Custom |
+| Plan | Evals | Reset | Price |
+|---|---|---|---|
+| developer | 100 | Weekly (auto-reset every 7 days) | Free |
+| startup | 1,000,000 | Monthly | $49/mo |
+| business | unlimited | — | $199/mo |
+| enterprise | unlimited | — | Custom |
 
 `eval_limit = 0` means unlimited. Check: `org.eval_limit > 0 and eval_count >= org.eval_limit`
-(Redis counter is checked first; DB is source of truth for billing.)
+
+Weekly reset: `eval_week_start` column records when the current week began. On every `/v1/evaluate`
+call, if `now - eval_week_start >= 7 days` (or `eval_week_start` is NULL), `eval_count` is reset
+to 0 and `eval_week_start` is updated. Redis counter is checked first; DB is source of truth.
 
 ---
 
