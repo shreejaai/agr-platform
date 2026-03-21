@@ -268,6 +268,53 @@ class WebhookResponse(BaseModel):
     created_at: datetime
 
 
+class PolicyImportItem(BaseModel):
+    """Single policy entry in a bulk import request."""
+
+    name: str = Field(..., min_length=1, max_length=256)
+    level: str = Field(..., pattern=r"^(org|project|agent)$")
+    cedar_rule: str = Field(..., min_length=1)
+    project_id: uuid.UUID | None = None
+    agent_id: str | None = None
+    active: bool = True
+
+    @field_validator("cedar_rule")
+    @classmethod
+    def validate_cedar(cls, v: str) -> str:
+        return _validate_cedar_rule(v)
+
+
+class PolicyImportRequest(BaseModel):
+    """Bulk import request — JSON or YAML-decoded list of policies."""
+
+    policies: list[PolicyImportItem] = Field(..., min_length=1)
+    # dry_run=True validates and returns preview without writing to DB
+    dry_run: bool = False
+    # overwrite=True replaces existing policies with matching names
+    overwrite: bool = False
+
+
+class PolicyImportResult(BaseModel):
+    """Per-policy result within a bulk import response."""
+
+    name: str
+    status: str  # "created" | "updated" | "skipped" | "error"
+    policy_id: str | None = None
+    error: str | None = None
+
+
+class PolicyImportResponse(BaseModel):
+    """Bulk import response."""
+
+    dry_run: bool
+    total: int
+    created: int
+    updated: int
+    skipped: int
+    errors: int
+    results: list[PolicyImportResult]
+
+
 class HealthResponse(BaseModel):
     status: str
 
