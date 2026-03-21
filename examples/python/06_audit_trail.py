@@ -19,9 +19,9 @@ if not AGR_API_KEY:
 headers = {"Authorization": f"Bearer {AGR_API_KEY}"}
 
 evals = [
-    ("agent-a", "read",    "file1.txt",   {}),
-    ("agent-b", "write",   "file2.txt",   {"environment": "staging"}),
-    ("agent-c", "db.drop", "staging-db",  {"environment": "staging"}),
+    ("agent-a", "read", "file1.txt", {}),
+    ("agent-b", "write", "file2.txt", {"environment": "staging"}),
+    ("agent-c", "db.drop", "staging-db", {"environment": "staging"}),
 ]
 
 with httpx.Client(base_url=AGR_BASE_URL, headers=headers, timeout=10) as client:
