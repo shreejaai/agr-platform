@@ -47,7 +47,7 @@ async def _onprem_bootstrap() -> None:
             return
 
         api_key = "agr_sk_" + secrets.token_hex(24)
-        eval_limit = int(license_payload.get("evals", 0))
+        eval_limit = int(str(license_payload.get("evals") or 0))
 
         org_obj = Organization(
             id=uuid.uuid4(),

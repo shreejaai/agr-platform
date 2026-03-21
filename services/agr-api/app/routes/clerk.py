@@ -154,7 +154,7 @@ async def clerk_webhook(
     # --- Svix signature verification ---
     if settings.clerk_webhook_secret:
         try:
-            from svix.webhooks import Webhook  # type: ignore[import]
+            from svix.webhooks import Webhook
 
             wh = Webhook(settings.clerk_webhook_secret)
             headers = {

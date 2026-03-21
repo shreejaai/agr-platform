@@ -74,7 +74,7 @@ async def evaluate(
             .values(eval_count=0, eval_week_start=now_utc)
             .execution_options(synchronize_session=False)
         )
-        if reset_result.rowcount > 0:
+        if reset_result.rowcount > 0:  # type: ignore[attr-defined]
             org.eval_count = 0
             org.eval_week_start = now_utc
 
@@ -115,7 +115,7 @@ async def evaluate(
         decision = str(cached["decision"])
         reason = str(cached.get("reason", ""))
         policy_id = cached.get("policy_id")
-        latency_ms = float(cached.get("latency_ms", 0))
+        latency_ms = float(cached.get("latency_ms") or 0)  # type: ignore[arg-type]
 
         await create_audit_event(
             session=session,

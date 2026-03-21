@@ -73,7 +73,7 @@ class ApprovalRequest(Base):
     agent_id: Mapped[str] = mapped_column(Text, nullable=False)
     action: Mapped[str] = mapped_column(Text, nullable=False)
     resource: Mapped[str] = mapped_column(Text, nullable=False)
-    context: Mapped[dict | None] = mapped_column(JSONType, nullable=True)  # type: ignore[assignment]
+    context: Mapped[dict[str, object] | None] = mapped_column(JSONType, nullable=True)
     status: Mapped[str] = mapped_column(Text, default="pending")
     approver_email: Mapped[str | None] = mapped_column(Text, nullable=True)
     decision_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -92,7 +92,9 @@ class Agent(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("organizations.id"), nullable=False)
     agent_id: Mapped[str] = mapped_column(Text, nullable=False)
-    agent_metadata: Mapped[dict | None] = mapped_column("metadata", JSONType, nullable=True)
+    agent_metadata: Mapped[dict[str, object] | None] = mapped_column(
+        "metadata", JSONType, nullable=True
+    )
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -111,7 +113,7 @@ class Webhook(Base):
     secret: Mapped[str] = mapped_column(Text, nullable=False)
     events: Mapped[list[str]] = mapped_column(
         JSONType, default=lambda: ["approval.approved", "approval.rejected"]
-    )  # type: ignore[assignment]
+    )
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -130,7 +132,7 @@ class WebhookDelivery(Base):
     )
     org_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     event: Mapped[str] = mapped_column(Text, nullable=False)
-    payload: Mapped[dict] = mapped_column(JSONType, nullable=False)  # type: ignore[assignment]
+    payload: Mapped[dict[str, object]] = mapped_column(JSONType, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -153,7 +155,7 @@ class AuditEvent(Base):
     decision: Mapped[str] = mapped_column(Text, nullable=False)
     policy_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     approval_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
-    payload: Mapped[dict | None] = mapped_column(JSONType, nullable=True)  # type: ignore[assignment]
+    payload: Mapped[dict[str, object] | None] = mapped_column(JSONType, nullable=True)
     prev_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     entry_hash: Mapped[str] = mapped_column(Text, nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(

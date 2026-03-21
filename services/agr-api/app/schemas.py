@@ -30,7 +30,7 @@ class EvaluateRequest(BaseModel):
 
     @field_validator("context")
     @classmethod
-    def context_size_limit(cls, v: dict) -> dict:
+    def context_size_limit(cls, v: dict[str, object]) -> dict[str, object]:
         if len(v) > 50:
             raise ValueError("context must have at most 50 keys.")
         return v

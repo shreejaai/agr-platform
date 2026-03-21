@@ -19,7 +19,7 @@ for _p in Path(__file__).resolve().parents:
         _agr_core = str(_candidate)
         break
 sys.path.insert(0, _agr_core or "/packages/agr-core")
-from policy_engine import EvaluationResult, evaluate_policies  # noqa: E402
+from policy_engine import EvaluationResult, evaluate_policies  # type: ignore[import-not-found]  # noqa: E402, I001
 
 logger = logging.getLogger(__name__)
 

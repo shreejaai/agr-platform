@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 AGR_PUBLIC_KEY_B64 = "m3HWC3YbeihSPYQ84JfzjpF03krhI0B3GOKNwHle2/M="
 
 
-def validate_license(license_key: str) -> dict:
+def validate_license(license_key: str) -> dict[str, object]:
     """Validate a license key. Returns the decoded payload dict.
 
     Raises RuntimeError with a human-readable message if:
@@ -84,7 +84,7 @@ def validate_license(license_key: str) -> dict:
         except InvalidSignature as exc:
             raise ValueError("signature verification failed") from exc
 
-        payload: dict = json.loads(payload_bytes)
+        payload: dict[str, object] = json.loads(payload_bytes)
 
     except RuntimeError:
         raise
@@ -92,7 +92,7 @@ def validate_license(license_key: str) -> dict:
         raise RuntimeError(f"Invalid AGR license key: {exc}") from exc
 
     # Check expiry
-    expiry_str: str = payload.get("expiry", "")
+    expiry_str = str(payload.get("expiry", ""))
     try:
         expiry = date.fromisoformat(expiry_str)
     except ValueError as exc:
