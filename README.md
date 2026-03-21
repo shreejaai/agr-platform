@@ -230,7 +230,7 @@ See [`.env.example`](.env.example) for the full reference.
 
 | Plan | Monthly evals | Price |
 |---|---|---|
-| Developer | 10,000 | Free |
+| Developer | 100/week | Free |
 | Startup | 1,000,000 | $49/mo |
 | Business | Unlimited | $199/mo |
 | Enterprise | Unlimited | Custom |
