@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     clerk_secret_key: str = ""
     clerk_publishable_key: str = ""
 
+    # CORS — restrict to known dashboard origin in production.
+    # Use ["*"] only for development. On-prem: set to ["https://your-dashboard-domain.com"]
+    cors_origins: list[str] = ["*"]
+
     # Deployment mode
     # "saas"    — multi-tenant, Clerk-managed orgs, hosted by Shreeja AI
     # "onprem"  — single-tenant, license-key auth, self-hosted by client

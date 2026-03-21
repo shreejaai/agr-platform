@@ -17,12 +17,19 @@ router = APIRouter(prefix="/v1")
 _VALID_EVENTS = frozenset(["approval.approved", "approval.rejected"])
 
 
-def _to_response(wh: Webhook) -> WebhookResponse:
+_SECRET_PLACEHOLDER = "agr_wh_••••••••"
+
+
+def _to_response(wh: Webhook, reveal_secret: bool = False) -> WebhookResponse:
+    """Convert a Webhook model to a response schema.
+
+    Secret is masked on all read endpoints — only revealed once on creation.
+    """
     return WebhookResponse(
         id=str(wh.id),
         org_id=str(wh.org_id),
         url=wh.url,
-        secret=wh.secret,
+        secret=wh.secret if reveal_secret else _SECRET_PLACEHOLDER,
         events=list(wh.events) if wh.events else [],
         active=wh.active,
         created_at=wh.created_at,
@@ -56,7 +63,7 @@ async def create_webhook(
     session.add(wh)
     await session.flush()
     await session.refresh(wh)
-    return _to_response(wh)
+    return _to_response(wh, reveal_secret=True)  # only time the secret is shown
 
 
 @router.get("/webhooks", response_model=list[WebhookResponse])

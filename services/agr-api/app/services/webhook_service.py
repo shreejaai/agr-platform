@@ -25,10 +25,10 @@ from typing import TYPE_CHECKING
 import httpx
 from sqlalchemy import select
 
+from app.models import Webhook, WebhookDelivery
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.models import Webhook, WebhookDelivery
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,6 @@ def _sign_payload(secret: str, timestamp: int, body: str) -> str:
 
 
 async def fire_approval_webhook(
-    session: AsyncSession,
     org_id: uuid.UUID,
     event: str,
     approval_id: uuid.UUID,
@@ -56,21 +55,11 @@ async def fire_approval_webhook(
 ) -> None:
     """Load active webhooks for the org and fire the event payload to each URL.
 
+    Opens its own DB session — safe to call as a BackgroundTask after the
+    request session has already committed and closed.
     Records every delivery attempt in webhook_deliveries.
-    Called as a BackgroundTask — errors are logged, never re-raised.
     """
-    result = await session.execute(
-        select(Webhook).where(
-            Webhook.org_id == org_id,
-            Webhook.active.is_(True),
-        )
-    )
-    webhooks = result.scalars().all()
-
-    matching = [wh for wh in webhooks if isinstance(wh.events, list) and event in wh.events]
-
-    if not matching:
-        return
+    from app.database import async_session_factory
 
     payload: dict[str, object] = {
         "event": event,
@@ -85,33 +74,52 @@ async def fire_approval_webhook(
     body = json.dumps(payload, default=str)
     timestamp = int(time.time())
 
-    async with httpx.AsyncClient(timeout=_WEBHOOK_TIMEOUT) as client:
-        for wh in matching:
-            sig = _sign_payload(str(wh.secret), timestamp, body)
-            headers = {
-                "Content-Type": "application/json",
-                "X-AGR-Signature": f"t={timestamp},v1={sig}",
-                "X-AGR-Event": event,
-            }
-
-            delivery = WebhookDelivery(
-                id=uuid.uuid4(),
-                webhook_id=wh.id,
-                org_id=org_id,
-                event=event,
-                payload=payload,
+    try:
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(Webhook).where(
+                    Webhook.org_id == org_id,
+                    Webhook.active.is_(True),
+                )
             )
-            session.add(delivery)
-            await session.flush()
+            webhooks = result.scalars().all()
+            matching = [wh for wh in webhooks if isinstance(wh.events, list) and event in wh.events]
 
-            status, http_status, last_error, attempts = await _deliver_with_retry(
-                client, wh.id, str(wh.url), body, headers
-            )
+            if not matching:
+                return
 
-            delivery.status = status
-            delivery.http_status = http_status
-            delivery.last_error = last_error
-            delivery.attempts = attempts
+            async with httpx.AsyncClient(timeout=_WEBHOOK_TIMEOUT) as client:
+                for wh in matching:
+                    sig = _sign_payload(str(wh.secret), timestamp, body)
+                    headers = {
+                        "Content-Type": "application/json",
+                        "X-AGR-Signature": f"t={timestamp},v1={sig}",
+                        "X-AGR-Event": event,
+                    }
+
+                    delivery = WebhookDelivery(
+                        id=uuid.uuid4(),
+                        webhook_id=wh.id,
+                        org_id=org_id,
+                        event=event,
+                        payload=payload,
+                    )
+                    session.add(delivery)
+                    await session.flush()
+
+                    status, http_status, last_error, attempts = await _deliver_with_retry(
+                        client, wh.id, str(wh.url), body, headers
+                    )
+
+                    delivery.status = status
+                    delivery.http_status = http_status
+                    delivery.last_error = last_error
+                    delivery.attempts = attempts
+                    await session.flush()
+
+            await session.commit()
+    except Exception as exc:
+        logger.error("fire_approval_webhook failed for org %s event %s: %s", org_id, event, exc)
 
 
 async def retry_webhook_delivery(

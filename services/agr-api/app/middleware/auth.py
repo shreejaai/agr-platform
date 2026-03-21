@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 UNPROTECTED_PATHS = {
     "/health",
+    "/health/ready",
     "/docs",
     "/openapi.json",
     "/redoc",

@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
     from app.models import Organization
 
+from sqlalchemy import or_
+
 from app.database import get_session
 from app.schemas import ErrorResponse, EvaluateRequest, EvaluateResponse
 from app.services.approval_service import create_approval_request
@@ -49,23 +51,29 @@ async def evaluate(
     org_id: uuid.UUID = request.state.org_id
 
     # -------------------------------------------------------------------------
-    # Weekly reset — if the current week has expired, reset eval_count to 0
+    # Weekly reset — atomic single UPDATE prevents concurrent reset races (C2+C4)
     # -------------------------------------------------------------------------
     now_utc = datetime.now(UTC)
-    if org.eval_limit > 0 and (
-        org.eval_week_start is None
-        or now_utc - org.eval_week_start.replace(tzinfo=UTC) >= timedelta(days=7)
-    ):
+    week_threshold = now_utc - timedelta(days=7)
+
+    if org.eval_limit > 0:
         from app.models import Organization as OrgModel
 
-        await session.execute(
+        reset_result = await session.execute(
             sa_update(OrgModel)
-            .where(OrgModel.id == org_id)
+            .where(
+                OrgModel.id == org_id,
+                or_(
+                    OrgModel.eval_week_start.is_(None),
+                    OrgModel.eval_week_start < week_threshold,
+                ),
+            )
             .values(eval_count=0, eval_week_start=now_utc)
+            .execution_options(synchronize_session=False)
         )
-        await session.flush()
-        org.eval_count = 0
-        org.eval_week_start = now_utc
+        if reset_result.rowcount > 0:
+            org.eval_count = 0
+            org.eval_week_start = now_utc
 
     # -------------------------------------------------------------------------
     # Rate limit — Redis INCR (fast path); falls back to DB check if Redis down

@@ -60,6 +60,11 @@ async def _load_pending(
             status_code=409,
             detail=f"Approval request already resolved with status '{approval.status}'.",
         )
+    expires = approval.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=UTC)
+    if datetime.now(UTC) > expires:
+        raise HTTPException(status_code=410, detail="Approval request has expired.")
     return approval
 
 
@@ -179,6 +184,15 @@ async def decide_via_email_post(
             media_type="text/html",
             status_code=200,
         )
+    expires = approval.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=UTC)
+    if datetime.now(UTC) > expires:
+        return Response(
+            content=_html_page("This approval link has expired.", "error"),
+            media_type="text/html",
+            status_code=410,
+        )
 
     approval.status = decision
     approval.decision_at = datetime.now(UTC)
@@ -201,7 +215,6 @@ async def decide_via_email_post(
 
     background_tasks.add_task(
         fire_approval_webhook,
-        session,
         approval.org_id,
         f"approval.{decision}",
         approval.id,
@@ -275,7 +288,6 @@ async def decide_approval(
 
     background_tasks.add_task(
         fire_approval_webhook,
-        session,
         org_id,
         f"approval.{body.decision}",
         approval.id,
@@ -320,7 +332,6 @@ async def approve_request(
 
     background_tasks.add_task(
         fire_approval_webhook,
-        session,
         org_id,
         "approval.approved",
         approval.id,
@@ -365,7 +376,6 @@ async def reject_request(
 
     background_tasks.add_task(
         fire_approval_webhook,
-        session,
         org_id,
         "approval.rejected",
         approval.id,

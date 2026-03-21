@@ -13,12 +13,19 @@ from sqlalchemy import func, select
 from app.config import settings
 from app.database import async_session_factory
 from app.middleware.auth import AuthMiddleware
+from app.middleware.logging_mw import RequestIDFormatter, RequestLoggingMiddleware
 from app.models import Organization
 from app.routes import agents, approvals, audit, clerk, evaluate, health, org, policies, webhooks
 
+# Structured logging with request_id injected by RequestIDFormatter
+_handler = logging.StreamHandler()
+_handler.setFormatter(
+    RequestIDFormatter("%(asctime)s [%(request_id)s] %(name)s %(levelname)s %(message)s")
+)
 logging.basicConfig(
     level=logging.INFO if settings.env == "production" else logging.DEBUG,
-    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    handlers=[_handler],
+    force=True,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,12 +93,13 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.add_middleware(AuthMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(health.router)
 app.include_router(evaluate.router)
