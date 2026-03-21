@@ -52,9 +52,7 @@ class AuditTrailCompliancePlugin(CompliancePlugin):
 
         # SOC2 CC6.1 — action must describe a specific operation (not empty/wildcard)
         action_ok = bool(
-            ctx.action
-            and ctx.action != "*"
-            and not re.match(r"^[\*\?]+$", ctx.action)
+            ctx.action and ctx.action != "*" and not re.match(r"^[\*\?]+$", ctx.action)
         )
         findings.append(
             ComplianceFinding(

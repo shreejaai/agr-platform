@@ -116,9 +116,7 @@ async def test_import_invalid_cedar_returns_error(
     response = await client.post(
         "/v1/policies/import",
         json={
-            "policies": [
-                {"name": "Bad policy", "level": "org", "cedar_rule": "not valid cedar"}
-            ]
+            "policies": [{"name": "Bad policy", "level": "org", "cedar_rule": "not valid cedar"}]
         },
         headers=auth_headers,
     )
@@ -151,9 +149,7 @@ async def test_export_active_only(
     client: AsyncClient,
     auth_headers: dict[str, str],
 ) -> None:
-    response = await client.get(
-        "/v1/policies/export?active_only=true", headers=auth_headers
-    )
+    response = await client.get("/v1/policies/export?active_only=true", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert all(p["active"] for p in data["policies"])

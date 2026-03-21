@@ -1,6 +1,5 @@
 """Unit tests for the risk scoring engine."""
 
-
 from app.services.risk_service import RiskResult, compute_risk_score
 
 

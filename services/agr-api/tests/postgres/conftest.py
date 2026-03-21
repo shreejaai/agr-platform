@@ -134,7 +134,12 @@ async def pg_org_b(pg_session: AsyncSession) -> dict[str, str]:
             INSERT INTO organizations (id, name, slug, plan, api_key, eval_count, eval_limit)
             VALUES (:id, :name, :slug, 'developer', :api_key, 0, 1000)
         """),
-        {"id": org_id, "name": "PG Test Org B", "slug": f"pg-test-b-{org_id[:8]}", "api_key": api_key},
+        {
+            "id": org_id,
+            "name": "PG Test Org B",
+            "slug": f"pg-test-b-{org_id[:8]}",
+            "api_key": api_key,
+        },
     )
     await pg_session.flush()
     return {"id": org_id, "api_key": api_key}
