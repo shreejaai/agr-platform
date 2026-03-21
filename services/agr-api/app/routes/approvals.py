@@ -220,7 +220,9 @@ async def decide_via_email_post(
             status_code=400,
         )
     result = await session.execute(
-        select(ApprovalRequest).where(ApprovalRequest.id == approval_uuid)
+        select(ApprovalRequest)
+        .where(ApprovalRequest.id == approval_uuid)
+        .with_for_update()  # serialize concurrent email-link clicks to prevent double-decision
     )
     approval = result.scalar_one_or_none()
     if not approval:

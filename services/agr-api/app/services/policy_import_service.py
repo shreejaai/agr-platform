@@ -120,6 +120,17 @@ async def import_policies(
     results: list[PolicyImportResult] = []
     created = updated = skipped = errors = 0
 
+    # Reject duplicate names within the import list itself — the second entry
+    # would silently shadow the first since existing_by_name is keyed by name.
+    seen_names: set[str] = set()
+    for item in req.policies:
+        if item.name in seen_names:
+            raise ValueError(
+                f"Duplicate policy name in import list: '{item.name}'. "
+                "Each policy name must be unique within a single import request."
+            )
+        seen_names.add(item.name)
+
     # Pre-load existing policies by name (needed for skip and overwrite detection)
     existing_by_name: dict[str, Policy] = {}
     stmt = select(Policy).where(Policy.org_id == org_id)

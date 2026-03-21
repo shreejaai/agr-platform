@@ -142,6 +142,7 @@ async def delete_webhook(
     if not wh:
         raise HTTPException(status_code=404, detail="Webhook not found.")
     await session.delete(wh)
+    await session.flush()
 
 
 def _delivery_to_response(d: WebhookDelivery) -> WebhookDeliveryResponse:
