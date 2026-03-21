@@ -1,8 +1,18 @@
+import re
 import urllib.parse
 import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
+
+# L5: strip null bytes and ASCII control characters from free-text fields.
+# Null bytes crash some logging systems; control chars can confuse log parsers
+# and policy evaluators. Non-breaking — valid agent IDs are never control chars.
+_CTRL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _strip_ctrl(v: str) -> str:
+    return _CTRL_CHARS.sub("", v)
 
 
 class EvaluateRequest(BaseModel):
@@ -12,6 +22,11 @@ class EvaluateRequest(BaseModel):
     # M6: limit context to 50 keys to prevent DoS via huge payloads
     context: dict[str, object] = Field(default_factory=dict)
     approver_email: str | None = Field(default=None, max_length=256)
+
+    @field_validator("agent_id", "action", "resource")
+    @classmethod
+    def strip_control_chars(cls, v: str) -> str:
+        return _strip_ctrl(v)
 
     @field_validator("context")
     @classmethod
@@ -30,6 +45,36 @@ class EvaluateResponse(BaseModel):
     eval_id: str
 
 
+def _validate_cedar_rule(rule: str) -> str:
+    """L6: Basic Cedar policy structure validation.
+
+    Full semantic validation requires the Cedar CLI (not yet wired in).
+    These checks catch the most common authoring mistakes before they
+    reach the policy evaluator and produce confusing 'permit everything'
+    or 'deny everything' behaviour.
+    """
+    stripped = rule.strip()
+    if not stripped:
+        raise ValueError("Cedar rule cannot be empty.")
+    lower = stripped.lower()
+    if not (lower.startswith("permit") or lower.startswith("forbid")):
+        raise ValueError("Cedar rule must start with 'permit' or 'forbid'.")
+    if not stripped.rstrip().endswith(";"):
+        raise ValueError("Cedar rule must end with ';'.")
+    # Balanced parentheses
+    depth = 0
+    for ch in stripped:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if depth < 0:
+            raise ValueError("Cedar rule has unmatched closing parenthesis.")
+    if depth != 0:
+        raise ValueError("Cedar rule has unclosed parenthesis.")
+    return rule
+
+
 class PolicyCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=256)
     level: str = Field(..., pattern=r"^(org|project|agent)$")
@@ -37,11 +82,23 @@ class PolicyCreate(BaseModel):
     project_id: uuid.UUID | None = None
     agent_id: str | None = None
 
+    @field_validator("cedar_rule")
+    @classmethod
+    def validate_cedar(cls, v: str) -> str:
+        return _validate_cedar_rule(v)
+
 
 class PolicyUpdate(BaseModel):
     cedar_rule: str | None = None
     active: bool | None = None
     name: str | None = None
+
+    @field_validator("cedar_rule")
+    @classmethod
+    def validate_cedar(cls, v: str | None) -> str | None:
+        if v is not None:
+            _validate_cedar_rule(v)
+        return v
 
 
 class PolicyResponse(BaseModel):
