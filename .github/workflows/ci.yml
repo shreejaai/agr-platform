@@ -23,6 +23,15 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
     env:
       DATABASE_URL: postgresql+asyncpg://agr:password@localhost:5432/agr_dev
       REDIS_URL: redis://localhost:6379
@@ -46,6 +55,11 @@ jobs:
           ruff check .
           ruff format --check .
 
+      - name: Type-check
+        run: |
+          cd services/agr-api
+          python -m mypy app/
+
       - name: Unit tests
         run: |
           cd services/agr-api
@@ -55,6 +69,27 @@ jobs:
         run: |
           cd services/agr-api
           python -m pytest tests/integration -v
+
+  test-python-sdk:
+    name: Python SDK — lint & type-check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e packages/agr-sdk-python httpx
+
+      - name: Lint
+        run: ruff check packages/agr-sdk-python/
+
+      - name: Type-check
+        run: python -m mypy packages/agr-sdk-python/agr/ --ignore-missing-imports
 
   build-dashboard:
     name: Build Angular Dashboard
@@ -66,7 +101,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4.3.0
         with:
-          node-version: "24"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: apps/agr-dashboard/package-lock.json
 
@@ -97,7 +132,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4.3.0
         with:
-          node-version: "24"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: packages/agr-sdk-ts/package-lock.json
 
@@ -118,9 +153,8 @@ jobs:
         working-directory: packages/agr-sdk-ts
 
   # ── PostgreSQL integration tests ──────────────────────────────────────────
-  # Runs against a real PostgreSQL 16 instance with all 13 migrations applied.
-  # continue-on-error: true — these tests require Docker services; failures are
-  # reported but do not block the publish step.
+  # Runs against a real PostgreSQL 16 instance with all 15 migrations applied.
+  # continue-on-error: true — failures are reported but do not block publish.
   test-postgres:
     name: PostgreSQL integration tests
     runs-on: ubuntu-latest
@@ -164,8 +198,7 @@ jobs:
   # Images are private (packages visibility set to private in repo settings).
   #
   # Required secrets (set in repo Settings → Secrets → Actions):
-  #   GHCR_TOKEN — a GitHub PAT with packages:write scope
-  #                (GITHUB_TOKEN also works for same-repo packages)
+  #   CLERK_PUBLISHABLE_KEY — Clerk frontend publishable key (baked into dashboard image)
 
   publish:
     name: Publish images to ghcr.io
@@ -225,4 +258,3 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/agr-dashboard:latest
             ghcr.io/${{ github.repository_owner }}/agr-dashboard:${{ steps.sha.outputs.short }}
-

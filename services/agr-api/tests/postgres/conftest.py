@@ -57,6 +57,8 @@ _MIGRATION_FILES = [
     "011_indexes.sql",
     "012_token_version.sql",
     "013_status_check.sql",
+    "014_audit_sequence_per_org.sql",
+    "015_audit_agent_index.sql",
 ]
 
 
