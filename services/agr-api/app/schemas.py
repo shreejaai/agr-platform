@@ -46,6 +46,7 @@ class EvaluateResponse(BaseModel):
     risk_score: int | None = None
     risk_level: str | None = None
     risk_factors: dict[str, int] | None = None
+    compliance_findings: list[dict[str, object]] | None = None
 
 
 def _validate_cedar_rule(rule: str) -> str:
