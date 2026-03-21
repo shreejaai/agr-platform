@@ -122,6 +122,9 @@ class ComplianceRegistry:
                 findings = await plugin.check(ctx)
                 all_findings.extend(findings)
             except Exception as exc:
+                # M9: re-raise process-terminating signals — never swallow them
+                if isinstance(exc, SystemExit | KeyboardInterrupt):
+                    raise
                 logger.warning("Compliance plugin %s raised (skipping): %s", plugin.name, exc)
 
         return ComplianceResult(findings=all_findings)

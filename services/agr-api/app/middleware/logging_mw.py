@@ -55,18 +55,17 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         try:
             response = await call_next(request)
-        except Exception:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            response.headers["X-Request-ID"] = rid
+            logging.getLogger("agr.access").info(
+                "%s %s %d %.1fms",
+                request.method,
+                request.url.path,
+                response.status_code,
+                elapsed_ms,
+            )
+            return response
+        finally:
+            # M6: always reset ContextVar — even if call_next raises, so stale
+            # request_id never leaks into subsequent requests on the same task
             _request_id_ctx.reset(token)
-            raise
-
-        elapsed_ms = (time.perf_counter() - start) * 1000
-        response.headers["X-Request-ID"] = rid
-        logging.getLogger("agr.access").info(
-            "%s %s %d %.1fms",
-            request.method,
-            request.url.path,
-            response.status_code,
-            elapsed_ms,
-        )
-        _request_id_ctx.reset(token)
-        return response

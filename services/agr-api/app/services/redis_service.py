@@ -132,16 +132,32 @@ async def set_cached_eval(
         logger.debug("Cache SET error: %s", exc)
 
 
+_SCAN_BATCH_SIZE = 500  # keys per DEL call — prevents single huge command
+
+
 async def invalidate_org_eval_cache(org_id: UUID) -> None:
-    """Delete all cached evaluations for an org. Called on every policy mutation."""
+    """Delete all cached evaluations for an org. Called on every policy mutation.
+
+    L4: deletes in batches to avoid a single DEL with thousands of keys
+    (which would block the Redis event loop for the duration).
+    """
     r = _get_redis()
     if r is None:
         return
     try:
-        keys: list[str] = [k async for k in r.scan_iter(f"eval:{org_id}:*")]
-        if keys:
-            await r.delete(*keys)
-            logger.debug("Invalidated %d cache keys for org %s", len(keys), org_id)
+        batch: list[str] = []
+        total = 0
+        async for key in r.scan_iter(f"eval:{org_id}:*"):
+            batch.append(key)
+            if len(batch) >= _SCAN_BATCH_SIZE:
+                await r.unlink(*batch)  # UNLINK is async delete (non-blocking)
+                total += len(batch)
+                batch = []
+        if batch:
+            await r.unlink(*batch)
+            total += len(batch)
+        if total:
+            logger.debug("Invalidated %d cache keys for org %s", total, org_id)
     except Exception as exc:
         logger.debug("Cache invalidation error: %s", exc)
 

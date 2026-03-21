@@ -40,7 +40,31 @@ class Settings(BaseSettings):
     risk_thresholds_approval_max: int = 70
     risk_scoring_enabled: bool = True
 
+    # Webhook delivery — configurable timeout per attempt (seconds)
+    webhook_timeout: float = 10.0
+
     model_config = {"env_file": ".env", "extra": "ignore"}
+
+    def validate_production_settings(self) -> None:
+        """Raise RuntimeError for dangerous defaults that must not reach production.
+
+        Called at app startup in main.py lifespan so the process refuses to
+        start rather than silently running with insecure config.
+        """
+        if self.env == "production":
+            # S2: a predictable secret_key lets attackers forge approval tokens
+            if "dev-secret-key" in self.secret_key:
+                raise RuntimeError(
+                    "SECRET_KEY must be changed for production. "
+                    'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+                )
+            # M5: wildcard CORS allows any website to make credentialed requests
+            if self.cors_origins == ["*"]:
+                raise RuntimeError(
+                    "CORS_ORIGINS must be restricted in production. "
+                    "Set CORS_ORIGINS to your dashboard domain(s), e.g. "
+                    'CORS_ORIGINS=["https://dashboard.agr.dev"]'
+                )
 
 
 settings = Settings()

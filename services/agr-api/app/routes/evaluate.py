@@ -81,10 +81,14 @@ async def evaluate(
     # -------------------------------------------------------------------------
     # Rate limit — Redis INCR (fast path); falls back to DB check if Redis down
     # -------------------------------------------------------------------------
+    # H4: single rate-limit decision — rate_limit_incr returns True when the
+    # limit is hit via Redis (fast path) OR falls back to DB check when Redis
+    # is down. The secondary DB check below is the Redis-unavailable fallback:
+    # rate_limit_incr returned (False, db_count), so we check the DB value.
     rate_limited, new_count = await rate_limit_incr(org_id, org.eval_limit, org.eval_count)
 
-    if not rate_limited and org.eval_limit > 0 and org.eval_count >= org.eval_limit:
-        # Redis unavailable path: new_count == org.eval_count, check DB value
+    if not rate_limited and org.eval_limit > 0 and new_count >= org.eval_limit:
+        # Redis was unavailable (new_count == db_count); enforce limit via DB
         rate_limited = True
 
     if rate_limited:
@@ -209,6 +213,7 @@ async def evaluate(
             resource=body.resource,
             context=body.context,
             approver_email=body.approver_email,
+            background_tasks=background_tasks,  # S3: Slack fires post-commit
         )
         approval_id = str(approval.id)
         background_tasks.add_task(send_approval_email, approval)

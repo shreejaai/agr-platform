@@ -54,6 +54,11 @@ def evaluate_policies(
     start = time.perf_counter_ns()
 
     if not cedar_policies:
+        # L6: warn so ops can distinguish "no policies seeded yet" from silent deny
+        logger.warning(
+            "No active policies found for org — all actions will be DENY. "
+            "Seed default policies or create at least one policy to allow actions."
+        )
         elapsed = (time.perf_counter_ns() - start) / 1_000_000
         return EvaluationResult(
             decision="DENY",

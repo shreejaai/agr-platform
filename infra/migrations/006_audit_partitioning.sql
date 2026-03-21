@@ -89,19 +89,6 @@ ELSE
             USING (org_id = current_setting('app.current_org_id', true)::uuid)
     $pol$;
 
-    -- ────────────────────────────────────────────────────────────
-    -- 6. Migrate existing data from legacy table
-    -- ────────────────────────────────────────────────────────────
-    EXECUTE '
-        INSERT INTO audit_events
-            (id, org_id, sequence_num, event_type, agent_id, action, resource, decision,
-             policy_id, approval_id, payload, prev_hash, entry_hash, recorded_at)
-        SELECT
-            id, org_id, sequence_num, event_type, agent_id, action, resource, decision,
-            policy_id, approval_id, payload, prev_hash, entry_hash, recorded_at
-        FROM audit_events_legacy
-    ';
-
     RAISE NOTICE 'Migration 006 structural steps complete.';
 
 END IF; -- end idempotency guard
@@ -184,6 +171,33 @@ BEGIN
         d := date_trunc('month', now()) + (i || ' months')::INTERVAL;
         PERFORM create_audit_partition(EXTRACT(YEAR FROM d)::INT, EXTRACT(MONTH FROM d)::INT);
     END LOOP;
+END;
+$$;
+
+
+-- ────────────────────────────────────────────────────────────
+-- 6. Migrate existing data from legacy table into partitioned table.
+--    Must run AFTER step 5 so partitions covering the legacy rows exist.
+--    Wrapped in idempotency guard: skip if legacy table no longer exists.
+-- ────────────────────────────────────────────────────────────
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relname = 'audit_events_legacy' AND n.nspname = current_schema()
+    ) THEN
+        INSERT INTO audit_events
+            (id, org_id, sequence_num, event_type, agent_id, action, resource, decision,
+             policy_id, approval_id, payload, prev_hash, entry_hash, recorded_at)
+        SELECT
+            id, org_id, sequence_num, event_type, agent_id, action, resource, decision,
+            policy_id, approval_id, payload, prev_hash, entry_hash, recorded_at
+        FROM audit_events_legacy;
+        RAISE NOTICE 'Migration 006: data migrated from audit_events_legacy.';
+    ELSE
+        RAISE NOTICE 'Migration 006: audit_events_legacy not found — skipping data migration.';
+    END IF;
 END;
 $$;
 

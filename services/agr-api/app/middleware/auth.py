@@ -104,8 +104,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 async def set_rls_org(session: object, org_id: UUID) -> None:
-    """Set the RLS context for the current session."""
+    """Set the RLS context for the current session.
+
+    Uses a parameterized bind to prevent any SQL injection risk — even though
+    org_id is a UUID, we never interpolate directly into SQL strings.
+    """
     from sqlalchemy.ext.asyncio import AsyncSession
 
     if isinstance(session, AsyncSession):
-        await session.execute(text(f"SET LOCAL app.current_org = '{org_id}'"))
+        # S1: use bindparams — never interpolate org_id directly into SQL text
+        await session.execute(
+            text("SET LOCAL app.current_org_id = :org_id").bindparams(org_id=str(org_id))
+        )
