@@ -32,8 +32,21 @@ Cedar policy engine:
   If `cedar` binary on PATH → Cedar CLI subprocess (cedar authorize)
   Else → Python regex fallback evaluator
       ↓
-ALLOW → return immediately, agent executes
-DENY  → return immediately, agent does not execute
+ALLOW → continue below  (DENY/APPROVAL_REQUIRED is final from Cedar)
+      ↓
+Risk scoring engine (app/services/risk_service.py):
+  Computes 0-100 risk score from 5 weighted factors (action severity, context signals,
+  rate pattern, agent trust, amount/scale). Configurable thresholds (default: allow≤30,
+  approval≤70, deny>70). Can upgrade Cedar ALLOW → APPROVAL_REQUIRED or DENY.
+  Cedar DENY always wins. Disabled via RISK_SCORING_ENABLED=false.
+      ↓
+Compliance hooks (app/services/compliance_service.py):
+  Advisory only — never blocks. Runs ComplianceRegistry plugins (fail-open per plugin).
+  Built-in: AuditTrailCompliancePlugin (EU AI Act Art.13, SOC2 CC6.1, ISO42001 §8.4).
+  Findings included in response and audit payload.
+      ↓
+ALLOW             → return immediately, agent executes
+DENY              → return immediately, agent does not execute
 APPROVAL_REQUIRED → create approval_requests row in DB
                   → start Temporal workflow (if TEMPORAL_HOST configured)
                   → send Resend email with one-click approve/reject links (if RESEND_API_KEY set)
@@ -132,9 +145,14 @@ agr-platform/
 │       │   │   ├── cedar_service.py    # Load policies from DB + call policy_engine.evaluate_policies()
 │       │   │   ├── approval_service.py # Create ApprovalRequest + start Temporal workflow
 │       │   │   ├── audit_service.py    # Hash-chained append-only audit logger
+│       │   │   ├── compliance_service.py  # CompliancePlugin ABC + ComplianceRegistry (fail-open) + get_registry()
+│       │   │   ├── compliance_plugins/
+│       │   │   │   └── audit_trail_check.py  # Built-in: EU AI Act Art.13, SOC2 CC6.1, ISO42001 §8.4
 │       │   │   ├── notification_service.py # HMAC-signed email tokens + Resend email
 │       │   │   ├── org_service.py      # seed_default_policies() — 5 default Cedar rules
+│       │   │   ├── policy_import_service.py  # import_policies(), export_policies(), parse_yaml_import(), parse_cedar_raw_import()
 │       │   │   ├── redis_service.py    # Eval cache + rate limiting (atomic Redis INCR)
+│       │   │   ├── risk_service.py     # Deterministic risk scoring (0-100), 5 weighted factors, RiskResult dataclass
 │       │   │   ├── temporal_service.py # Lazy Temporal client, start/signal workflow (graceful degradation)
 │       │   │   └── webhook_service.py  # fire_approval_webhook() — HMAC-SHA256 signed POST
 │       │   ├── workflows/
@@ -386,18 +404,30 @@ RLS enabled
 ```
 Auth:    Bearer agr_sk_...
 Body:    { agent_id, action, resource, context: {}, approver_email?: str }
-Returns: { decision, reason, policy_id, approval_id, latency_ms, eval_id }
+Returns: { decision, reason, policy_id, approval_id, latency_ms, eval_id,
+           risk_score?, risk_level?, risk_factors?, compliance_findings? }
 
 Decision values:
   ALLOW             → agent may execute immediately
-  DENY              → agent must not execute
+  DENY              → agent must not execute (Cedar forbid OR risk_score > approval_max threshold)
   APPROVAL_REQUIRED → approval_request created in DB, approval_id is non-null
                       Temporal workflow started (if configured)
                       Resend email sent to approver_email (if configured)
+                      Also triggered when risk_score > allow_max threshold
 
 Rate limit: 429 when Redis eval counter >= eval_limit (non-zero). No audit event on 429.
 Redis INCR is authoritative. DB eval_count synced via BackgroundTask.
 Cache: Redis 60s TTL on ALLOW/DENY results. APPROVAL_REQUIRED is never cached.
+
+Risk scoring (when RISK_SCORING_ENABLED=true):
+  risk_score: int 0-100 (5 weighted factors)
+  risk_level: "low" | "medium" | "high"
+  risk_factors: { action_severity, context_signals, rate_pattern, agent_trust, amount_scale }
+  Cedar DENY always wins — risk score cannot override a Cedar forbid.
+
+Compliance findings (advisory — never blocks decision):
+  compliance_findings: list of { plugin, standard, rule_id, severity, message, passed }
+  null when all checks pass (no findings).
 ```
 
 ### GET /v1/policies
@@ -417,6 +447,19 @@ cedar_rule change increments version. Invalidates Redis eval cache. Returns: Pol
 
 ### DELETE /v1/policies/{id}
 Returns: 204. Hard delete. Invalidates Redis eval cache.
+
+### POST /v1/policies/import
+Body: `{ policies: [PolicyImportItem], dry_run?: bool, overwrite?: bool }`
+Bulk import policies from JSON. `dry_run=true` validates without persisting.
+`overwrite=true` updates existing policies matched by name. Default: skip duplicates.
+Returns: `{ dry_run, total, created, updated, skipped, errors, results: [{ name, status, policy_id?, error? }] }`
+Also accepts YAML (`Content-Type: application/x-yaml`) and raw Cedar text (`Content-Type: text/plain`).
+**IMPORTANT**: Route declared BEFORE `/{policy_id}` in policies.py to avoid UUID parse conflict.
+
+### GET /v1/policies/export
+Query params: `active_only=true|false` (default false)
+Returns JSON array of all org policies (same format as import input).
+**IMPORTANT**: Route declared BEFORE `/{policy_id}` in policies.py to avoid UUID parse conflict.
 
 ### GET /v1/approvals
 Query params: `status=pending|approved|rejected`
@@ -631,10 +674,14 @@ python -m app.workers.approval_worker
 
 All models in one file:
 - `EvaluateRequest` — agent_id, action, resource, context, approver_email?
-- `EvaluateResponse` — decision, reason, policy_id, approval_id, latency_ms, eval_id
+- `EvaluateResponse` — decision, reason, policy_id, approval_id, latency_ms, eval_id, risk_score?, risk_level?, risk_factors?, compliance_findings?
 - `PolicyCreate` — name, level (org|project|agent), cedar_rule, project_id?, agent_id?
 - `PolicyUpdate` — cedar_rule?, active?, name?
 - `PolicyResponse` — full policy fields
+- `PolicyImportItem` — name, level, cedar_rule, project_id?, agent_id?, active (default True)
+- `PolicyImportRequest` — policies (list[PolicyImportItem], min 1), dry_run (bool), overwrite (bool)
+- `PolicyImportResult` — name, status ("created"|"updated"|"skipped"|"error"), policy_id?, error?
+- `PolicyImportResponse` — dry_run, total, created, updated, skipped, errors, results
 - `ApprovalResponse` — id, org_id, agent_id, action, resource, context, status, approver_email, decision_at, expires_at, created_at
 - `ApprovalDecisionRequest` — decided_by (default "api_user"), reason (default "")
 - `ApprovalDecideRequest` — decision ("approved"|"rejected"), decided_by, reason
@@ -670,6 +717,10 @@ clerk_publishable_key: str # ""  (for future dashboard auth)
 deployment_mode: str       # "saas" (default) | "onprem" — controls license check + bootstrap + auth error messages
 license_key: str           # ""  — required when deployment_mode=="onprem"; Ed25519-signed token issued by Shreeja AI
 onprem_org_name: str       # "My Organization" — org name shown in dashboard/logs for auto-bootstrapped onprem org
+# Risk scoring (Feature: risk-scoring-engine)
+risk_thresholds_allow_max: int     # 30  — scores ≤ this → ALLOW (unchanged)
+risk_thresholds_approval_max: int  # 70  — scores > allow_max and ≤ this → APPROVAL_REQUIRED; above → DENY
+risk_scoring_enabled: bool         # True — set False to disable risk scoring entirely
 ```
 
 ---
@@ -775,6 +826,29 @@ pytest services/agr-api/tests/unit -v                 # unit only (no DB)
 pytest services/agr-api/tests/integration -v          # integration (SQLite)
 pytest services/agr-api/tests/integration/test_evaluate.py -v  # single file
 ```
+
+### PostgreSQL Integration Tests (`tests/postgres/`)
+
+Real PostgreSQL 16 tests — all 13 migrations applied before suite runs.
+Requires `PG_TEST_URL` env var (e.g., `postgresql+asyncpg://agr_test:agr_test_password@localhost:5433/agr_test`).
+Tests auto-skip if PostgreSQL is unavailable (not a failure).
+
+```bash
+# Start test postgres
+docker-compose -f docker-compose.test.yml up -d postgres-test
+
+# Run postgres tests
+PG_TEST_URL=postgresql+asyncpg://agr_test:agr_test_password@localhost:5433/agr_test \
+  pytest services/agr-api/tests/postgres/ -v
+```
+
+Test files:
+- `test_rls.py` — org isolation via SET LOCAL app.current_org_id (4 tests)
+- `test_audit_partitioning.py` — monthly partition routing, future partitions (5 tests)
+- `test_jsonb_operations.py` — JSONB `->>`/`@>` operators on agents/approvals/audit (4 tests)
+- `test_constraints.py` — CHECK constraints, UNIQUE, CASCADE DELETE, audit FK absence (6 tests)
+
+`conftest.py` fixtures: `apply_migrations` (session-scoped), `pg_session` (auto-rollback), `pg_org`, `pg_org_b`
 
 ---
 
@@ -1550,6 +1624,162 @@ All 30 identified production issues resolved across two PRs:
 - `idx_audit_org_time` — `audit_events(org_id, recorded_at DESC)`
 - `idx_approvals_org_status` — `approval_requests(org_id, status)`
 - `idx_delivery_webhook_time` — `webhook_deliveries(webhook_id, created_at DESC)`
+
+---
+
+## Risk Scoring Engine (`app/services/risk_service.py`)
+
+Deterministic 0–100 risk scorer with no LLM dependency. Runs after Cedar evaluation.
+
+### Weights
+```
+action_severity  0.35  — delete/drop/destroy/exec/kill/rm/wipe → 100; write/create/deploy → 60; read → 10
+context_signals  0.25  — environment=production → +40; dry_run=true → -20; role=admin → +20; etc.
+rate_pattern     0.15  — eval_count / eval_limit fraction (0 when eval_limit=0)
+agent_trust      0.15  — "untrusted"|"unknown" → 80; "trusted" → 10; else → 40
+amount_scale     0.10  — "all"/"everything"/"entire"/"bulk" in resource → 80; else → 0
+```
+
+### Decision upgrade logic (Cedar DENY always wins)
+```
+risk_score > risk_thresholds_approval_max (default 70) → ALLOW upgraded to DENY
+risk_score > risk_thresholds_allow_max   (default 30) → ALLOW upgraded to APPROVAL_REQUIRED
+Cedar DENY stays DENY regardless of risk score.
+```
+
+### RiskResult dataclass
+```python
+@dataclass
+class RiskResult:
+    score: int          # 0-100
+    level: str          # "low" | "medium" | "high"
+    factors: dict[str, int]  # per-factor scores before weighting
+```
+
+### Config
+```
+RISK_SCORING_ENABLED=true       # default: true
+RISK_THRESHOLDS_ALLOW_MAX=30    # default: 30
+RISK_THRESHOLDS_APPROVAL_MAX=70 # default: 70
+```
+
+---
+
+## Compliance Hooks Framework (`app/services/compliance_service.py`)
+
+Advisory-only plugin system. Findings never modify the decision.
+
+### Key types
+```python
+class CompliancePlugin(ABC):
+    @property
+    @abstractmethod
+    def name(self) -> str: ...
+    @abstractmethod
+    async def check(self, ctx: ComplianceContext) -> list[ComplianceFinding]: ...
+
+@dataclass
+class ComplianceContext:
+    org_id: str; agent_id: str; action: str; resource: str
+    context: dict; decision: str; risk_score: int; risk_level: str
+
+@dataclass
+class ComplianceFinding:
+    plugin: str; standard: str; rule_id: str; severity: str  # "info"|"warning"|"violation"
+    message: str; passed: bool
+```
+
+### Registry pattern
+```python
+registry = get_registry()           # module-level singleton, created on first call
+registry.register(MyPlugin())        # register in FastAPI lifespan
+reset_registry()                     # tests only — creates fresh singleton
+```
+Fail-open: exceptions from individual plugins are caught and logged; other plugins still run.
+
+### Built-in plugin: `AuditTrailCompliancePlugin`
+Location: `app/services/compliance_plugins/audit_trail_check.py`
+
+| Rule ID | Standard | Check |
+|---|---|---|
+| EU-AI-ACT-ART13-AGENT-ID | EU AI Act Art.13 | agent_id is descriptive (len > 3, no "unknown") |
+| SOC2-CC6.1-ACTION-SPECIFIC | SOC2 CC6.1 | action is specific (not "*" or "all") |
+| ISO42001-8.4-RESOURCE-IDENTIFIED | ISO 42001 §8.4 | resource is non-empty and identified |
+| EU-AI-ACT-ART13-CONTEXT | EU AI Act Art.13 | context provided when decision is DENY or APPROVAL_REQUIRED |
+
+### Adding a new plugin
+```python
+class MyPlugin(CompliancePlugin):
+    @property
+    def name(self) -> str:
+        return "my_plugin"
+    async def check(self, ctx: ComplianceContext) -> list[ComplianceFinding]:
+        ...
+
+# In main.py lifespan:
+get_registry().register(MyPlugin())
+```
+
+---
+
+## Policy Import/Export (`app/services/policy_import_service.py`)
+
+### Import formats
+- **JSON** (default): `Content-Type: application/json` — `{ policies: [...], dry_run: bool, overwrite: bool }`
+- **YAML**: `Content-Type: application/x-yaml` — same structure, YAML-encoded
+- **Cedar raw**: `Content-Type: text/plain` — one Cedar rule per `permit`/`forbid` block; name extracted from `// @name:` comment or auto-generated
+
+### Import behavior
+- `dry_run=true` — validates and returns what would happen, no DB writes
+- `overwrite=false` (default) — duplicates (matched by name) → status `"skipped"`
+- `overwrite=true` — duplicates → updated (cedar_rule, active); status `"updated"`
+- New policies → status `"created"`
+- Validation errors → status `"error"`, processing continues for remaining items
+
+### Export
+`GET /v1/policies/export?active_only=false` returns JSON array compatible with import input.
+
+### Route ordering critical detail
+```python
+# policies.py — import/export MUST be declared BEFORE /{policy_id}
+router.post("/policies/import", ...)   # line ~N
+router.get("/policies/export", ...)    # line ~N+20
+router.get("/policies/{policy_id}", .) # line ~N+40  ← otherwise "import" hits UUID parse → 422
+```
+
+---
+
+## Demo Examples (`examples/`)
+
+```
+examples/
+├── curl/
+│   ├── 01_register_agent.sh         — register an agent
+│   ├── 02_evaluate_allow.sh          — basic ALLOW evaluation
+│   ├── 03_evaluate_deny.sh           — DENY via Cedar forbid
+│   ├── 04_approval_flow.sh           — full approval workflow
+│   ├── 05_audit_log.sh               — fetch audit log
+│   ├── 06_policy_crud.sh             — create/read/update/delete policy
+│   ├── 07_webhooks.sh                — webhook CRUD + delivery history
+│   ├── 08_policy_import_export.sh    — bulk import/export
+│   └── 09_risk_scoring.sh            — risk score in evaluate response
+├── python/
+│   ├── 01_basic_evaluate.py          — AGRClient evaluate
+│   ├── 02_approval_flow.py           — wait_for_approval
+│   ├── 03_langgraph_agent.py         — LangGraph integration
+│   ├── 04_crewai_agent.py            — CrewAI integration
+│   ├── 05_policy_import.py           — bulk import from Python
+│   └── 06_compliance_findings.py     — inspect compliance findings
+├── node/
+│   ├── 01_basic_evaluate.ts          — TypeScript SDK evaluate
+│   └── 02_approval_flow.ts           — TypeScript SDK waitForApproval
+└── policy_packs/
+    ├── fintech.yaml                   — financial services policies
+    ├── devops.yaml                    — DevOps/CI-CD policies
+    ├── healthcare_hipaa.yaml          — HIPAA compliance policies
+    ├── eu_ai_act.yaml                 — EU AI Act compliance policies
+    └── deny_all.yaml                  — lockdown: deny everything
+```
 
 ---
 
