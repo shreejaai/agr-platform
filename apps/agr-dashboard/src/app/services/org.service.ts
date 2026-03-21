@@ -9,6 +9,7 @@ export interface OrgMe {
   plan: string;
   eval_count: number;
   eval_limit: number;
+  eval_week_start: string | null;
   created_at: string;
 }
 

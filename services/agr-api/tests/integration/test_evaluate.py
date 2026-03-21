@@ -1,5 +1,7 @@
 """Integration tests for POST /v1/evaluate — the core endpoint."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from app.models import AuditEvent, Organization, Policy
 from httpx import AsyncClient
@@ -111,7 +113,11 @@ async def test_evaluate_returns_429_when_limit_exceeded(
     await db_session.execute(
         update(Organization)
         .where(Organization.id == test_org.id)
-        .values(eval_count=10000, eval_limit=10000)
+        .values(
+            eval_count=10000,
+            eval_limit=10000,
+            eval_week_start=datetime.now(UTC) - timedelta(hours=1),
+        )
     )
     await db_session.commit()
 

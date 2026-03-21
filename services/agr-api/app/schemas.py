@@ -130,6 +130,7 @@ class OrgMeResponse(BaseModel):
     plan: str
     eval_count: int
     eval_limit: int
+    eval_week_start: datetime | None = None
     created_at: datetime
 
 

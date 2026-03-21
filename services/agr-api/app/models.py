@@ -32,7 +32,8 @@ class Organization(Base):
     plan: Mapped[str] = mapped_column(Text, default="developer")
     api_key: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     eval_count: Mapped[int] = mapped_column(BigInteger, default=0)
-    eval_limit: Mapped[int] = mapped_column(BigInteger, default=10000)
+    eval_limit: Mapped[int] = mapped_column(BigInteger, default=100)
+    eval_week_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
