@@ -200,8 +200,13 @@ agr-platform/
 │       ├── 006_audit_partitioning.sql  # Convert audit_events to monthly RANGE partitions
 │       ├── 007_pg_cron_audit_partitions.sql  # pg_cron job: create next month's audit partition
 │       ├── 008_webhook_deliveries.sql  # webhook_deliveries DLQ table + RLS
-│       └── rollback/                         # Rollback scripts 001_down.sql – 008_down.sql
-├── infra/migrate.sh                    # Runs migrations 001–008 (used by docker-compose migrate service)
+│       ├── 009_agent_active.sql        # agents.active column
+│       ├── 010_eval_week.sql           # organizations.eval_week_start + eval_limit=100 default
+│       ├── 011_indexes.sql             # Composite indexes: audit org+time, approvals org+status, deliveries webhook+time
+│       ├── 012_token_version.sql       # approval_requests.token_version INTEGER DEFAULT 0
+│       ├── 013_status_check.sql        # CHECK constraint: status IN ('pending','approved','rejected','escalated')
+│       └── rollback/                         # Rollback scripts 001_down.sql – 013_down.sql
+├── infra/migrate.sh                    # Runs migrations 001–013 (used by docker-compose migrate service)
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                      # 4 jobs: lint-and-test, build-dashboard, test-ts-sdk, publish (ghcr.io on merge to main)
@@ -292,11 +297,13 @@ agent_id        TEXT NOT NULL
 action          TEXT NOT NULL
 resource        TEXT NOT NULL
 context         JSONB NULLABLE
-status          TEXT DEFAULT 'pending'  -- pending|approved|rejected
+status          TEXT DEFAULT 'pending'  -- pending|approved|rejected|escalated
+                                        -- CHECK constraint: approval_status_check (migration 013)
 approver_email  TEXT NULLABLE           -- set from EvaluateRequest.approver_email
 decision_at     TIMESTAMPTZ NULLABLE    -- set when approve/reject is called
 temporal_run_id TEXT NULLABLE           -- Temporal workflow ID (null if Temporal not configured)
 expires_at      TIMESTAMPTZ NOT NULL    -- created_at + 48h
+token_version   INTEGER NOT NULL DEFAULT 0  -- incremented on escalate; v2 email tokens embed this
 created_at      TIMESTAMPTZ
 
 Indexes: idx_approval_requests_org_id, idx_approval_requests_status (org_id, status)
@@ -1494,7 +1501,55 @@ The public key (`AGR_PUBLIC_KEY_B64` in `license.py`) is safe to bake into the i
 - **`POST /v1/approvals/{id}/escalate`** — updates `approver_email`, resends notification email. Returns 409 if not pending.
 - **`GET /v1/audit/verify`** — walks all audit events in sequence order, re-computes SHA-256 hashes, returns `{valid, total, first_invalid_sequence}`.
 - **Slack retry on failure** — `send_approval_slack()` retries 3× with exponential backoff (1s, 2s delays). Uses real HMAC tokens for approve/reject buttons.
-- **Rollback migrations** — `infra/migrations/rollback/001_down.sql` through `008_down.sql` written.
+- **Rollback migrations** — `infra/migrations/rollback/001_down.sql` through `013_down.sql` written.
+
+### Production Hardening (PRs #6 and #7 — 2026-03-21)
+
+All 30 identified production issues resolved across two PRs:
+
+**Security**
+- XSS: `html.escape()` on all user fields in approval confirm page and email HTML
+- Cross-tenant: `list_deliveries` now filters `WebhookDelivery.org_id == org_id`
+- Webhook secret masked (`agr_wh_••••••••`) on all GET responses; revealed only on POST creation
+- CORS origins configurable via `CORS_ORIGINS` env var (not hardcoded `*`)
+- Auth error JSON built with `json.dumps()` — hint text can't break JSON structure
+- Webhook URLs validated for `http`/`https` scheme only (rejects `javascript:`, `data:` etc.)
+- Email subject strips `\r\n` to prevent header injection
+
+**Race Conditions & Correctness**
+- Audit hash-chain: `SELECT FOR UPDATE` on sequence number query
+- Weekly eval reset: single atomic SQL `UPDATE ... WHERE eval_week_start < threshold`
+- Redis rate-limit seed: atomic `SET NX` replaces `exists()+set()` TOCTOU pair
+- Approval decisions: `SELECT FOR UPDATE` in `_load_pending` prevents concurrent approve race
+- Approval expiry enforced at decision time — returns 410 on expired requests
+
+**Token Security**
+- v2 email tokens include `token_version` in HMAC: `{id}:{decision}:{expires}:{version}:{sig}`
+- Escalation increments `token_version` — old approver links invalidated immediately
+- Legacy v1 tokens (4-part) still accepted for in-flight emails (backward compat)
+- Rate limit on `POST /v1/approvals/decide`: max 10 attempts per approval per 5 min
+
+**Reliability**
+- `fire_approval_webhook` opens its own DB session — safe as `BackgroundTask`
+- `escalate_approval` sends email as `BackgroundTask` — no longer blocks response
+- Webhook retry aborts immediately on permanent 4xx (401/403/404) — no wasted retries
+
+**Observability**
+- `RequestLoggingMiddleware` + `ContextVar` propagates request ID to every log line
+- `X-Request-ID` response header on every response
+- `GET /health/ready` readiness probe — returns 503 if DB or Redis is down
+
+**Validation**
+- `EvaluateRequest.context` capped at 50 keys (DoS guard)
+- Control chars (incl. null bytes) stripped from `agent_id`, `action`, `resource`
+- Basic Cedar rule structure validated: must start with `permit`/`forbid`, end with `;`, balanced parens
+- `approval_requests.status` has DB-level `CHECK` constraint (migration 013)
+- `eval_week_start` set to `datetime.now(UTC)` on org creation (Clerk + on-prem bootstrap)
+
+**DB Indexes (migration 011)**
+- `idx_audit_org_time` — `audit_events(org_id, recorded_at DESC)`
+- `idx_approvals_org_status` — `approval_requests(org_id, status)`
+- `idx_delivery_webhook_time` — `webhook_deliveries(webhook_id, created_at DESC)`
 
 ---
 
