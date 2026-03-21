@@ -13,6 +13,7 @@ import json
 import logging
 import secrets
 import uuid
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import httpx
@@ -213,6 +214,7 @@ async def clerk_webhook(
             api_key=api_key,
             eval_count=0,
             eval_limit=100,
+            eval_week_start=datetime.now(UTC),  # L3: always UTC-aware on creation
         )
         session.add(org)
         await session.flush()  # get org.id before seeding

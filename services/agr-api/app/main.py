@@ -5,6 +5,7 @@ import secrets
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -56,6 +57,7 @@ async def _onprem_bootstrap() -> None:
             api_key=api_key,
             eval_count=0,
             eval_limit=eval_limit,
+            eval_week_start=datetime.now(UTC),  # L3: always UTC-aware on creation
         )
         session.add(org_obj)
         await session.flush()

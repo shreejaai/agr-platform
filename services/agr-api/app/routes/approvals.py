@@ -19,6 +19,7 @@ from app.schemas import (
 )
 from app.services.audit_service import create_audit_event
 from app.services.notification_service import send_approval_email, verify_decision_token
+from app.services.redis_service import check_decide_rate_limit
 from app.services.temporal_service import signal_approval_workflow
 from app.services.webhook_service import fire_approval_webhook
 
@@ -181,6 +182,16 @@ async def decide_via_email_post(
             status_code=400,
         )
     approval_id_str, decision, token_ver = parsed
+
+    # M5: rate-limit this unauthenticated endpoint — max 10 attempts per
+    # approval ID per 5 minutes to block automated abuse
+    if await check_decide_rate_limit(approval_id_str):
+        return Response(
+            content=_html_page("Too many attempts. Please try again later.", "error"),
+            media_type="text/html",
+            status_code=429,
+        )
+
     try:
         approval_uuid = uuid.UUID(approval_id_str)
     except ValueError:

@@ -24,4 +24,6 @@ $PSQL -f /migrations/011_indexes.sql
 echo "  011 done"
 $PSQL -f /migrations/012_token_version.sql
 echo "  012 done"
+$PSQL -f /migrations/013_status_check.sql
+echo "  013 done"
 echo "All migrations complete."

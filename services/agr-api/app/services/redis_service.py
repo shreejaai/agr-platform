@@ -192,6 +192,30 @@ async def rate_limit_incr(
         return False, db_count
 
 
+_DECIDE_RATE_WINDOW = 300  # 5-minute window
+_DECIDE_RATE_MAX = 10  # max attempts per approval within the window
+
+
+async def check_decide_rate_limit(approval_id: str) -> bool:
+    """Return True (blocked) if too many decide attempts for this approval.
+
+    M5: Prevents automated abuse of the email one-click decide endpoint.
+    Fails open — if Redis is unavailable the request is allowed through.
+    """
+    r = _get_redis()
+    if r is None:
+        return False  # fail-open: don't block when Redis is unavailable
+    try:
+        key = f"decide_limit:{approval_id}"
+        count: int = await r.incr(key)
+        if count == 1:
+            await r.expire(key, _DECIDE_RATE_WINDOW)
+        return count > _DECIDE_RATE_MAX
+    except Exception as exc:
+        logger.debug("decide rate limit check failed (allowing through): %s", exc)
+        return False  # fail-open
+
+
 async def sync_eval_count_to_db(org_id: UUID) -> None:
     """Background task: write the current Redis eval count back to the DB.
 
