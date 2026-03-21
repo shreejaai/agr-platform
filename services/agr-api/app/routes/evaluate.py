@@ -23,6 +23,7 @@ from app.schemas import ErrorResponse, EvaluateRequest, EvaluateResponse
 from app.services.approval_service import create_approval_request
 from app.services.audit_service import create_audit_event
 from app.services.cedar_service import evaluate_request
+from app.services.compliance_service import ComplianceContext, get_registry
 from app.services.notification_service import send_approval_email
 from app.services.redis_service import (
     get_cached_eval,
@@ -179,6 +180,26 @@ async def evaluate(
                     f"Threshold is {settings.risk_thresholds_allow_max}."
                 )
 
+    # -------------------------------------------------------------------------
+    # Compliance hooks — advisory only, never blocks; fail-open on errors
+    # -------------------------------------------------------------------------
+    compliance_findings: list[dict[str, object]] | None = None
+    try:
+        comp_ctx = ComplianceContext(
+            org_id=str(org_id),
+            agent_id=body.agent_id,
+            action=body.action,
+            resource=body.resource,
+            context=body.context,
+            decision=result.decision,
+            risk_score=risk.score if risk else None,
+            risk_level=risk.level if risk else None,
+        )
+        comp_result = await get_registry().run_all(comp_ctx)
+        compliance_findings = comp_result.to_dict() if comp_result.findings else None
+    except Exception as exc:
+        logger.warning("Compliance hooks failed (ignoring): %s", exc)
+
     if result.decision == "APPROVAL_REQUIRED":
         approval = await create_approval_request(
             session=session,
@@ -198,13 +219,17 @@ async def evaluate(
         else f"TOOL_{result.decision}"
     )
 
-    risk_payload: dict[str, object] = {}
+    extra_payload: dict[str, object] = {}
     if risk is not None:
-        risk_payload = {
-            "risk_score": risk.score,
-            "risk_level": risk.level,
-            "risk_factors": risk.factors,
-        }
+        extra_payload.update(
+            {
+                "risk_score": risk.score,
+                "risk_level": risk.level,
+                "risk_factors": risk.factors,
+            }
+        )
+    if compliance_findings:
+        extra_payload["compliance_findings"] = compliance_findings
 
     await create_audit_event(
         session=session,
@@ -216,7 +241,7 @@ async def evaluate(
         decision=result.decision,
         policy_id=uuid.UUID(result.policy_id) if result.policy_id else None,
         approval_id=uuid.UUID(approval_id) if approval_id else None,
-        payload={"context": body.context, "eval_id": eval_id, **risk_payload},
+        payload={"context": body.context, "eval_id": eval_id, **extra_payload},
     )
 
     # Cache ALLOW/DENY results; sync DB eval_count in background
@@ -246,4 +271,5 @@ async def evaluate(
         risk_score=risk.score if risk else None,
         risk_level=risk.level if risk else None,
         risk_factors=risk.factors if risk else None,
+        compliance_findings=compliance_findings,
     )

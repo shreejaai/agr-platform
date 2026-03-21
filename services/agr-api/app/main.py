@@ -83,6 +83,15 @@ async def _onprem_bootstrap() -> None:
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     if settings.deployment_mode == "onprem":
         await _onprem_bootstrap()
+
+    # Register built-in compliance plugins
+    from app.services.compliance_plugins.audit_trail_check import AuditTrailCompliancePlugin
+    from app.services.compliance_service import get_registry
+
+    registry = get_registry()
+    registry.register(AuditTrailCompliancePlugin())
+    logger.info("Compliance registry ready (%d plugins)", len(registry.plugins))
+
     yield
 
 
