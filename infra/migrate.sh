@@ -14,6 +14,10 @@ $PSQL -f /migrations/004_agents_table.sql
 echo "  004 done"
 $PSQL -f /migrations/005_webhooks_table.sql
 echo "  005 done"
+$PSQL -f /migrations/006_audit_partitioning.sql
+echo "  006 done"
+$PSQL -f /migrations/007_pg_cron_audit_partitions.sql
+echo "  007 done"
 $PSQL -f /migrations/008_webhook_deliveries.sql
 echo "  008 done"
 $PSQL -f /migrations/009_agent_active.sql
