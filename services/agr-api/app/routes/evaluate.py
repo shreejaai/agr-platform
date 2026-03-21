@@ -7,13 +7,15 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from sqlalchemy import update as sa_update
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from app.models import Organization
+
+from sqlalchemy import or_
 
 from app.database import get_session
 from app.schemas import ErrorResponse, EvaluateRequest, EvaluateResponse
@@ -44,28 +46,34 @@ async def evaluate(
     response: Response,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
-) -> EvaluateResponse | Response:
+) -> EvaluateResponse:
     org: Organization = request.state.org
     org_id: uuid.UUID = request.state.org_id
 
     # -------------------------------------------------------------------------
-    # Weekly reset — if the current week has expired, reset eval_count to 0
+    # Weekly reset — atomic single UPDATE prevents concurrent reset races (C2+C4)
     # -------------------------------------------------------------------------
     now_utc = datetime.now(UTC)
-    if org.eval_limit > 0 and (
-        org.eval_week_start is None
-        or now_utc - org.eval_week_start.replace(tzinfo=UTC) >= timedelta(days=7)
-    ):
+    week_threshold = now_utc - timedelta(days=7)
+
+    if org.eval_limit > 0:
         from app.models import Organization as OrgModel
 
-        await session.execute(
+        reset_result = await session.execute(
             sa_update(OrgModel)
-            .where(OrgModel.id == org_id)
+            .where(
+                OrgModel.id == org_id,
+                or_(
+                    OrgModel.eval_week_start.is_(None),
+                    OrgModel.eval_week_start < week_threshold,
+                ),
+            )
             .values(eval_count=0, eval_week_start=now_utc)
+            .execution_options(synchronize_session=False)
         )
-        await session.flush()
-        org.eval_count = 0
-        org.eval_week_start = now_utc
+        if reset_result.rowcount > 0:
+            org.eval_count = 0
+            org.eval_week_start = now_utc
 
     # -------------------------------------------------------------------------
     # Rate limit — Redis INCR (fast path); falls back to DB check if Redis down
@@ -77,15 +85,19 @@ async def evaluate(
         rate_limited = True
 
     if rate_limited:
-        return Response(
-            content=(
-                '{"error":"eval_limit_exceeded",'
-                f'"message":"You have reached your evaluation limit of {org.eval_limit}. '
-                'Upgrade your plan for more evaluations.",'
-                '"upgrade_url":"https://agr.dev/pricing"}'
-            ),
+        # H2: raise HTTPException so response_model=EvaluateResponse is accurate
+        # FastAPI serialises HTTPException detail as {"detail": ...}; clients should
+        # check for status 429 rather than a specific body shape.
+        raise HTTPException(
             status_code=429,
-            media_type="application/json",
+            detail={
+                "error": "eval_limit_exceeded",
+                "message": (
+                    f"You have reached your evaluation limit of {org.eval_limit}. "
+                    "Upgrade your plan for more evaluations."
+                ),
+                "upgrade_url": "https://agr.dev/pricing",
+            },
         )
 
     # -------------------------------------------------------------------------

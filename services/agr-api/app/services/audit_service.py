@@ -30,12 +30,18 @@ def compute_entry_hash(
 
 
 async def get_last_audit_event(session: AsyncSession, org_id: UUID) -> AuditEvent | None:
-    """Get the most recent audit event for an org to chain hashes."""
+    """Get the most recent audit event for an org to chain hashes.
+
+    Uses SELECT FOR UPDATE to serialize concurrent audit writes for the same org,
+    preventing duplicate sequence numbers and hash chain corruption.
+    Silently ignored on SQLite (used in tests).
+    """
     result = await session.execute(
         select(AuditEvent)
         .where(AuditEvent.org_id == org_id)
         .order_by(AuditEvent.sequence_num.desc())
         .limit(1)
+        .with_for_update()
     )
     return result.scalar_one_or_none()
 

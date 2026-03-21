@@ -39,8 +39,10 @@ async def send_approval_slack(approval: ApprovalRequest) -> None:
         return
 
     # Generate real HMAC-signed tokens for one-click approve/reject URL buttons
-    approve_token = make_decision_token(str(approval.id), "approved")
-    reject_token = make_decision_token(str(approval.id), "rejected")
+    # Include token_version so escalation invalidates old Slack message links (H3)
+    token_ver = getattr(approval, "token_version", 0) or 0
+    approve_token = make_decision_token(str(approval.id), "approved", token_ver)
+    reject_token = make_decision_token(str(approval.id), "rejected", token_ver)
     approve_url = f"{settings.api_base_url}/v1/approvals/decide?token={approve_token}"
     reject_url = f"{settings.api_base_url}/v1/approvals/decide?token={reject_token}"
 

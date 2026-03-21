@@ -79,6 +79,8 @@ class ApprovalRequest(Base):
     decision_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     temporal_run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # H3: incremented on every escalation so old email tokens are immediately invalidated
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     organization: Mapped["Organization"] = relationship(back_populates="approval_requests")
@@ -107,7 +109,7 @@ class Webhook(Base):
     org_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("organizations.id"), nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     secret: Mapped[str] = mapped_column(Text, nullable=False)
-    events: Mapped[list] = mapped_column(
+    events: Mapped[list[str]] = mapped_column(
         JSONType, default=lambda: ["approval.approved", "approval.rejected"]
     )  # type: ignore[assignment]
     active: Mapped[bool] = mapped_column(Boolean, default=True)

@@ -133,8 +133,10 @@ async def test_evaluate_returns_429_when_limit_exceeded(
     )
     assert response.status_code == 429
     data = response.json()
-    assert data["error"] == "eval_limit_exceeded"
-    assert "upgrade_url" in data
+    # HTTPException wraps detail in {"detail": {...}}
+    detail = data["detail"]
+    assert detail["error"] == "eval_limit_exceeded"
+    assert "upgrade_url" in detail
 
 
 @pytest.mark.asyncio

@@ -174,9 +174,9 @@ async def rate_limit_incr(
 
     try:
         key = _rate_key(org_id)
-        # Seed from DB on first encounter so the counter is accurate
-        if not await r.exists(key):
-            await r.set(key, db_count, ex=_RATE_KEY_TTL)
+        # Seed from DB atomically using SET NX (set-if-not-exists) — prevents
+        # two concurrent requests both seeding the key and resetting the counter.
+        await r.set(key, db_count, nx=True, ex=_RATE_KEY_TTL)
 
         new_count: int = await r.incr(key)
 

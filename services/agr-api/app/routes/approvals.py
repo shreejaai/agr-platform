@@ -1,5 +1,6 @@
 """Approval decision endpoints."""
 
+import html as _html
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -45,12 +46,18 @@ def _to_response(a: ApprovalRequest) -> ApprovalResponse:
 async def _load_pending(
     approval_id: uuid.UUID, org_id: uuid.UUID, session: AsyncSession
 ) -> ApprovalRequest:
-    """Load an approval scoped to the org, raise 404/409 as needed."""
+    """Load an approval scoped to the org, raise 404/409 as needed.
+
+    Uses SELECT FOR UPDATE to prevent concurrent decision races — two simultaneous
+    approve/reject calls would otherwise both pass the status check.
+    """
     result = await session.execute(
-        select(ApprovalRequest).where(
+        select(ApprovalRequest)
+        .where(
             ApprovalRequest.id == approval_id,
             ApprovalRequest.org_id == org_id,
         )
+        .with_for_update()
     )
     approval = result.scalar_one_or_none()
     if not approval:
@@ -60,6 +67,11 @@ async def _load_pending(
             status_code=409,
             detail=f"Approval request already resolved with status '{approval.status}'.",
         )
+    expires = approval.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=UTC)
+    if datetime.now(UTC) > expires:
+        raise HTTPException(status_code=410, detail="Approval request has expired.")
     return approval
 
 
@@ -92,7 +104,7 @@ async def decide_via_email_get(
             media_type="text/html",
             status_code=400,
         )
-    approval_id_str, decision = parsed
+    approval_id_str, decision, token_ver = parsed
     try:
         approval_uuid = uuid.UUID(approval_id_str)
     except ValueError:
@@ -117,17 +129,31 @@ async def decide_via_email_get(
             media_type="text/html",
             status_code=200,
         )
+    # H3: reject tokens from before the last escalation
+    if token_ver is not None and approval.token_version != token_ver:
+        return Response(
+            content=_html_page(
+                "This link has been superseded. Check your email for the latest link.",
+                "error",
+            ),
+            media_type="text/html",
+            status_code=410,
+        )
 
     verb = "Approve" if decision == "approved" else "Reject"
     color = "#16a34a" if decision == "approved" else "#dc2626"
+    # C1: escape user-controlled fields to prevent XSS in the confirmation page
+    safe_agent = _html.escape(str(approval.agent_id))
+    safe_action = _html.escape(str(approval.action))
+    safe_resource = _html.escape(str(approval.resource))
     return Response(
         content=f"""
 <html><body style="font-family:sans-serif;max-width:480px;margin:48px auto;padding:0 16px">
   <h2>Confirm {verb}</h2>
-  <p><strong>Agent:</strong> {approval.agent_id}</p>
-  <p><strong>Action:</strong> {approval.action}</p>
-  <p><strong>Resource:</strong> {approval.resource}</p>
-  <form method="POST" action="/v1/approvals/decide?token={token}">
+  <p><strong>Agent:</strong> {safe_agent}</p>
+  <p><strong>Action:</strong> {safe_action}</p>
+  <p><strong>Resource:</strong> {safe_resource}</p>
+  <form method="POST" action="/v1/approvals/decide?token={_html.escape(token)}">
     <button type="submit"
       style="background:{color};color:#fff;padding:12px 28px;border:none;
              border-radius:6px;font-size:16px;font-weight:600;cursor:pointer">
@@ -154,7 +180,7 @@ async def decide_via_email_post(
             media_type="text/html",
             status_code=400,
         )
-    approval_id_str, decision = parsed
+    approval_id_str, decision, token_ver = parsed
     try:
         approval_uuid = uuid.UUID(approval_id_str)
     except ValueError:
@@ -179,6 +205,25 @@ async def decide_via_email_post(
             media_type="text/html",
             status_code=200,
         )
+    # H3: reject tokens from before the last escalation
+    if token_ver is not None and approval.token_version != token_ver:
+        return Response(
+            content=_html_page(
+                "This link has been superseded. Check your email for the latest link.",
+                "error",
+            ),
+            media_type="text/html",
+            status_code=410,
+        )
+    expires = approval.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=UTC)
+    if datetime.now(UTC) > expires:
+        return Response(
+            content=_html_page("This approval link has expired.", "error"),
+            media_type="text/html",
+            status_code=410,
+        )
 
     approval.status = decision
     approval.decision_at = datetime.now(UTC)
@@ -201,7 +246,6 @@ async def decide_via_email_post(
 
     background_tasks.add_task(
         fire_approval_webhook,
-        session,
         approval.org_id,
         f"approval.{decision}",
         approval.id,
@@ -275,7 +319,6 @@ async def decide_approval(
 
     background_tasks.add_task(
         fire_approval_webhook,
-        session,
         org_id,
         f"approval.{body.decision}",
         approval.id,
@@ -320,7 +363,6 @@ async def approve_request(
 
     background_tasks.add_task(
         fire_approval_webhook,
-        session,
         org_id,
         "approval.approved",
         approval.id,
@@ -365,7 +407,6 @@ async def reject_request(
 
     background_tasks.add_task(
         fire_approval_webhook,
-        session,
         org_id,
         "approval.rejected",
         approval.id,
@@ -383,12 +424,15 @@ async def escalate_approval(
     approval_id: uuid.UUID,
     body: ApprovalEscalateRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ) -> ApprovalResponse:
     """Re-send approval email to a (new) approver email address.
 
     Updates approver_email and resends the notification. Returns 409 if
     the approval is no longer pending.
+    Increments token_version so old email links sent to the previous
+    approver are immediately invalidated (H3).
     """
     org_id: uuid.UUID = request.state.org_id
     result = await session.execute(
@@ -407,8 +451,11 @@ async def escalate_approval(
         )
 
     approval.approver_email = body.approver_email
+    # Invalidate old email tokens by bumping the version (H3)
+    approval.token_version = (approval.token_version or 0) + 1
     await session.flush()
-    await send_approval_email(approval)
+    # H1: send email as background task — don't block the response
+    background_tasks.add_task(send_approval_email, approval)
     logger.info("Escalated approval %s to %s", approval_id, body.approver_email)
     return _to_response(approval)
 

@@ -248,9 +248,10 @@ async def test_email_decide_idempotent_on_already_resolved(
 
 
 def test_verify_decision_token_roundtrip() -> None:
-    token = make_decision_token("some-uuid", "approved")
+    token = make_decision_token("some-uuid", "approved", token_version=0)
     result = verify_decision_token(token)
-    assert result == ("some-uuid", "approved")
+    # v2 format returns (approval_id, decision, token_version)
+    assert result == ("some-uuid", "approved", 0)
 
 
 def test_verify_decision_token_tampered() -> None:
