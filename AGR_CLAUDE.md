@@ -73,11 +73,11 @@ agr-platform/
 │       │   │   ├── app.routes.ts       # Lazy routes — authGuard + apiKeyGuard
 │       │   │   ├── core/
 │       │   │   │   ├── auth/
-│       │   │   │   │   ├── clerk.service.ts       # @clerk/clerk-js singleton wrapper (signals)
+│       │   │   │   │   ├── clerk.service.ts       # @clerk/clerk-js wrapper; fetchApiKey() public, 3 retries, FetchKeyResult
 │       │   │   │   │   ├── auth.guard.ts          # CanActivateFn — Clerk signed-in
 │       │   │   │   │   └── api-key.guard.ts       # CanActivateFn — agr_sk_ key in localStorage
 │       │   │   │   ├── http/
-│       │   │   │   │   ├── api-key.interceptor.ts # Injects Bearer <key> on /v1/ requests
+│       │   │   │   │   ├── api-key.interceptor.ts # Injects Bearer <key> on /v1/ — skips if Authorization already set
 │       │   │   │   │   └── error.interceptor.ts   # Redirects to /settings on 401
 │       │   │   │   └── models/                    # TypeScript interfaces (mirrors schemas.py)
 │       │   │   │       ├── approval.model.ts
@@ -96,13 +96,14 @@ agr-platform/
 │       │   │   │   ├── audit/audit.component.ts    # Filtered table + pagination
 │       │   │   │   ├── agents/agents.component.ts  # Register + list, API key reveal
 │       │   │   │   ├── webhooks/webhooks.component.ts    # Create + list + delete
-│       │   │   │   └── settings/settings.component.ts    # API key storage
+│       │   │   │   └── settings/settings.component.ts    # API key auto-fetch + manual paste
 │       │   │   ├── services/                       # HttpClient-based Observables
 │       │   │   │   ├── api-key.service.ts           # localStorage signal wrapper
 │       │   │   │   ├── approval.service.ts
 │       │   │   │   ├── policy.service.ts
 │       │   │   │   ├── audit.service.ts
 │       │   │   │   ├── agent.service.ts
+│       │   │   │   ├── org.service.ts
 │       │   │   │   └── webhook.service.ts
 │       │   │   └── shared/
 │       │   │       ├── components/
@@ -125,42 +126,43 @@ agr-platform/
 ├── services/
 │   └── agr-api/                        # The deployed FastAPI service
 │       ├── app/
-│       │   ├── main.py                 # FastAPI app + CORS + AuthMiddleware + all routers; lifespan: onprem license check + org bootstrap
-│       │   ├── config.py               # pydantic_settings.BaseSettings — reads .env; includes deployment_mode / license_key / onprem_org_name
-│       │   ├── license.py              # Ed25519 license validator (onprem mode only) — validates AGR_LICENSE_KEY on startup
-│       │   ├── database.py             # Async SQLAlchemy engine (pool_size=20) + get_session()
-│       │   ├── models.py               # ORM: Organization, Policy, ApprovalRequest, AuditEvent, Agent, Webhook
-│       │   ├── schemas.py              # ALL Pydantic v2 request/response models (single file)
+│       │   ├── main.py                 # FastAPI app + CORS + AuthMiddleware + all routers; lifespan: validate_production_settings + compliance registry + onprem license check + org bootstrap
+│       │   ├── config.py               # pydantic_settings.BaseSettings — reads .env; validate_production_settings() guards weak key + wildcard CORS in production
+│       │   ├── license.py              # Ed25519 license validator (onprem mode only)
+│       │   ├── database.py             # Async SQLAlchemy engine (pool_size=20, echo=False) + get_session()
+│       │   ├── models.py               # ORM: Organization, Policy, ApprovalRequest, AuditEvent, Agent, Webhook, WebhookDelivery
+│       │   ├── schemas.py              # ALL Pydantic v2 request/response models (single file); webhook events validated via @field_validator
 │       │   ├── routes/
-│       │   │   ├── evaluate.py         # POST /v1/evaluate — core endpoint (Redis cache + rate limit)
-│       │   │   ├── policies.py         # GET/POST/GET{id}/PATCH/DELETE /v1/policies
-│       │   │   ├── approvals.py        # Full approval endpoints + email one-click flow + escalate
-│       │   │   ├── audit.py            # GET /v1/audit (with filters) + GET /v1/audit/verify
+│       │   │   ├── evaluate.py         # POST /v1/evaluate — core endpoint (Redis cache + rate limit + BackgroundTasks)
+│       │   │   ├── policies.py         # GET/POST/GET{id}/PATCH/DELETE /v1/policies; DELETE is soft-delete (active=False); GET/PATCH filter active=True
+│       │   │   ├── approvals.py        # Full approval endpoints + email one-click (FOR UPDATE on POST decide) + escalate
+│       │   │   ├── audit.py            # GET /v1/audit (with filters) + GET /v1/audit/verify (paginated 1000/page, max 100k)
 │       │   │   ├── org.py              # GET /v1/org/me — org profile + eval usage
-│       │   │   ├── agents.py           # POST /v1/agents/register, GET /v1/agents (DB-backed)
-│       │   │   ├── webhooks.py         # POST/GET/DELETE /v1/webhooks
-│       │   │   ├── clerk.py            # POST /v1/clerk/webhook (Clerk user.created → org + policies)
+│       │   │   ├── agents.py           # POST /v1/agents/register, GET /v1/agents, GET/DELETE /v1/agents/{id}
+│       │   │   ├── webhooks.py         # POST/GET/GET{id}/DELETE /v1/webhooks; GET deliveries + retry
+│       │   │   ├── clerk.py            # POST /v1/clerk/webhook + GET /v1/clerk/api-key (auto-provisions org if missing)
 │       │   │   └── health.py           # GET /health (no auth)
 │       │   ├── services/
-│       │   │   ├── cedar_service.py    # Load policies from DB + call policy_engine.evaluate_policies()
-│       │   │   ├── approval_service.py # Create ApprovalRequest + start Temporal workflow
-│       │   │   ├── audit_service.py    # Hash-chained append-only audit logger
-│       │   │   ├── compliance_service.py  # CompliancePlugin ABC + ComplianceRegistry (fail-open) + get_registry()
+│       │   │   ├── cedar_service.py    # Load active policies from DB + call policy_engine.evaluate_policies()
+│       │   │   ├── approval_service.py # create_approval_request() — Slack sent via BackgroundTasks (not inline)
+│       │   │   ├── audit_service.py    # Hash-chained audit logger; payload capped at 64 KB with truncation warning
+│       │   │   ├── compliance_service.py  # CompliancePlugin ABC + ComplianceRegistry; SystemExit/KeyboardInterrupt re-raised
 │       │   │   ├── compliance_plugins/
 │       │   │   │   └── audit_trail_check.py  # Built-in: EU AI Act Art.13, SOC2 CC6.1, ISO42001 §8.4
-│       │   │   ├── notification_service.py # HMAC-signed email tokens + Resend email
+│       │   │   ├── notification_service.py # HMAC-signed email tokens (v1/v2) + Resend email delivery
 │       │   │   ├── org_service.py      # seed_default_policies() — 5 default Cedar rules
-│       │   │   ├── policy_import_service.py  # import_policies(), export_policies(), parse_yaml_import(), parse_cedar_raw_import()
-│       │   │   ├── redis_service.py    # Eval cache + rate limiting (atomic Redis INCR)
-│       │   │   ├── risk_service.py     # Deterministic risk scoring (0-100), 5 weighted factors, RiskResult dataclass
-│       │   │   ├── temporal_service.py # Lazy Temporal client, start/signal workflow (graceful degradation)
-│       │   │   └── webhook_service.py  # fire_approval_webhook() — HMAC-SHA256 signed POST
+│       │   │   ├── policy_import_service.py  # import/export; 1 MB YAML cap; duplicate name check within batch
+│       │   │   ├── redis_service.py    # Eval cache + rate limiting; cache invalidation uses async scan_iter + batched UNLINK (500/batch)
+│       │   │   ├── risk_service.py     # Deterministic risk scoring (0-100), 5 weighted factors
+│       │   │   ├── temporal_service.py # Lazy Temporal client; retries connection after failure (not cached permanently)
+│       │   │   └── webhook_service.py  # HMAC-SHA256 signed delivery; timeout from settings.webhook_timeout; logs malformed events
 │       │   ├── workflows/
 │       │   │   └── approval_workflow.py # Temporal ApprovalWorkflow — 48h wait + human_decision signal
 │       │   ├── workers/
 │       │   │   └── approval_worker.py  # Standalone Temporal worker process
 │       │   └── middleware/
-│       │       └── auth.py             # Bearer token → org lookup → request.state.org + request.state.org_id; error messages adapt to deployment_mode
+│       │       ├── auth.py             # Bearer → org lookup; SET LOCAL uses parameterized bindparam (not string interpolation); UNPROTECTED_PATHS includes /v1/clerk/api-key
+│       │       └── logging_mw.py       # Request ID ContextVar; reset in finally block (not lost on exception)
 │       ├── scripts/
 │       │   └── migrate.py
 │       ├── tests/
@@ -170,30 +172,34 @@ agr-platform/
 │       │   │   ├── test_langgraph_plugin.py
 │       │   │   ├── test_policy_engine.py
 │       │   │   └── test_sdk_client.py
-│       │   └── integration/
-│       │       ├── test_evaluate.py
-│       │       ├── test_approvals.py
-│       │       ├── test_policies.py
-│       │       ├── test_multi_tenant.py
-│       │       ├── test_agents.py           # includes GET /v1/agents/{id} + cross-org
-│       │       ├── test_webhooks.py         # 11 tests: CRUD, isolation, auth
-│       │       └── test_clerk_webhook.py    # org creation, 5 default policies, idempotency
+│       │   ├── integration/
+│       │   │   ├── test_evaluate.py
+│       │   │   ├── test_approvals.py
+│       │   │   ├── test_policies.py
+│       │   │   ├── test_multi_tenant.py
+│       │   │   ├── test_agents.py
+│       │   │   ├── test_webhooks.py
+│       │   │   └── test_clerk_webhook.py
+│       │   └── postgres/               # Real PostgreSQL tests (require PG_TEST_URL)
+│       │       ├── test_rls.py
+│       │       ├── test_audit_partitioning.py
+│       │       ├── test_jsonb_operations.py
+│       │       └── test_constraints.py
 │       ├── requirements.txt
 │       ├── Dockerfile          # 3-stage: python:builder + rust:slim (Cedar CLI) + python:runtime
 │       ├── Dockerfile.onprem   # 4-stage: deps + cedar-builder + cython-build + runtime (no .py source)
-│       ├── setup_cython.py     # Cython compilation config (used by Dockerfile.onprem)
-│       └── Dockerfile.dev
+│       └── setup_cython.py     # Cython compilation config (used by Dockerfile.onprem only)
 ├── packages/
 │   ├── agr-core/
 │   │   ├── __init__.py
-│   │   ├── policy_engine.py            # Cedar CLI subprocess + Python regex fallback
+│   │   ├── policy_engine.py            # Cedar CLI subprocess + Python regex fallback; warns on empty policy list
 │   │   └── policies/
 │   │       └── default.cedar           # 5 default Cedar policies (mirrored in org_service.py)
 │   ├── agr-sdk-python/
 │   │   ├── setup.py
 │   │   └── agr/
 │   │       ├── __init__.py
-│   │       ├── client.py               # evaluate(), wait_for_approval() (polls GET /v1/approvals/{id}), register_agent()
+│   │       ├── client.py               # evaluate(), wait_for_approval(), register_agent()
 │   │       └── plugins/
 │   │           ├── langgraph.py        # @agr_governed decorator
 │   │           └── crewai.py           # AGRToolWrapper class decorator
@@ -209,34 +215,39 @@ agr-platform/
 │               ├── client.test.ts
 │               └── errors.test.ts
 ├── infra/
+│   ├── migrate.sh                      # Runs migrations 001–015; credentials in PSQL connection string
 │   └── migrations/
 │       ├── 001_initial_schema.sql      # Core schema: orgs, policies, approval_requests, audit_events + RLS
 │       ├── 002_approval_enhancements.sql # approver_email, decision_at, temporal_run_id columns
 │       ├── 003_default_policy_trigger.sql # PostgreSQL trigger: on_org_created → seed 5 default policies
 │       ├── 004_agents_table.sql        # agents table + RLS
 │       ├── 005_webhooks_table.sql      # webhooks table + RLS
-│       ├── 006_audit_partitioning.sql  # Convert audit_events to monthly RANGE partitions
-│       ├── 007_pg_cron_audit_partitions.sql  # pg_cron job: create next month's audit partition
+│       ├── 006_audit_partitioning.sql  # Convert audit_events to monthly RANGE partitions; INSERT from legacy runs AFTER partitions created
+│       ├── 007_pg_cron_audit_partitions.sql  # pg_cron job: create next month's audit partition (skipped if pg_cron unavailable)
 │       ├── 008_webhook_deliveries.sql  # webhook_deliveries DLQ table + RLS
 │       ├── 009_agent_active.sql        # agents.active column
 │       ├── 010_eval_week.sql           # organizations.eval_week_start + eval_limit=100 default
 │       ├── 011_indexes.sql             # Composite indexes: audit org+time, approvals org+status, deliveries webhook+time
 │       ├── 012_token_version.sql       # approval_requests.token_version INTEGER DEFAULT 0
 │       ├── 013_status_check.sql        # CHECK constraint: status IN ('pending','approved','rejected','escalated')
-│       └── rollback/                         # Rollback scripts 001_down.sql – 013_down.sql
-├── infra/migrate.sh                    # Runs migrations 001–013 (used by docker-compose migrate service)
+│       ├── 014_audit_sequence_per_org.sql  # UNIQUE INDEX on audit_events(org_id, sequence_num, recorded_at)
+│       ├── 015_audit_agent_index.sql   # INDEX on audit_events(org_id, agent_id) for agent_id filter queries
+│       └── rollback/                   # Rollback scripts 001_down.sql – 013_down.sql (014 and 015 rollbacks not yet written)
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                      # 4 jobs: lint-and-test, build-dashboard, test-ts-sdk, publish (ghcr.io on merge to main)
 ├── docker-compose.yml                  # postgres:16 + redis:7 + migrate + agr-api + agr-dashboard
-│                                       # profile "temporal": temporal-worker service
+│                                       # DB: agr_svc_usr / agr_platform; profile "temporal": temporal-worker
 ├── docker-compose.onprem.yml           # On-prem self-hosted deployment (uses ghcr.io images, single-tenant)
+├── docker-compose.test.yml             # Isolated postgres:5433 + redis:6380 for PostgreSQL integration tests
+├── .env                                # Root-level Docker Compose overrides (gitignored) — CLERK_*, ENV, CORS_ORIGINS
 ├── tools/
-│   ├── generate_keypair.py             # One-time Ed25519 key pair generator (run once, store private key in vault)
+│   ├── generate_keypair.py             # One-time Ed25519 key pair generator
 │   └── generate_license.py            # Issue signed license keys per customer
 ├── pyproject.toml                      # ruff + mypy + pytest config
 ├── .env.example
-├── .env.onprem.example                 # Template for on-prem client deployments
+├── .env.onprem.example
+├── openapi.json                        # Manually maintained OpenAPI 3.1.0 spec
 └── README.md
 ```
 
@@ -249,7 +260,7 @@ agr-platform/
 | Language | Python 3.12 | Live | Type hints everywhere, async throughout |
 | API framework | FastAPI 0.115 | Live | Async, OpenAPI auto-docs at /docs |
 | Policy engine | Cedar CLI → Python fallback | Live | `shutil.which("cedar")` first; Python regex if no binary. Cedar binary compiled in Docker (rust:slim stage). |
-| ORM | SQLAlchemy 2.0 async | Live | AsyncSession, no sync queries |
+| ORM | SQLAlchemy 2.0 async | Live | AsyncSession, no sync queries. `echo=False` always. |
 | DB | PostgreSQL 16 | Live | RLS on all 6 tables. Monthly partitioning on audit_events. |
 | Cache | Redis 7 (redis.asyncio) | Live | 60s eval cache, org-scoped invalidation on policy change |
 | Rate limiting | Redis INCR + DB fallback | Live | Atomic Redis counter; DB synced via BackgroundTask |
@@ -257,19 +268,19 @@ agr-platform/
 | Email notifications | Resend REST API | Live | No-ops if RESEND_API_KEY blank; one-click HMAC-signed links |
 | Webhook push | httpx + HMAC-SHA256 | Live | Fires on approve/reject; Stripe-style signature header; every attempt recorded in webhook_deliveries |
 | Webhook DLQ | webhook_deliveries table | Live | Dead-letter queue; manual retry via POST /v1/webhooks/{id}/deliveries/{id}/retry |
-| Auth (dashboard) | Clerk webhook + Backend API | Live | POST /v1/clerk/webhook → create org; GET /v1/clerk/api-key → auto API key fetch |
-| Secrets | .env / Doppler (prod) | Live | pydantic_settings reads .env |
+| Auth (dashboard) | Clerk webhook + Backend API | Live | POST /v1/clerk/webhook → create org; GET /v1/clerk/api-key → auto-provisions org + returns API key |
+| Secrets | .env / root .env (Docker Compose) | Live | pydantic_settings reads .env; root .env overrides Docker Compose vars |
 | Deploy (SaaS) | Docker Compose / manual | Live | No auto-deploy configured; merge to main, deploy manually |
 | Deploy (On-Prem) | ghcr.io private images + docker-compose.onprem.yml | Live | CI publishes :latest and :onprem-latest to ghcr.io on every merge to main |
-| On-Prem licensing | Ed25519 signed license keys | Live | `app/license.py` validates on startup; `tools/generate_license.py` issues keys; `DEPLOYMENT_MODE=onprem` activates single-tenant bootstrap |
+| On-Prem licensing | Ed25519 signed license keys | Live | `app/license.py` validates on startup; `tools/generate_license.py` issues keys |
 | Validation | Pydantic v2 | Live | All request/response models in schemas.py |
 | Linting | ruff 0.8 | Live | Line length 100 |
 | Type checking | mypy --strict | Live | Must pass on every PR. tests/ excluded. |
 | Testing | pytest + pytest-asyncio | Live | SQLite in-memory for integration tests |
 | TypeScript SDK | native fetch, ESM+CJS | Live | Node 18+, camelCase interface |
 | Dashboard | Angular 17 standalone, Tailwind CSS | Live | OnPush, signals, inject(), no NgModules |
-| Dashboard auth (identity) | @clerk/clerk-js (vanilla JS) | Live | Wrapped in ClerkService singleton; no official Angular SDK |
-| Dashboard auth (API) | agr_sk_ in localStorage | Live | apiKeyInterceptor injects Bearer header on /v1/ requests |
+| Dashboard auth (identity) | @clerk/clerk-js (vanilla JS) | Live | Wrapped in ClerkService singleton |
+| Dashboard auth (API) | agr_sk_ in localStorage | Live | apiKeyInterceptor injects Bearer header on /v1/ requests; skips override if request already has Authorization |
 
 ---
 
@@ -277,15 +288,16 @@ agr-platform/
 
 ### organizations
 ```
-id          UUID PK
-name        TEXT NOT NULL
-slug        TEXT UNIQUE (nullable)
-plan        TEXT DEFAULT 'developer'   -- developer|startup|business|enterprise
-api_key     TEXT UNIQUE NOT NULL       -- agr_sk_ + 48 hex chars
-eval_count  BIGINT DEFAULT 0
-eval_limit  BIGINT DEFAULT 100         -- 0 = unlimited; developer plan = 100/week
-created_at  TIMESTAMPTZ
-updated_at  TIMESTAMPTZ
+id              UUID PK
+name            TEXT NOT NULL
+slug            TEXT UNIQUE (nullable)   -- stores Clerk user_id
+plan            TEXT DEFAULT 'developer' -- developer|startup|business|enterprise
+api_key         TEXT UNIQUE NOT NULL     -- agr_sk_ + 48 hex chars
+eval_count      BIGINT DEFAULT 0
+eval_limit      BIGINT DEFAULT 100       -- 0 = unlimited; developer plan = 100/week
+eval_week_start TIMESTAMPTZ
+created_at      TIMESTAMPTZ
+updated_at      TIMESTAMPTZ
 
 Index: idx_organizations_api_key
 ```
@@ -300,7 +312,7 @@ name        TEXT NOT NULL
 level       TEXT NOT NULL              -- org | project | agent
 cedar_rule  TEXT NOT NULL
 version     INT DEFAULT 1              -- increments on cedar_rule change
-active      BOOLEAN DEFAULT TRUE
+active      BOOLEAN DEFAULT TRUE       -- soft-delete: DELETE sets active=False; GET/PATCH filter active=True
 created_at  TIMESTAMPTZ
 updated_at  TIMESTAMPTZ
 
@@ -317,14 +329,14 @@ resource        TEXT NOT NULL
 context         JSONB NULLABLE
 status          TEXT DEFAULT 'pending'  -- pending|approved|rejected|escalated
                                         -- CHECK constraint: approval_status_check (migration 013)
-approver_email  TEXT NULLABLE           -- set from EvaluateRequest.approver_email
-decision_at     TIMESTAMPTZ NULLABLE    -- set when approve/reject is called
-temporal_run_id TEXT NULLABLE           -- Temporal workflow ID (null if Temporal not configured)
+approver_email  TEXT NULLABLE
+decision_at     TIMESTAMPTZ NULLABLE
+temporal_run_id TEXT NULLABLE
 expires_at      TIMESTAMPTZ NOT NULL    -- created_at + 48h
-token_version   INTEGER NOT NULL DEFAULT 0  -- incremented on escalate; v2 email tokens embed this
+token_version   INTEGER NOT NULL DEFAULT 0  -- incremented on escalate
 created_at      TIMESTAMPTZ
 
-Indexes: idx_approval_requests_org_id, idx_approval_requests_status (org_id, status)
+Indexes: idx_approval_requests_org_id, idx_approvals_org_status (org_id, status)
 ```
 
 ### audit_events (append-only, hash-chained, monthly partitioned)
@@ -339,7 +351,7 @@ resource     TEXT NOT NULL
 decision     TEXT NOT NULL
 policy_id    UUID NULLABLE
 approval_id  UUID NULLABLE
-payload      JSONB NULLABLE
+payload      JSONB NULLABLE             -- capped at 64 KB; oversized payloads truncated with warning log
 prev_hash    TEXT NULLABLE
 entry_hash   TEXT NOT NULL              -- SHA-256(seq:event_type:json(payload):prev_hash)
 recorded_at  TIMESTAMPTZ NOT NULL
@@ -347,6 +359,10 @@ recorded_at  TIMESTAMPTZ NOT NULL
 Primary Key: (id, recorded_at) — required for partitioning
 PARTITION BY RANGE (recorded_at) — monthly child tables auto-created
 RLS enabled (inherited by all partitions)
+
+Indexes: idx_audit_org_time (org_id, recorded_at DESC)
+         idx_audit_events_org_agent (org_id, agent_id)          -- migration 015
+         idx_audit_events_org_seq_unique UNIQUE (org_id, sequence_num, recorded_at) -- migration 014
 ```
 
 ### agents
@@ -354,7 +370,8 @@ RLS enabled (inherited by all partitions)
 id          UUID PK
 org_id      UUID FK → organizations (CASCADE DELETE)
 agent_id    TEXT NOT NULL
-metadata    JSONB NULLABLE
+active      BOOLEAN DEFAULT TRUE
+metadata    JSONB NULLABLE             -- name, description, framework stored here
 created_at  TIMESTAMPTZ
 updated_at  TIMESTAMPTZ
 
@@ -379,22 +396,22 @@ RLS enabled
 ```
 id          UUID PK
 webhook_id  UUID FK → webhooks (CASCADE DELETE)
-org_id      UUID NOT NULL              -- for RLS; no FK (outlives webhook if needed)
+org_id      UUID NOT NULL
 event       TEXT NOT NULL
-payload     JSONB NOT NULL             -- full payload that was sent
+payload     JSONB NOT NULL
 status      TEXT NOT NULL              -- pending | delivered | failed
-http_status INTEGER NULLABLE           -- HTTP response code from receiver
+http_status INTEGER NULLABLE
 attempts    INTEGER NOT NULL DEFAULT 0
-last_error  TEXT NULLABLE              -- last exception or non-2xx description
+last_error  TEXT NULLABLE
 created_at  TIMESTAMPTZ NOT NULL
 
-Indexes: idx_webhook_deliveries_webhook_id, idx_webhook_deliveries_org_id
+Indexes: idx_delivery_webhook_time (webhook_id, created_at DESC)
 RLS enabled
 ```
 
-**RLS:** ALL SIX tables have RLS enabled. `set_rls_org()` in `auth.py` sets `SET LOCAL app.current_org = '<org_id>'`. Routes also explicitly filter by `org_id` in every SQLAlchemy query — RLS is the safety net, explicit `WHERE org_id = X` is the primary guard.
+**RLS:** ALL SIX tables have RLS enabled. `set_rls_org()` in `auth.py` sets `SET LOCAL app.current_org_id = :org_id` via parameterized bindparam (never string interpolation). Routes also explicitly filter by `org_id` in every SQLAlchemy query — RLS is the safety net, explicit `WHERE org_id = X` is the primary guard.
 
-**Default policies:** Migration 003 adds a PostgreSQL trigger `on_org_created`. `org_service.seed_default_policies()` provides the same seeding at the app layer for Clerk webhooks and SQLite tests.
+**Default policies:** Migration 003 adds a PostgreSQL trigger `on_org_created`. `org_service.seed_default_policies()` provides the same seeding at the app layer for Clerk webhooks, auto-provisioning, and SQLite tests.
 
 ---
 
@@ -409,25 +426,11 @@ Returns: { decision, reason, policy_id, approval_id, latency_ms, eval_id,
 
 Decision values:
   ALLOW             → agent may execute immediately
-  DENY              → agent must not execute (Cedar forbid OR risk_score > approval_max threshold)
-  APPROVAL_REQUIRED → approval_request created in DB, approval_id is non-null
-                      Temporal workflow started (if configured)
-                      Resend email sent to approver_email (if configured)
-                      Also triggered when risk_score > allow_max threshold
+  DENY              → agent must not execute
+  APPROVAL_REQUIRED → approval_request created in DB
 
 Rate limit: 429 when Redis eval counter >= eval_limit (non-zero). No audit event on 429.
-Redis INCR is authoritative. DB eval_count synced via BackgroundTask.
-Cache: Redis 60s TTL on ALLOW/DENY results. APPROVAL_REQUIRED is never cached.
-
-Risk scoring (when RISK_SCORING_ENABLED=true):
-  risk_score: int 0-100 (5 weighted factors)
-  risk_level: "low" | "medium" | "high"
-  risk_factors: { action_severity, context_signals, rate_pattern, agent_trust, amount_scale }
-  Cedar DENY always wins — risk score cannot override a Cedar forbid.
-
-Compliance findings (advisory — never blocks decision):
-  compliance_findings: list of { plugin, standard, rule_id, severity, message, passed }
-  null when all checks pass (no findings).
+Cache: Redis 60s TTL on ALLOW/DENY. APPROVAL_REQUIRED never cached.
 ```
 
 ### GET /v1/policies
@@ -439,146 +442,143 @@ Body: `{ name, level, cedar_rule, project_id?, agent_id? }`
 Returns: PolicyResponse (201). Invalidates Redis eval cache for org.
 
 ### GET /v1/policies/{id}
-Returns: PolicyResponse (404 if not found or wrong org)
+Returns: PolicyResponse (404 if not found, wrong org, or soft-deleted)
 
 ### PATCH /v1/policies/{id}
 Body: `{ cedar_rule?, active?, name? }`
-cedar_rule change increments version. Invalidates Redis eval cache. Returns: PolicyResponse.
+Returns: PolicyResponse. 404 if soft-deleted. cedar_rule change increments version.
 
 ### DELETE /v1/policies/{id}
-Returns: 204. Hard delete. Invalidates Redis eval cache.
+**Soft-delete** — sets `active=False`, does NOT remove the row (preserves audit FK integrity).
+Returns: 204.
 
 ### POST /v1/policies/import
 Body: `{ policies: [PolicyImportItem], dry_run?: bool, overwrite?: bool }`
-Bulk import policies from JSON. `dry_run=true` validates without persisting.
-`overwrite=true` updates existing policies matched by name. Default: skip duplicates.
-Returns: `{ dry_run, total, created, updated, skipped, errors, results: [{ name, status, policy_id?, error? }] }`
-Also accepts YAML (`Content-Type: application/x-yaml`) and raw Cedar text (`Content-Type: text/plain`).
-**IMPORTANT**: Route declared BEFORE `/{policy_id}` in policies.py to avoid UUID parse conflict.
+Duplicate names within the same import list are rejected with 400.
+Also accepts YAML (`Content-Type: application/x-yaml`, max 1 MB) and raw Cedar text.
+Returns: `{ dry_run, total, created, updated, skipped, errors, results }`
+**IMPORTANT**: Route declared BEFORE `/{policy_id}` in policies.py.
 
 ### GET /v1/policies/export
 Query params: `active_only=true|false` (default false)
-Returns JSON array of all org policies (same format as import input).
-**IMPORTANT**: Route declared BEFORE `/{policy_id}` in policies.py to avoid UUID parse conflict.
+**IMPORTANT**: Route declared BEFORE `/{policy_id}` in policies.py.
 
 ### GET /v1/approvals
 Query params: `status=pending|approved|rejected`
-Returns: list of ApprovalResponse (scoped to org, ordered by created_at desc)
+Returns: list of ApprovalResponse (scoped to org)
 
 ### GET /v1/approvals/{id}
-Returns: ApprovalResponse (404 if not found or wrong org)
+Returns: ApprovalResponse
 
-### POST /v1/approvals/{id}/decide
-Body: `{ decision: "approved"|"rejected", decided_by?: str, reason?: str }`
-Unified decide endpoint. Signals Temporal, fires webhook, writes audit event.
-Returns: ApprovalResponse. 409 if not pending.
-
-### POST /v1/approvals/{id}/approve
-Body: `{ decided_by?: str, reason?: str }`
-Sets status=approved. Signals Temporal, fires webhook, writes APPROVAL_APPROVED audit event.
-Returns: ApprovalResponse. 409 if not pending.
-
-### POST /v1/approvals/{id}/reject
-Body: `{ decided_by?: str, reason?: str }`
-Sets status=rejected. Signals Temporal, fires webhook, writes APPROVAL_REJECTED audit event.
-Returns: ApprovalResponse. 409 if not pending.
+### POST /v1/approvals/{id}/approve | /reject | /decide | /escalate
+Uses `SELECT FOR UPDATE` (`_load_pending()`) to prevent concurrent double-decision races.
 
 ### GET /v1/approvals/decide (no auth)
-Query param: `token=<hmac_signed_token>`
-Renders HTML confirmation page for one-click email approve/reject.
-Token format: `{approval_id}:{decision}:{expires_unix}:{hmac_sha256}`
+Query param: `token=<hmac_signed_token>` — renders HTML confirmation page.
 
 ### POST /v1/approvals/decide (no auth)
-Query param: `token=<hmac_signed_token>`
-Executes the decision from email link. Returns HTML result page.
-Signals Temporal, fires webhook, writes audit event.
+Accepts token via hidden POST form field (not URL query param — prevents token leakage in server logs).
+Falls back to query param for Slack button links.
+Uses `SELECT FOR UPDATE` on the approval row to serialize concurrent email link clicks.
 
 ### GET /v1/audit
 Query params: `event_type`, `agent_id`, `start_date`, `end_date`, `limit` (max 200, default 50), `offset`
-Returns: list of AuditEventResponse (scoped to org, ordered by sequence_num desc)
+Covered by `idx_audit_org_time` for time-range queries and `idx_audit_events_org_agent` for agent_id filter.
+
+### GET /v1/audit/verify
+Verifies the hash chain by recomputing SHA-256 for each event.
+**Paginated**: fetches in batches of 1000, stops at `limit` (default + max: 100,000 events).
+Returns: `{ valid, total, first_invalid_sequence }`
+
+### GET /v1/org/me
+Returns: `{ id, name, plan, eval_count, eval_limit, eval_week_start }`
 
 ### POST /v1/agents/register
-Body: `{ agent_id, metadata?: {} }`
-Upserts on (org_id, agent_id). Returns: AgentResponse. DB-persisted.
+Body: `{ agent_id, metadata?: {} }` — upserts on (org_id, agent_id).
 
 ### GET /v1/agents
-Returns: list of AgentResponse (scoped to org, ordered by created_at desc)
+Returns: list of AgentResponse (scoped to org)
 
 ### GET /v1/agents/{id}
-Returns: AgentResponse (404 if not found or wrong org). `id` is the UUID primary key.
+Returns: AgentResponse (404 if not found or wrong org)
+
+### DELETE /v1/agents/{id}
+Hard delete. Returns 204.
 
 ### POST /v1/webhooks
-Body: `{ url, events?: ["approval.approved","approval.rejected"] }`
-Creates webhook subscription. Returns: WebhookResponse (201) — secret shown once.
-Valid event values: `approval.approved`, `approval.rejected`
+Body: `{ url, events?: [...] }` — events validated via Pydantic `@field_validator`.
+Valid events: `approval.approved`, `approval.rejected`
 
-### GET /v1/webhooks
-Returns: list of WebhookResponse (scoped to org)
-
-### GET /v1/webhooks/{id}
-Returns: WebhookResponse (404 if not found or wrong org)
-
-### DELETE /v1/webhooks/{id}
-Returns: 204. Hard delete.
+### GET/DELETE /v1/webhooks/{id}
+DELETE returns 204.
 
 ### GET /v1/webhooks/{id}/deliveries
-Returns: list of WebhookDeliveryResponse — last 50 delivery attempts, newest first.
-404 if webhook not found or wrong org.
+Returns last 50 delivery attempts.
 
 ### POST /v1/webhooks/{id}/deliveries/{delivery_id}/retry
-Re-fires a failed delivery. Creates a new WebhookDelivery record (preserves history).
-Returns: WebhookDeliveryResponse for the new attempt.
-404 if delivery not found or wrong org.
+Re-fires a failed delivery. Creates a new WebhookDelivery record.
 
 ### GET /v1/clerk/api-key (no agr_sk_ auth — uses Clerk session JWT)
-Body: `Authorization: Bearer <clerk_session_jwt>`
-Verifies the Clerk session via Clerk Backend API (requires `CLERK_SECRET_KEY`).
-Finds the org whose `slug = clerk_user_id`, returns the org's `api_key`.
-Used by the dashboard to auto-populate the API key after login.
-Returns 503 if `CLERK_SECRET_KEY` not configured; 404 if org not created yet.
+`Authorization: Bearer <clerk_session_jwt>`
+1. Verifies the Clerk session via Clerk Backend API (`CLERK_SECRET_KEY` required — returns 503 if not set)
+2. Looks up org by `slug = clerk_user_id`
+3. **If org not found**: auto-provisions org + seeds 5 default policies using Clerk user profile data
+   (handles local dev where Clerk webhooks can't reach localhost)
+4. Returns `{ api_key, org_id, org_name }`
+
+Rate-limited: 10 requests/IP/minute via Redis (fails open if Redis unavailable).
 
 ### POST /v1/clerk/webhook (no auth)
-Handles Clerk `user.created` event. Creates Organization + seeds 5 default policies.
-Svix signature verified if `CLERK_WEBHOOK_SECRET` is set (skipped in dev if blank).
-Idempotent: duplicate slug → 200.
+Handles Clerk `user.created` event → creates Organization + seeds 5 default policies.
+Svix signature verified if `CLERK_WEBHOOK_SECRET` set. Idempotent on duplicate slug.
 
 ### GET /health
-No auth required. Returns `{ status: "ok" }`.
-Also unprotected: `/docs`, `/openapi.json`, `/redoc`, `/v1/approvals/decide`, `/v1/clerk/webhook`
+No auth. Returns `{ status: "ok" }`.
 
----
-
-## Webhook Signature Verification
-
-Payloads are signed with HMAC-SHA256 (Stripe-style):
-```
-X-AGR-Signature: t=<unix_timestamp>,v1=<hmac_hex>
-Signed content: "<timestamp>.<json_body>"
-```
-
-Receiving end verification:
-```python
-import hmac, hashlib, time
-ts = header.split(",")[0].split("=")[1]
-sig = header.split("v1=")[1]
-expected = hmac.new(secret.encode(), f"{ts}.{body}".encode(), hashlib.sha256).hexdigest()
-assert hmac.compare_digest(sig, expected)
-assert abs(int(ts) - time.time()) < 300  # 5-minute tolerance
-```
+**UNPROTECTED_PATHS:**
+`/health`, `/health/ready`, `/docs`, `/openapi.json`, `/redoc`,
+`/v1/approvals/decide`, `/v1/clerk/webhook`, `/v1/clerk/api-key`
 
 ---
 
 ## Auth Middleware (Actual Behavior)
 
-`AuthMiddleware` (Starlette `BaseHTTPMiddleware`) runs on every request:
-1. Skip auth for `UNPROTECTED_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/v1/approvals/decide", "/v1/clerk/webhook", "/v1/clerk/api-key"}` and OPTIONS
-2. Require `Authorization: Bearer agr_sk_...` header — 401 with actionable message if missing
-3. Error messages adapt to `settings.deployment_mode`: saas messages reference `dashboard.agr.dev`; onprem messages say "Contact your AGR administrator"
+`AuthMiddleware` (`middleware/auth.py`):
+1. Skip auth for `UNPROTECTED_PATHS` and OPTIONS
+2. Require `Authorization: Bearer agr_sk_...` header — 401 if missing or wrong format
+3. Error messages adapt to `settings.deployment_mode`: saas → reference `dashboard.agr.dev`; onprem → "Contact your AGR administrator"
 4. Look up `Organization` by `api_key` in DB
 5. Set `request.state.org_id: UUID` and `request.state.org: Organization`
 
+**SQL injection prevention**: `SET LOCAL app.current_org_id` uses `text(...).bindparams(org_id=str(org_id))` — never string interpolation.
+
 Routes access org via `request.state.org_id` — there is **no** `Depends(get_current_org)` dependency.
-`set_rls_org()` exists in `auth.py` but is not called automatically — routes can call it if needed.
+
+---
+
+## Dashboard — API Key Auto-Fetch Flow
+
+```
+App bootstrap (APP_INITIALIZER)
+  └─ ClerkService.init()
+       └─ if clerk.user AND no key in localStorage → fetchApiKey()
+
+Settings page (ngOnInit)
+  └─ if no key in localStorage → fetchFromClerk() [auto-triggers on load]
+  └─ "Fetch API Key Automatically" button → fetchFromClerk()
+  └─ "Refresh from Clerk" button (when key exists) → fetchFromClerk()
+
+fetchApiKey() in ClerkService:
+  - Gets Clerk session JWT via clerk.session.getToken()
+  - Calls GET /v1/clerk/api-key with Authorization: Bearer <jwt>
+  - Retries up to 3 times with 2s delay (handles webhook latency on first signup)
+  - Returns FetchKeyResult: { ok: true } | { ok: false, reason: 'not_signed_in' | 'clerk_not_configured' | 'org_not_found' | 'error' }
+
+apiKeyInterceptor:
+  - Adds Authorization: Bearer <agr_sk_> on all /v1/ requests
+  - SKIPS override if request already has Authorization header set
+    (prevents clobbering the Clerk JWT when calling /v1/clerk/api-key)
+```
 
 ---
 
@@ -586,114 +586,11 @@ Routes access org via `request.state.org_id` — there is **no** `Depends(get_cu
 
 `evaluate_policies()` in `packages/agr-core/policy_engine.py`:
 
-1. Try `shutil.which("cedar")` — if found, use Cedar CLI subprocess
-2. If Cedar CLI fails or is not installed, fall back to Python regex evaluator
+1. Warns if no active policies (all actions DENY by default)
+2. Try `shutil.which("cedar")` — if found, use Cedar CLI subprocess
+3. Fall back to Python regex evaluator
 
-**Cedar CLI path** (`_cedar_cli_evaluator`):
-- Writes temp `policies.cedar` + `entities.json` files
-- Runs `cedar authorize --policies ... --entities ... --request-json ...`
-- APPROVAL_REQUIRED detection via double-eval: first call with given context → if DENY, re-call with `approval_status=approved` injected → if ALLOW, return APPROVAL_REQUIRED
-- `policy_id` is always `None` (Cedar CLI does not report which policy matched)
-
-**Python fallback path** (`_python_evaluator`):
-- Parses `forbid`/`permit` from cedar_rule text
-- `_check_action_match()` — regex on `Action::"name"` or action-in-list
-- `_check_when_clause()` — extracts `resource.attr == "val"`, `resource.attr like "pat*"`, `context.attr == "val"`
-- Special case: `forbid ... unless { context has approval_status && context.approval_status == "approved" }` → APPROVAL_REQUIRED
-- `policy_id` is populated (unlike Cedar CLI path)
-- Forbid wins over permit (deny-overrides semantics)
-
-**Limitations of Python evaluator (not full Cedar spec):**
-- No principal attribute matching beyond pattern matching
-- No Cedar schema validation
-- `like` patterns only support `*` glob
-- No Cedar entity/attribute type system
-
-`cedar_service.py` loads policies via:
-```python
-SELECT * FROM policies WHERE org_id = ? AND active = TRUE
-  [AND (agent_id IS NULL OR agent_id = ?)]
-```
-
----
-
-## Redis Service (`app/services/redis_service.py`)
-
-```python
-# Lazy client init — never blocks startup if Redis is down
-async def _get_redis() -> Redis | None: ...
-
-# Eval result cache
-async def get_cached_eval(org_id, cache_key) -> dict | None   # None on miss or error
-async def set_cached_eval(org_id, cache_key, result) -> None  # 60s TTL, never caches APPROVAL_REQUIRED
-async def invalidate_org_eval_cache(org_id) -> None           # deletes eval:{org_id}:* pattern
-
-# Rate limiting
-async def rate_limit_incr(org_id, eval_limit, db_count) -> tuple[bool, int]
-# Returns (rate_limited, new_count). Atomic INCR. Falls back to db_count if Redis down.
-
-# DB sync
-async def sync_eval_count_to_db(org_id, session) -> None  # called as BackgroundTask
-```
-
-Cache key: `eval:{org_id}:{sha256(agent_id+action+resource+sorted_context)}`
-
----
-
-## Temporal Integration
-
-**Workflow** (`app/workflows/approval_workflow.py`):
-```python
-@workflow.defn
-class ApprovalWorkflow:
-    @workflow.run
-    async def run(self, approval_id: str) -> str:
-        # Suspends up to 48h waiting for human_decision signal
-        # Returns: "approved" | "rejected" | "expired"
-
-    @workflow.signal
-    def human_decision(self, decision: str) -> None: ...
-```
-
-**Worker** (`app/workers/approval_worker.py`):
-```bash
-# Run as standalone process alongside the API:
-python -m app.workers.approval_worker
-# Requires TEMPORAL_HOST env var
-```
-
-**Temporal service** (`app/services/temporal_service.py`):
-- Lazy client init — logs warning and returns `None` if TEMPORAL_HOST unset or unreachable
-- `start_approval_workflow(approval_id)` → returns workflow_id or None
-- `signal_approval_workflow(workflow_id, decision)` → returns bool
-- All decision endpoints (approve/reject/decide/email-link) call `signal_approval_workflow` if `temporal_run_id` is set
-
----
-
-## Pydantic Schemas (`app/schemas.py`)
-
-All models in one file:
-- `EvaluateRequest` — agent_id, action, resource, context, approver_email?
-- `EvaluateResponse` — decision, reason, policy_id, approval_id, latency_ms, eval_id, risk_score?, risk_level?, risk_factors?, compliance_findings?
-- `PolicyCreate` — name, level (org|project|agent), cedar_rule, project_id?, agent_id?
-- `PolicyUpdate` — cedar_rule?, active?, name?
-- `PolicyResponse` — full policy fields
-- `PolicyImportItem` — name, level, cedar_rule, project_id?, agent_id?, active (default True)
-- `PolicyImportRequest` — policies (list[PolicyImportItem], min 1), dry_run (bool), overwrite (bool)
-- `PolicyImportResult` — name, status ("created"|"updated"|"skipped"|"error"), policy_id?, error?
-- `PolicyImportResponse` — dry_run, total, created, updated, skipped, errors, results
-- `ApprovalResponse` — id, org_id, agent_id, action, resource, context, status, approver_email, decision_at, expires_at, created_at
-- `ApprovalDecisionRequest` — decided_by (default "api_user"), reason (default "")
-- `ApprovalDecideRequest` — decision ("approved"|"rejected"), decided_by, reason
-- `AuditEventResponse` — all audit_events fields
-- `AgentRegisterRequest` — agent_id, metadata
-- `AgentResponse` — id, org_id, agent_id, metadata, created_at, updated_at
-- `WebhookCreate` — url, events (list of valid event strings)
-- `WebhookResponse` — id, org_id, url, secret, events, active, created_at
-- `WebhookDeliveryResponse` — id, webhook_id, org_id, event, payload, status, http_status, attempts, last_error, created_at
-- `ClerkApiKeyResponse` — api_key, org_id, org_name
-- `HealthResponse` — status
-- `ErrorResponse` — error, message, upgrade_url?
+**Python fallback limitations:** No principal attribute matching, no Cedar schema validation, `like` only supports `*` glob, no Cedar entity/attribute type system.
 
 ---
 
@@ -705,23 +602,28 @@ database_url: str          # postgresql+asyncpg://...
 redis_url: str             # redis://localhost:6379
 secret_key: str            # openssl rand -hex 32  (used for HMAC token signing)
 env: str                   # development | production | test
-api_base_url: str          # http://localhost:8000  (used in email links)
-temporal_host: str         # localhost:7233  (empty string = Temporal disabled)
+api_base_url: str          # http://localhost:8000
+temporal_host: str         # empty string = Temporal disabled
 temporal_namespace: str    # default
-resend_api_key: str        # ""  (empty = email disabled)
-slack_bot_token: str       # Slack Bot Token — empty = no Slack notifications
-slack_channel_id: str      # Slack channel ID, e.g. C0123456789 — empty = no Slack notifications
-clerk_webhook_secret: str  # ""  (empty = Svix verification skipped in dev)
-clerk_secret_key: str      # ""  (for future dashboard auth)
-clerk_publishable_key: str # ""  (for future dashboard auth)
-deployment_mode: str       # "saas" (default) | "onprem" — controls license check + bootstrap + auth error messages
-license_key: str           # ""  — required when deployment_mode=="onprem"; Ed25519-signed token issued by Shreeja AI
-onprem_org_name: str       # "My Organization" — org name shown in dashboard/logs for auto-bootstrapped onprem org
-# Risk scoring (Feature: risk-scoring-engine)
-risk_thresholds_allow_max: int     # 30  — scores ≤ this → ALLOW (unchanged)
-risk_thresholds_approval_max: int  # 70  — scores > allow_max and ≤ this → APPROVAL_REQUIRED; above → DENY
-risk_scoring_enabled: bool         # True — set False to disable risk scoring entirely
+resend_api_key: str        # "" = email disabled
+slack_bot_token: str       # "" = no Slack notifications
+slack_channel_id: str      # "" = no Slack notifications
+clerk_webhook_secret: str  # "" = Svix verification skipped (dev-safe)
+clerk_secret_key: str      # required for GET /v1/clerk/api-key to work
+clerk_publishable_key: str # "" (used in dashboard build args)
+deployment_mode: str       # "saas" (default) | "onprem"
+license_key: str           # required when deployment_mode=="onprem"
+onprem_org_name: str       # "My Organization"
+risk_thresholds_allow_max: int     # 30
+risk_thresholds_approval_max: int  # 70
+risk_scoring_enabled: bool         # True
+webhook_timeout: float             # 10.0 — configurable per-attempt delivery timeout (seconds)
+cors_origins: list[str]            # ["*"] default; must be restricted in production
 ```
+
+**`validate_production_settings()`** — called at startup when `env == "production"`:
+- Raises `RuntimeError` if `secret_key` contains `"dev-secret-key"`
+- Raises `RuntimeError` if `cors_origins == ["*"]`
 
 ---
 
@@ -730,7 +632,7 @@ risk_scoring_enabled: bool         # True — set False to disable risk scoring 
 ```python
 engine = create_async_engine(
     settings.database_url,
-    echo=(settings.env == "development"),
+    echo=False,   # SQL query logging disabled — was echo=(env=="development"), removed for cleaner logs
     pool_size=20,
     max_overflow=10,
     pool_pre_ping=True,
@@ -749,61 +651,73 @@ engine = create_async_engine(
 hash = SHA-256("{sequence_num}:{event_type}:{json.dumps(payload, sort_keys=True)}:{prev_hash or ''}")
 ```
 
-`sequence_num` is app-managed (last + 1 per org), NOT the DB column's autoincrement.
-Event types: `TOOL_ALLOW`, `TOOL_DENY`, `APPROVAL_REQUESTED`, `APPROVAL_APPROVED`, `APPROVAL_REJECTED`
+`sequence_num` is app-managed (last + 1 per org). Enforced unique by migration 014.
+Payload capped at **64 KB** — oversized payloads truncated to `{ _truncated, _original_size_bytes, eval_id }`.
+`audit_service.get_last_audit_event()` uses `SELECT FOR UPDATE` to serialize concurrent writes per org.
 
 ---
 
-## Python SDK — Public Interface
+## Security Fixes Applied (2026-03)
 
-```python
-from agr import AGRClient, EvaluationResult, AGRError, AGRAuthError, AGRRateLimitError
+These were identified in a full code audit and fixed:
 
-agr = AGRClient(api_key="agr_sk_...", base_url="https://api.agr.dev")
-
-result: EvaluationResult = agr.evaluate(
-    agent="coder-001", action="deploy", resource="production-server",
-    context={"environment": "production"}
-)
-result.decision          # "ALLOW" | "DENY" | "APPROVAL_REQUIRED"
-result.allowed           # bool
-result.denied            # bool
-result.requires_approval # bool
-result.approval_id       # str | None
-result.latency_ms        # float
-
-# Polls GET /v1/approvals/{id} (fixed endpoint, not full list scan)
-approved: bool = agr.wait_for_approval(approval_id, poll_interval=2.0, timeout=3600.0)
-
-agr.register_agent("coder-001", metadata={"framework": "langgraph"})
-```
-
-**SDK uses synchronous `httpx.Client`** (not async). Python 3.11+.
+| Severity | Fix |
+|----------|-----|
+| CRITICAL | SQL injection in `SET LOCAL app.current_org = '{org_id}'` → parameterized bindparam |
+| CRITICAL | Weak dev secret key allowed in production → `validate_production_settings()` guard |
+| CRITICAL | Slack notification sent before DB transaction commit → deferred to BackgroundTasks |
+| CRITICAL | HMAC token exposed in URL query param → hidden POST form field |
+| CRITICAL | `/v1/clerk/api-key` unauthenticated + enumerable → Redis rate limit (10 req/min/IP) |
+| HIGH | `GET /v1/audit/verify` loaded all rows into memory → paginated (1000/page, 100k cap) |
+| HIGH | `IntegrityError` handler too broad in Clerk webhook → slug-specific detection (Postgres + SQLite) |
+| HIGH | Email link decide handler had no `FOR UPDATE` lock → double-decision race condition |
+| HIGH | Migration 006 INSERT from legacy ran before partitions created → fixed ordering |
+| HIGH | Missing unique index on `(org_id, sequence_num)` → migration 014 |
+| HIGH | Webhook service silently skipped malformed events column → warning log added |
+| MEDIUM | ContextVar not reset on exception in logging middleware → moved to `finally` block |
+| MEDIUM | Hard delete on policies broke audit FK references → soft-delete (active=False) |
+| MEDIUM | Webhook event type validated only in route handler → `@field_validator` in Pydantic schemas |
+| MEDIUM | `SystemExit`/`KeyboardInterrupt` swallowed in compliance registry → re-raised |
+| MEDIUM | YAML import had no size limit → 1 MB cap before `yaml.safe_load()` |
+| MEDIUM | Bulk import allowed duplicate names within same batch → upfront duplicate check |
+| MEDIUM | Missing `session.flush()` after `session.delete()` in agent + webhook DELETE endpoints |
+| MEDIUM | Missing index on `audit_events(org_id, agent_id)` → migration 015 |
+| LOW | Webhook timeout hardcoded → `settings.webhook_timeout` |
+| LOW | Redis cache invalidation materialised all keys → async `scan_iter` + batched `UNLINK` (500/batch) |
+| LOW | Temporal connection failure cached permanently → retry on next call |
+| LOW | Audit JSONB payload unbounded → 64 KB cap with truncation |
+| LOW | Empty policy list denied silently → warning log in policy_engine.py |
+| LOW | Angular interceptor clobbered Clerk JWT with agr_sk_ key → skip override if Authorization already set |
 
 ---
 
-## TypeScript SDK — Public Interface
+## Docker Compose Setup
 
-```typescript
-import { AGRClient } from '@agr/sdk'
-
-const agr = new AGRClient({ apiKey: 'agr_sk_...', baseUrl: 'https://api.agr.dev' })
-
-const result = await agr.evaluate({
-  agentId: 'coder-001', action: 'deploy', resource: 'production-server',
-  context: { environment: 'production' }
-})
-result.decision          // "ALLOW" | "DENY" | "APPROVAL_REQUIRED"
-result.allowed           // boolean
-result.approvalId        // string | null
-
-const approved = await agr.waitForApproval(approvalId, { pollInterval: 2000, timeout: 3600000 })
-
-await agr.registerAgent('coder-001', { framework: 'langgraph' })
+### Credentials (docker-compose.yml)
+```
+DB user:     agr_svc_usr
+DB password: gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl
+DB name:     agr_platform
+SECRET_KEY:  4e993a8cbcb458e9823be7cc7215d42a57e1e56a3f90e8cdaa9334e9930d8dbf
 ```
 
-Node 18+. Uses native `fetch`. Dual ESM + CJS output. camelCase interface.
-Errors: `AGRAuthError` (401), `AGRRateLimitError` (429), `AGRError` (other).
+### Root `.env` file (project root — gitignored)
+Docker Compose auto-loads this file. Used for secrets that override compose defaults:
+```bash
+CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+CLERK_WEBHOOK_SECRET=whsec_...   # optional; blank = skip Svix verification
+```
+**Note**: Variables in `.env` are only injected into containers if listed in the service's `environment:` block in `docker-compose.yml` using `${VAR}` syntax.
+
+### Services
+```
+postgres    — port 5432, volume: pgdata
+redis       — port 6379
+migrate     — one-shot, runs all 015 migrations then exits
+agr-api     — port 8000, depends on postgres+redis+migrate healthy
+agr-dashboard — port 4200, depends on agr-api healthy
+```
 
 ---
 
@@ -818,992 +732,176 @@ Errors: `AGRAuthError` (401), `AGRRateLimitError` (429), `AGRError` (other).
 - `client` — TestClient patching both session factories
 - `auth_headers`
 
-**Implication**: RLS, JSONB operators, and audit partitioning are NOT tested at the integration level.
-
 ```bash
-pytest -v                                              # all tests
-pytest services/agr-api/tests/unit -v                 # unit only (no DB)
-pytest services/agr-api/tests/integration -v          # integration (SQLite)
-pytest services/agr-api/tests/integration/test_evaluate.py -v  # single file
+# From repo root
+pytest services/agr-api/tests/ -q --ignore=services/agr-api/tests/postgres  # 158 tests
+pytest services/agr-api/tests/unit -v
+pytest services/agr-api/tests/integration -v
+
+ruff check .
+ruff format --check .
+mypy services/agr-api/app   # 39 source files, 0 issues
 ```
 
-### PostgreSQL Integration Tests (`tests/postgres/`)
-
-Real PostgreSQL 16 tests — all 13 migrations applied before suite runs.
-Requires `PG_TEST_URL` env var (e.g., `postgresql+asyncpg://agr_test:agr_test_password@localhost:5433/agr_test`).
-Tests auto-skip if PostgreSQL is unavailable (not a failure).
-
+### PostgreSQL Integration Tests
+Requires `PG_TEST_URL` env var. Auto-skip if unavailable.
 ```bash
-# Start test postgres
-docker-compose -f docker-compose.test.yml up -d postgres-test
-
-# Run postgres tests
+docker compose -f docker-compose.test.yml up -d postgres-test
 PG_TEST_URL=postgresql+asyncpg://agr_test:agr_test_password@localhost:5433/agr_test \
   pytest services/agr-api/tests/postgres/ -v
 ```
-
-Test files:
-- `test_rls.py` — org isolation via SET LOCAL app.current_org_id (4 tests)
-- `test_audit_partitioning.py` — monthly partition routing, future partitions (5 tests)
-- `test_jsonb_operations.py` — JSONB `->>`/`@>` operators on agents/approvals/audit (4 tests)
-- `test_constraints.py` — CHECK constraints, UNIQUE, CASCADE DELETE, audit FK absence (6 tests)
-
-`conftest.py` fixtures: `apply_migrations` (session-scoped), `pg_session` (auto-rollback), `pg_org`, `pg_org_b`
 
 ---
 
 ## Running Locally — Complete Setup
 
-### Prerequisites
-
-| Tool | Version | Install |
-|---|---|---|
-| Python | 3.12+ | `pyenv install 3.12` |
-| Docker + Docker Compose | any recent | docker.com |
-| Node.js | 18+ (TS SDK only) | nodejs.org |
-| `cedar` CLI | optional | `cargo install cedar-policy-cli` |
-
----
-
-### Step 1 — Clone and enter the repo
+### Option A — Full Docker Compose (recommended)
 
 ```bash
 git clone https://github.com/shreejaai/agr-platform.git
 cd agr-platform
+
+# Create root .env with Clerk keys
+cat > .env <<EOF
+CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+EOF
+
+# Build and start everything (migrations run automatically via migrate service)
+docker compose up --build
+
+# API: http://localhost:8000
+# Dashboard: http://localhost:4200
 ```
 
----
+**First login flow:**
+1. Open http://localhost:4200 → sign in with Clerk
+2. Dashboard navigates to Settings, auto-fetches your `agr_sk_` key from the API
+3. Key is stored in localStorage — all pages become available
 
-### Step 2 — Create `.env` file
-
-```bash
-cp .env.example services/agr-api/.env
-```
-
-Edit `services/agr-api/.env`:
+### Option B — Local Python (hot reload)
 
 ```bash
-# Required
-DATABASE_URL=postgresql+asyncpg://agr:password@localhost:5432/agr_dev
-SECRET_KEY=$(openssl rand -hex 32)   # replace with actual output
-
-# Defaults that work out of the box
-REDIS_URL=redis://localhost:6379
-ENV=development
-API_BASE_URL=http://localhost:8000
-TEMPORAL_HOST=                       # leave blank to disable Temporal
-TEMPORAL_NAMESPACE=default
-
-# Optional features (leave blank to disable)
-RESEND_API_KEY=                      # blank = no approval emails
-SLACK_BOT_TOKEN=                     # not yet used
-CLERK_WEBHOOK_SECRET=                # blank = Svix verification skipped (dev-safe)
-CLERK_SECRET_KEY=
-CLERK_PUBLISHABLE_KEY=
-```
-
----
-
-### Step 3 — Start infrastructure (Postgres + Redis)
-
-```bash
-# Start only postgres and redis (not the API container — run API directly for hot reload)
+# Start infra only
 docker compose up -d postgres redis
 
-# Verify they're healthy
-docker compose ps
-```
-
----
-
-### Step 4 — Install Python dependencies
-
-```bash
+# Install deps
 cd services/agr-api
-python3.12 -m venv .venv
-source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-```
 
----
-
-### Step 5 — Run database migrations
-
-```bash
-# From repo root
-psql postgresql://agr:password@localhost:5432/agr_dev \
-  -f infra/migrations/001_initial_schema.sql
-
-psql postgresql://agr:password@localhost:5432/agr_dev \
-  -f infra/migrations/002_approval_enhancements.sql
-
-psql postgresql://agr:password@localhost:5432/agr_dev \
-  -f infra/migrations/003_default_policy_trigger.sql
-
-psql postgresql://agr:password@localhost:5432/agr_dev \
-  -f infra/migrations/004_agents_table.sql
-
-psql postgresql://agr:password@localhost:5432/agr_dev \
-  -f infra/migrations/005_webhooks_table.sql
-
-psql postgresql://agr:password@localhost:5432/agr_dev \
-  -f infra/migrations/006_audit_partitioning.sql
-
-# Or run them all at once:
-for f in infra/migrations/*.sql; do
-  echo "Running $f..."
-  psql postgresql://agr:password@localhost:5432/agr_dev -f "$f"
+# Run migrations (new DB credentials)
+PGPASSWORD=gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl \
+  psql -h localhost -U agr_svc_usr -d agr_platform \
+  -f ../../infra/migrations/001_initial_schema.sql
+# ... repeat for 002 through 015, or:
+for i in $(seq -w 1 15); do
+  f=$(ls ../../infra/migrations/0${i}_*.sql 2>/dev/null | head -1)
+  [ -f "$f" ] && psql postgresql://agr_svc_usr:gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl@localhost:5432/agr_platform -f "$f"
 done
-```
 
----
+# Update .env for local run
+echo "DATABASE_URL=postgresql+asyncpg://agr_svc_usr:gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl@localhost:5432/agr_platform" >> .env
 
-### Step 6 — Create your first org + API key
-
-```bash
-psql postgresql://agr:password@localhost:5432/agr_dev -c "
-INSERT INTO organizations (id, name, slug, api_key)
-VALUES (
-  gen_random_uuid(),
-  'My Org',
-  'my-org',
-  'agr_sk_' || encode(gen_random_bytes(24), 'hex')
-)
-RETURNING id, api_key;
-"
-```
-
-Save the `api_key` output — you'll use it as `Bearer <api_key>` in all requests.
-
-The `on_org_created` trigger (migration 003) automatically seeds 5 default Cedar policies for this new org.
-
----
-
-### Step 7 — Start the API server
-
-```bash
-cd services/agr-api
-source .venv/bin/activate
 uvicorn app.main:app --reload --port 8000
 ```
 
-- API: http://localhost:8000
-- Docs: http://localhost:8000/docs
-- Health: http://localhost:8000/health
-
----
-
-### Step 8 — Verify the setup
-
-```bash
-# Health check
-curl http://localhost:8000/health
-
-# Test evaluate (replace YOUR_API_KEY)
-curl -X POST http://localhost:8000/v1/evaluate \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "agent_id": "test-agent",
-    "action": "deploy",
-    "resource": "production-server",
-    "context": {"environment": "production"}
-  }'
-# Expected: APPROVAL_REQUIRED (matches default policy)
-
-curl -X POST http://localhost:8000/v1/evaluate \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "agent_id": "test-agent",
-    "action": "deploy",
-    "resource": "staging-server",
-    "context": {"environment": "staging"}
-  }'
-# Expected: ALLOW (matches default staging permit policy)
-```
-
----
-
-### Step 9 (Optional) — Run the Temporal worker
-
-Only needed if `TEMPORAL_HOST` is set and you want durable approval workflows.
-
-```bash
-# In a separate terminal
-cd services/agr-api
-source .venv/bin/activate
-
-# With Temporal running locally (e.g. via temporal server start-dev)
-TEMPORAL_HOST=localhost:7233 python -m app.workers.approval_worker
-```
-
-Start Temporal locally:
-```bash
-# Install Temporal CLI: https://temporal.io/docs/cli
-temporal server start-dev
-# UI: http://localhost:8233
-```
-
----
-
-### Step 10 — Run the Angular dashboard
-
-```bash
-cd apps/agr-dashboard
-npm install
-npm start         # http://localhost:4200 (proxies /v1 → localhost:8000)
-```
-
-On first load:
-1. Sign in with Clerk (or skip if Clerk keys are blank — dashboard will still render)
-2. Go to **Settings** and paste your `agr_sk_` API key
-3. All pages (Approvals, Policies, Audit, Agents, Webhooks) become available
-
-Build for production:
-```bash
-npm run build -- --configuration production
-# Output: dist/agr-dashboard/browser/
-```
-
----
-
-### Step 11 (Optional) — TypeScript SDK development
-
-```bash
-cd packages/agr-sdk-ts
-npm install
-npm test          # Jest tests
-npm run build     # compile ESM + CJS to dist/
-```
-
----
-
-### Dashboard Angular Patterns
-
-- **All components** are standalone (no NgModules). `imports: [...]` per component.
-- **Change detection**: `ChangeDetectionStrategy.OnPush` everywhere. Use signals to trigger updates.
-- **DI**: `inject()` function, not constructor injection.
-- **Control flow**: Angular 17 `@for`, `@if`, `@else` — NOT `*ngFor` / `*ngIf`.
-- **HTTP interceptors**: Functional (`HttpInterceptorFn`) — registered in `appConfig` via `withInterceptors([...])`.
-- **Route guards**: Functional (`CanActivateFn`) — `authGuard` (Clerk), `apiKeyGuard` (agr_sk_ key).
-- **Models** live in `src/app/core/models/`. Services live in `src/app/services/`. Shared components in `src/app/shared/`.
-- **API calls** return `Observable<T>`. Subscribe in `ngOnInit`, update signals in callbacks.
-- No `async` pipe — components subscribe manually and write to signals to keep OnPush working.
-
----
-
-### Running Tests
-
-```bash
-cd services/agr-api
-source .venv/bin/activate
-
-# All tests (uses SQLite in-memory — no Postgres/Redis needed)
-pytest -v
-
-# Unit tests only
-pytest tests/unit -v
-
-# Integration tests only
-pytest tests/integration -v
-
-# With coverage
-pytest --cov=app --cov-report=term-missing
-
-# Lint + format check
-ruff check .
-ruff format --check .
-
-# Type checking
-mypy app/
-```
-
----
-
-### Alternative: Run everything via Docker Compose
-
-```bash
-# Builds and starts postgres + redis + agr-api + agr-dashboard (port 4200)
-docker compose up --build
-
-# Migrations still need to be run manually (first time):
-docker compose exec agr-api bash -c "
-  for f in /app/../../infra/migrations/*.sql; do
-    psql \$DATABASE_URL -f \$f
-  done
-"
-```
-
----
-
-### Common Local Dev Commands
+### Common Commands
 
 ```bash
 # List orgs
-psql postgresql://agr:password@localhost:5432/agr_dev \
+docker exec agr-platform-postgres-1 psql -U agr_svc_usr -d agr_platform \
   -c "SELECT id, name, api_key, eval_count FROM organizations;"
 
 # View recent audit events
-psql postgresql://agr:password@localhost:5432/agr_dev \
-  -c "SELECT event_type, agent_id, action, resource, recorded_at FROM audit_events ORDER BY recorded_at DESC LIMIT 20;"
+docker exec agr-platform-postgres-1 psql -U agr_svc_usr -d agr_platform \
+  -c "SELECT event_type, agent_id, action, decision, recorded_at FROM audit_events ORDER BY recorded_at DESC LIMIT 20;"
 
-# View pending approvals
-curl -H "Authorization: Bearer YOUR_API_KEY" \
-  "http://localhost:8000/v1/approvals?status=pending"
-
-# Flush Redis cache (invalidate all eval caches)
+# Flush Redis eval cache
 docker compose exec redis redis-cli FLUSHDB
 
-# Check Redis keys for an org
-docker compose exec redis redis-cli KEYS "eval:*"
+# Check logs
+docker compose logs agr-api --tail=50 -f
+docker compose logs agr-dashboard --tail=20
 ```
 
 ---
 
 ## Development Workflow & Deployment Rules
 
-**These rules govern EVERY code change — features, bug fixes, refactors, migrations, dashboard updates. Follow them without exception.**
-
----
-
 ### Rule 1 — Branch Before You Touch Code
 
-Every change, no matter how small, happens on a branch. Never commit directly to `main`.
+Every change happens on a branch. Never commit directly to `main`.
 
-| Change type | Branch prefix | Example |
-|---|---|---|
-| New feature | `feature/` | `feature/slack-notifications` |
-| Bug fix | `fix/` | `fix/audit-hash-chain-corrupt` |
-| Refactor (no behaviour change) | `refactor/` | `refactor/cedar-service-cleanup` |
-| Database migration | `migration/` | `migration/008-add-org-timezone` |
-| Dependency / infra update | `chore/` | `chore/upgrade-fastapi-0116` |
-| Hotfix to production | `hotfix/` | `hotfix/429-wrong-status-code` |
-
-```bash
-git checkout main && git pull origin main
-git checkout -b feature/my-feature
-```
-
----
+| Change type | Branch prefix |
+|---|---|
+| New feature | `feature/` |
+| Bug fix | `fix/` |
+| Refactor | `refactor/` |
+| DB migration | `migration/` |
+| Infra/deps | `chore/` |
+| Hotfix | `hotfix/` |
 
 ### Rule 2 — Commit Message Format
-
-Every commit message must follow this format:
 
 ```
 <type>(<scope>): <short description>
 
-[optional body — explain WHY, not WHAT]
+<body — what changed and why>
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ```
 
-**Types:** `feat` · `fix` · `refactor` · `chore` · `test` · `docs` · `migration`
+Types: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`, `migration`
 
-**Scopes:** `api` · `dashboard` · `sdk-ts` · `sdk-python` · `infra` · `ci`
+### Rule 3 — Every PR Must Pass
 
-**Examples:**
-```
-feat(api): add GET /v1/org/me endpoint with eval usage
+- `ruff check .` — zero warnings
+- `ruff format --check .` — no reformatting needed
+- `mypy services/agr-api/app` — zero errors
+- `pytest services/agr-api/tests/ --ignore=.../postgres` — all pass (currently 158)
 
-fix(dashboard): label-has-associated-control ESLint errors in 5 components
+### Rule 4 — New Migration Rules
 
-migration(infra): add org_timezone column (008_add_org_timezone.sql)
+- Filename: `NNN_snake_case_description.sql` (next number in sequence, currently at 015)
+- Must be idempotent (`IF NOT EXISTS`, `IF EXISTS`)
+- Add to `infra/migrate.sh`
+- Add rollback script in `infra/migrations/rollback/NNN_down.sql`
 
-chore(ci): upgrade Node 20 → 24, pin action versions
-```
+### Rule 5 — New Routes
 
-**Rules:**
-- Description is imperative mood, lowercase, no period
-- Max 72 characters on first line
-- Never commit directly: always commit on a branch, then PR
+- Create new file in `app/routes/`
+- Register router in `app/main.py`
+- Add request/response schemas to `app/schemas.py`
+- Add to `UNPROTECTED_PATHS` in `app/middleware/auth.py` if no agr_sk_ auth needed
 
----
+### Rule 6 — Session Patterns
 
-### Rule 3 — Quality Gates (Run Before Every Commit)
-
-**All of these must pass before pushing. CI will catch failures — fix them locally first.**
-
-#### Python (services/agr-api + packages/)
-```bash
-cd services/agr-api && source .venv/bin/activate
-ruff check .                    # linting — zero errors
-ruff format --check .           # formatting — zero diffs
-mypy app/                       # strict type check — zero errors
-pytest tests/unit -v            # unit tests — all pass
-pytest tests/integration -v     # integration tests — all pass
-```
-
-#### TypeScript SDK (packages/agr-sdk-ts)
-```bash
-cd packages/agr-sdk-ts
-npm run typecheck               # tsc --noEmit — zero errors
-npm test                        # jest — all pass
-npm run build                   # must compile without errors
-```
-
-#### Angular Dashboard (apps/agr-dashboard)
-```bash
-cd apps/agr-dashboard
-npm run lint                    # eslint — zero errors
-npm run build -- --configuration production  # must compile
-```
-
-**If any gate fails: fix it on the same branch before opening the PR. Do not open a PR with known failures.**
-
----
-
-### Rule 4 — What Must Change Together
-
-When you add or change a feature, ALL of the following must be updated in the SAME PR:
-
-| Changed | Also update |
-|---|---|
-| New API endpoint | Schema in `schemas.py` · ORM model if new columns · Integration test · `openapi.json` if maintained · `AGR_CLAUDE.md` endpoints section |
-| New DB column | New migration file (`00N_name.sql`) · ORM model (`models.py`) · Schema (`schemas.py`) · Rollback script (`rollback/00N_down.sql`) · Tests |
-| New config var | `config.py` (pydantic field with default) · `.env.example` · `AGR_CLAUDE.md` env var reference · `docker-compose.yml` if used at runtime · `docker-compose.onprem.yml` if relevant to on-prem |
-| New Python dependency | `requirements.txt` · verify no `pip install --user` pollution |
-| New TS SDK public method | Type in `types.ts` · Export in `index.ts` · Test in `__tests__/client.test.ts` |
-| New Angular page/service | Route in `app.routes.ts` · Nav link in `sidebar.component.ts` · Model in `core/models/` |
-| Breaking API change | Dashboard service updated · TS SDK updated · Python SDK updated — ALL in same PR |
-
----
-
-### Rule 5 — Database Migrations
-
-**Migrations are permanent. They cannot be modified once merged to main.**
-
-- Migration files are numbered sequentially: `008_name.sql`, `009_name.sql`, etc.
-- Always write the rollback script `rollback/00N_down.sql` in the same PR
-- Migrations must be idempotent: use `IF NOT EXISTS`, `IF EXISTS`, `ON CONFLICT DO NOTHING`
-- Never drop a column in the same migration that adds data depending on it
-- `audit_events` is append-only and partitioned — any schema change to it requires special care (must apply to parent table AND existing partitions)
-- Test migrations locally before pushing:
-  ```bash
-  psql postgresql://agr:password@localhost:5432/agr_dev -f infra/migrations/00N_name.sql
-  # verify it works, then test rollback:
-  psql postgresql://agr:password@localhost:5432/agr_dev -f infra/migrations/rollback/00N_down.sql
-  ```
-
----
-
-### Rule 6 — CI Must Pass Before Merge
-
-The CI pipeline has three mandatory jobs + one publish job. **All three test jobs must be green before merging to `main`.**
-
-| Job | Trigger | What it checks |
-|---|---|---|
-| `lint-and-test` | PR + push to main | ruff lint + format · Python unit tests · Python integration tests |
-| `build-dashboard` | PR + push to main | Angular ESLint · Angular production build |
-| `test-ts-sdk` | PR + push to main | TS typecheck · Jest tests · TS SDK build |
-| `publish` | push to main only (after tests pass) | Builds + pushes `agr-api:latest`, `agr-api:onprem-latest`, `agr-dashboard:latest` to `ghcr.io/shreejaai/` |
-
-The `publish` job is **not** a merge gate — it runs after merge, not before.
-
-If CI fails:
-1. Read the error output carefully — do not guess
-2. Reproduce the failure locally using the quality gate commands (Rule 3)
-3. Fix it on the same branch
-4. Push — CI re-runs automatically
-
----
-
-### Rule 7 — PR Checklist (Open a PR for Every Branch)
-
-Before marking a PR ready for review (or merging if solo):
-
-- [ ] Branch name follows Rule 1 naming
-- [ ] All commits follow Rule 2 message format
-- [ ] All quality gates pass locally (Rule 3)
-- [ ] All affected files updated together (Rule 4)
-- [ ] Migration + rollback written if DB changed (Rule 5)
-- [ ] CI is green (Rule 6)
-- [ ] `AGR_CLAUDE.md` updated if: new endpoint added, new config var, new dependency, architecture decision changed
-- [ ] No secrets, `.env` files, or credentials in the diff
-
-PR description must include:
-```
-## What
-<1-3 bullet points describing the change>
-
-## Why
-<the motivation — bug it fixes, feature it enables>
-
-## Test plan
-<what was tested and how>
-```
-
----
-
-### Rule 8 — Deployment Process
-
-**SaaS deployment is manual. Images are built automatically by CI and pushed to ghcr.io.**
-
-```
-Branch → PR → CI passes (all 3 test jobs) → Merge to main
-  → CI publish job pushes:
-      ghcr.io/shreejaai/agr-api:latest          (SaaS image)
-      ghcr.io/shreejaai/agr-api:onprem-latest   (on-prem Cython-compiled image)
-      ghcr.io/shreejaai/agr-dashboard:latest
-  → Pull and deploy manually on your server
-```
-
-**SaaS — deploy to your server:**
-```bash
-# On your production server
-docker pull ghcr.io/shreejaai/agr-api:latest
-docker pull ghcr.io/shreejaai/agr-dashboard:latest
-docker compose up -d --no-build agr-api agr-dashboard
-```
-
-**On-prem — ship to a client:**
-```bash
-# Client receives: docker-compose.onprem.yml + .env.onprem (with their LICENSE_KEY)
-# Client runs:
-docker compose -f docker-compose.onprem.yml --env-file .env.onprem up -d
-# Client copies API key from first-boot logs:
-docker compose -f docker-compose.onprem.yml logs agr-api | grep "API Key"
-```
-
-**Issuing a license key for a new client:**
-```bash
-# From repo root (private key from 1Password)
-python tools/generate_license.py \
-  --private-key "<b64_private_key>" \
-  --org "Client Name" \
-  --expiry 2027-03-20 \
-  --evals 1000000
-```
-
-**Database migrations on production:**
-Migrations do NOT run automatically. After merging a migration:
-```bash
-psql $DATABASE_URL -f infra/migrations/00N_name.sql
-```
-
----
-
-### Rule 9 — Hotfix Process
-
-For a critical production bug that cannot wait for a normal PR cycle:
-
-```bash
-git checkout main && git pull origin main
-git checkout -b hotfix/short-description
-
-# Make the minimal fix — no refactoring, no unrelated changes
-# Run quality gates
-# Commit with: fix(scope): <description>
-
-git push origin hotfix/short-description
-# Open PR, add "HOTFIX" label, merge as soon as CI passes
-```
-
-A hotfix PR must contain ONLY the fix. No cleanup, no improvements. Those go in a separate PR.
-
----
-
-### Rule 10 — What Claude Must Never Do
-
-- **Never commit directly to `main`** — always a branch + PR
-- **Never skip CI** — if CI is failing for unrelated reasons, fix the underlying issue; do not bypass
-- **Never modify an existing migration file** — create a new one
-- **Never commit `.env`, secrets, or API keys** — check the diff before every commit
-- **Never open a PR with failing tests** — fix them first
-- **Never make a "quick fix" that skips the quality gates** — ruff format failures ARE CI failures
-- **Never deploy by pushing directly to Railway** — always merge to main and let CI gate the deploy
-- **Never `git push --force` to main** — destructive and irreversible
-- **Never amend a commit that has already been pushed to a shared branch**
-
----
-
-## Coding Rules — Follow These Always
-
-### Python
-- Python 3.12+. Type hints on every function signature and return type. No bare `Any`.
-- `ruff check .` and `ruff format .` before every commit. Line length 100.
-- `mypy --strict` must pass. `exclude = ["tests/"]` in mypy config.
-- Ruff ignores: `["B008", "N999"]` globally; `N802` for crewai.py; `TCH003` for routes.
-- All FastAPI routes are `async def`. All DB calls use `await`. No sync SQLAlchemy anywhere.
-- Use `AsyncSession` everywhere. Never call `session.commit()` in route handlers — `get_session()` handles it. Use `await session.flush()` to get DB-assigned values mid-transaction.
-- Pydantic v2 for all request/response schemas. Use `model_config` not `class Config`. All schemas go in `app/schemas.py`.
-- No `print()`. Use `import logging; logger = logging.getLogger(__name__)`.
-
-### Database
-- Every SQLAlchemy query touching org data must include `WHERE org_id = <org_id>`.
-- Never raw SQL in application code. SQLAlchemy expressions only. (Migrations use raw SQL — fine.)
-- Never UPDATE or DELETE from `audit_events`. It is append-only.
-- New DB columns → new migration file (`007_...sql`, etc.). Never modify existing migrations.
-- Update ORM model + schemas + tests when adding columns.
-
-### API
-- Every new route needs an integration test before the PR merges.
-- All routes except UNPROTECTED_PATHS require auth via AuthMiddleware.
-- Access org_id via `request.state.org_id: UUID` — no dependency injection needed.
-- Status codes: 200 success, 201 creation, 204 deletion, 404 not found, 409 conflict, 429 rate limit.
-- Register new routers in `main.py` with `app.include_router(router)`.
-- Use `BackgroundTasks` for work that must not block the response (Redis sync, webhooks).
-
-### Redis
-- Always degrade gracefully — if Redis is down, fall back to DB values, log a warning, never raise.
-- Never cache `APPROVAL_REQUIRED` results.
-- Invalidate `eval:{org_id}:*` on any policy mutation (create/update/delete).
-
----
-
-## Environment Variables Reference
-
-```bash
-# Required (no safe defaults for production)
-DATABASE_URL=postgresql+asyncpg://agr:password@localhost:5432/agr_dev
-SECRET_KEY=<openssl rand -hex 32>          # HMAC signing for email tokens
-
-# Required with local defaults
-REDIS_URL=redis://localhost:6379
-ENV=development                             # development | production | test
-API_BASE_URL=http://localhost:8000          # used in email approve/reject links
-
-# Optional — empty string disables the feature
-TEMPORAL_HOST=localhost:7233               # empty = Temporal disabled (DB-only approvals)
-TEMPORAL_NAMESPACE=default
-RESEND_API_KEY=re_...                      # empty = approval emails disabled
-SLACK_BOT_TOKEN=xoxb-...                  # empty = Slack notifications disabled
-CLERK_WEBHOOK_SECRET=whsec_...            # empty = Svix verification skipped (dev-safe)
-CLERK_SECRET_KEY=sk_test_...
-CLERK_PUBLISHABLE_KEY=pk_test_...
-
-# On-prem mode (ignored in saas mode)
-DEPLOYMENT_MODE=onprem                    # "saas" (default) | "onprem"
-LICENSE_KEY=<issued by generate_license.py>  # required when DEPLOYMENT_MODE=onprem; app refuses to start without it
-ONPREM_ORG_NAME=Acme Corp                # org name for auto-bootstrapped org (shown in dashboard + logs)
-```
-
----
-
-## Pricing Tiers
-
-| Plan | Evals | Reset | Price |
-|---|---|---|---|
-| developer | 100 | Weekly (auto-reset every 7 days) | Free |
-| startup | 1,000,000 | Monthly | $49/mo |
-| business | unlimited | — | $199/mo |
-| enterprise | unlimited | — | Custom |
-
-`eval_limit = 0` means unlimited. Check: `org.eval_limit > 0 and eval_count >= org.eval_limit`
-
-Weekly reset: `eval_week_start` column records when the current week began. On every `/v1/evaluate`
-call, if `now - eval_week_start >= 7 days` (or `eval_week_start` is NULL), `eval_count` is reset
-to 0 and `eval_week_start` is updated. Redis counter is checked first; DB is source of truth.
-
----
-
----
-
-## On-Prem Deployment (Enterprise Tier)
-
-### How It Works
-
-`DEPLOYMENT_MODE=onprem` activates single-tenant mode. Each client gets one isolated deployment (their own Postgres, their own org).
-
-```
-Client server:
-  docker compose -f docker-compose.onprem.yml --env-file .env.onprem up -d
-    ↓
-  AGR API starts → app/license.py validates LICENSE_KEY (Ed25519 signature + expiry)
-    ↓ (first boot only)
-  _onprem_bootstrap() creates one Organization + seeds 5 default policies
-  Prints API key to Docker logs ONCE — ops team copies it
-    ↓
-  Client uses AGR normally via API key
-```
-
-### License Key System
-
-```
-You (Shreeja AI):
-  1. Generated key pair once with tools/generate_keypair.py
-     → Private key: stored in 1Password (NEVER committed)
-     → Public key:  baked into services/agr-api/app/license.py as AGR_PUBLIC_KEY_B64
-
-  2. Issue per-client license with tools/generate_license.py:
-       python tools/generate_license.py --private-key <b64> --org "Acme" --expiry 2027-01-01
-     → Sends client a string like: eyJvcmciOi....<sig>
-
-Client:
-  Sets LICENSE_KEY=eyJvcmciOi... in .env.onprem
-  App validates on startup — refuses to start if expired or tampered
-```
-
-### On-Prem vs SaaS Differences
-
-| Behaviour | SaaS (`DEPLOYMENT_MODE=saas`) | On-Prem (`DEPLOYMENT_MODE=onprem`) |
-|---|---|---|
-| Org creation | Clerk webhook POST /v1/clerk/webhook | Auto-bootstrapped on first start |
-| Auth errors | "Check https://dashboard.agr.dev/settings" | "Contact your AGR administrator" |
-| Clerk dependency | Required for dashboard login | Not required |
-| DB tenancy | Multi-tenant (many orgs per DB) | Single-tenant (one org per deployment) |
-| Startup check | None | License validation (hard stop if invalid) |
-| Docker image | `ghcr.io/shreejaai/agr-api:latest` | `ghcr.io/shreejaai/agr-api:onprem-latest` |
-| Source code | `.py` files in image | Compiled to `.so` (Cython), `.py` removed |
-
-### Code Protection
-
-`Dockerfile.onprem` uses a 4-stage build:
-1. `deps` — install Python packages
-2. `cedar-builder` — compile Cedar CLI from Rust
-3. `cython-build` — compile `app/**/*.py` → `.so` native binaries (except `__init__.py`, `main.py`, `config.py`, workers, workflows)
-4. `runtime` — lean final image with `.so` files only; `.py` source is not present
-
-The public key (`AGR_PUBLIC_KEY_B64` in `license.py`) is safe to bake into the image — it can only verify signatures, not create them.
-
----
-
-## Future Scope (Planned, Not Built)
-
-### Architecture Hardening
-1. **PyO3 Cedar bindings** — replace CLI subprocess with Python bindings when available
-
-## Recently Implemented (formerly Future Scope)
-
-- **On-prem enterprise tier** — `DEPLOYMENT_MODE=onprem` activates single-tenant self-hosted mode with Ed25519 license validation, auto org bootstrap, Cython-compiled distribution image, and `docker-compose.onprem.yml` for clients.
-- **Webhook DLQ** — `webhook_deliveries` table records every delivery attempt; manual retry via `POST /v1/webhooks/{id}/deliveries/{delivery_id}/retry`.
-- **Clerk Backend API verification** — `GET /v1/clerk/api-key` verifies Clerk session JWT via Clerk Backend API; auto-populates API key in dashboard after login.
-- **Temporal worker in docker-compose** — `temporal-worker` service added under `profiles: ["temporal"]`; uses `host.docker.internal:7233` to reach host Temporal.
-- **Cedar CLI in Docker** — `rust:slim` build stage compiles `cedar-policy-cli`; binary available at `/usr/local/bin/cedar` in the runtime image.
-- **ghcr.io CI publish** — CI `publish` job builds and pushes `agr-api:latest`, `agr-api:onprem-latest`, `agr-dashboard:latest` to `ghcr.io/shreejaai/` on every merge to main.
-- **`POST /v1/approvals/{id}/escalate`** — updates `approver_email`, resends notification email. Returns 409 if not pending.
-- **`GET /v1/audit/verify`** — walks all audit events in sequence order, re-computes SHA-256 hashes, returns `{valid, total, first_invalid_sequence}`.
-- **Slack retry on failure** — `send_approval_slack()` retries 3× with exponential backoff (1s, 2s delays). Uses real HMAC tokens for approve/reject buttons.
-- **Rollback migrations** — `infra/migrations/rollback/001_down.sql` through `013_down.sql` written.
-
-### Production Hardening (PRs #6 and #7 — 2026-03-21)
-
-All 30 identified production issues resolved across two PRs:
-
-**Security**
-- XSS: `html.escape()` on all user fields in approval confirm page and email HTML
-- Cross-tenant: `list_deliveries` now filters `WebhookDelivery.org_id == org_id`
-- Webhook secret masked (`agr_wh_••••••••`) on all GET responses; revealed only on POST creation
-- CORS origins configurable via `CORS_ORIGINS` env var (not hardcoded `*`)
-- Auth error JSON built with `json.dumps()` — hint text can't break JSON structure
-- Webhook URLs validated for `http`/`https` scheme only (rejects `javascript:`, `data:` etc.)
-- Email subject strips `\r\n` to prevent header injection
-
-**Race Conditions & Correctness**
-- Audit hash-chain: `SELECT FOR UPDATE` on sequence number query
-- Weekly eval reset: single atomic SQL `UPDATE ... WHERE eval_week_start < threshold`
-- Redis rate-limit seed: atomic `SET NX` replaces `exists()+set()` TOCTOU pair
-- Approval decisions: `SELECT FOR UPDATE` in `_load_pending` prevents concurrent approve race
-- Approval expiry enforced at decision time — returns 410 on expired requests
-
-**Token Security**
-- v2 email tokens include `token_version` in HMAC: `{id}:{decision}:{expires}:{version}:{sig}`
-- Escalation increments `token_version` — old approver links invalidated immediately
-- Legacy v1 tokens (4-part) still accepted for in-flight emails (backward compat)
-- Rate limit on `POST /v1/approvals/decide`: max 10 attempts per approval per 5 min
-
-**Reliability**
-- `fire_approval_webhook` opens its own DB session — safe as `BackgroundTask`
-- `escalate_approval` sends email as `BackgroundTask` — no longer blocks response
-- Webhook retry aborts immediately on permanent 4xx (401/403/404) — no wasted retries
-
-**Observability**
-- `RequestLoggingMiddleware` + `ContextVar` propagates request ID to every log line
-- `X-Request-ID` response header on every response
-- `GET /health/ready` readiness probe — returns 503 if DB or Redis is down
-
-**Validation**
-- `EvaluateRequest.context` capped at 50 keys (DoS guard)
-- Control chars (incl. null bytes) stripped from `agent_id`, `action`, `resource`
-- Basic Cedar rule structure validated: must start with `permit`/`forbid`, end with `;`, balanced parens
-- `approval_requests.status` has DB-level `CHECK` constraint (migration 013)
-- `eval_week_start` set to `datetime.now(UTC)` on org creation (Clerk + on-prem bootstrap)
-
-**DB Indexes (migration 011)**
-- `idx_audit_org_time` — `audit_events(org_id, recorded_at DESC)`
-- `idx_approvals_org_status` — `approval_requests(org_id, status)`
-- `idx_delivery_webhook_time` — `webhook_deliveries(webhook_id, created_at DESC)`
-
----
-
-## Risk Scoring Engine (`app/services/risk_service.py`)
-
-Deterministic 0–100 risk scorer with no LLM dependency. Runs after Cedar evaluation.
-
-### Weights
-```
-action_severity  0.35  — delete/drop/destroy/exec/kill/rm/wipe → 100; write/create/deploy → 60; read → 10
-context_signals  0.25  — environment=production → +40; dry_run=true → -20; role=admin → +20; etc.
-rate_pattern     0.15  — eval_count / eval_limit fraction (0 when eval_limit=0)
-agent_trust      0.15  — "untrusted"|"unknown" → 80; "trusted" → 10; else → 40
-amount_scale     0.10  — "all"/"everything"/"entire"/"bulk" in resource → 80; else → 0
-```
-
-### Decision upgrade logic (Cedar DENY always wins)
-```
-risk_score > risk_thresholds_approval_max (default 70) → ALLOW upgraded to DENY
-risk_score > risk_thresholds_allow_max   (default 30) → ALLOW upgraded to APPROVAL_REQUIRED
-Cedar DENY stays DENY regardless of risk score.
-```
-
-### RiskResult dataclass
 ```python
-@dataclass
-class RiskResult:
-    score: int          # 0-100
-    level: str          # "low" | "medium" | "high"
-    factors: dict[str, int]  # per-factor scores before weighting
-```
+# Correct — always use flush(), never commit() in routes
+session.add(obj)
+await session.flush()
+await session.refresh(obj)
 
-### Config
-```
-RISK_SCORING_ENABLED=true       # default: true
-RISK_THRESHOLDS_ALLOW_MAX=30    # default: 30
-RISK_THRESHOLDS_APPROVAL_MAX=70 # default: 70
-```
+# Correct — soft delete
+obj.active = False
+await session.flush()
 
----
+# Correct — hard delete
+await session.delete(obj)
+await session.flush()   # explicit flush required
 
-## Compliance Hooks Framework (`app/services/compliance_service.py`)
-
-Advisory-only plugin system. Findings never modify the decision.
-
-### Key types
-```python
-class CompliancePlugin(ABC):
-    @property
-    @abstractmethod
-    def name(self) -> str: ...
-    @abstractmethod
-    async def check(self, ctx: ComplianceContext) -> list[ComplianceFinding]: ...
-
-@dataclass
-class ComplianceContext:
-    org_id: str; agent_id: str; action: str; resource: str
-    context: dict; decision: str; risk_score: int; risk_level: str
-
-@dataclass
-class ComplianceFinding:
-    plugin: str; standard: str; rule_id: str; severity: str  # "info"|"warning"|"violation"
-    message: str; passed: bool
-```
-
-### Registry pattern
-```python
-registry = get_registry()           # module-level singleton, created on first call
-registry.register(MyPlugin())        # register in FastAPI lifespan
-reset_registry()                     # tests only — creates fresh singleton
-```
-Fail-open: exceptions from individual plugins are caught and logged; other plugins still run.
-
-### Built-in plugin: `AuditTrailCompliancePlugin`
-Location: `app/services/compliance_plugins/audit_trail_check.py`
-
-| Rule ID | Standard | Check |
-|---|---|---|
-| EU-AI-ACT-ART13-AGENT-ID | EU AI Act Art.13 | agent_id is descriptive (len > 3, no "unknown") |
-| SOC2-CC6.1-ACTION-SPECIFIC | SOC2 CC6.1 | action is specific (not "*" or "all") |
-| ISO42001-8.4-RESOURCE-IDENTIFIED | ISO 42001 §8.4 | resource is non-empty and identified |
-| EU-AI-ACT-ART13-CONTEXT | EU AI Act Art.13 | context provided when decision is DENY or APPROVAL_REQUIRED |
-
-### Adding a new plugin
-```python
-class MyPlugin(CompliancePlugin):
-    @property
-    def name(self) -> str:
-        return "my_plugin"
-    async def check(self, ctx: ComplianceContext) -> list[ComplianceFinding]:
-        ...
-
-# In main.py lifespan:
-get_registry().register(MyPlugin())
+# Correct — org access (no Depends)
+org_id: uuid.UUID = request.state.org_id
+org: Organization = request.state.org
 ```
 
 ---
 
-## Policy Import/Export (`app/services/policy_import_service.py`)
+## What Is NOT Yet Implemented
 
-### Import formats
-- **JSON** (default): `Content-Type: application/json` — `{ policies: [...], dry_run: bool, overwrite: bool }`
-- **YAML**: `Content-Type: application/x-yaml` — same structure, YAML-encoded
-- **Cedar raw**: `Content-Type: text/plain` — one Cedar rule per `permit`/`forbid` block; name extracted from `// @name:` comment or auto-generated
-
-### Import behavior
-- `dry_run=true` — validates and returns what would happen, no DB writes
-- `overwrite=false` (default) — duplicates (matched by name) → status `"skipped"`
-- `overwrite=true` — duplicates → updated (cedar_rule, active); status `"updated"`
-- New policies → status `"created"`
-- Validation errors → status `"error"`, processing continues for remaining items
-
-### Export
-`GET /v1/policies/export?active_only=false` returns JSON array compatible with import input.
-
-### Route ordering critical detail
-```python
-# policies.py — import/export MUST be declared BEFORE /{policy_id}
-router.post("/policies/import", ...)   # line ~N
-router.get("/policies/export", ...)    # line ~N+20
-router.get("/policies/{policy_id}", .) # line ~N+40  ← otherwise "import" hits UUID parse → 422
-```
-
----
-
-## Demo Examples (`examples/`)
-
-```
-examples/
-├── curl/
-│   ├── 01_register_agent.sh         — register an agent
-│   ├── 02_evaluate_allow.sh          — basic ALLOW evaluation
-│   ├── 03_evaluate_deny.sh           — DENY via Cedar forbid
-│   ├── 04_approval_flow.sh           — full approval workflow
-│   ├── 05_audit_log.sh               — fetch audit log
-│   ├── 06_policy_crud.sh             — create/read/update/delete policy
-│   ├── 07_webhooks.sh                — webhook CRUD + delivery history
-│   ├── 08_policy_import_export.sh    — bulk import/export
-│   └── 09_risk_scoring.sh            — risk score in evaluate response
-├── python/
-│   ├── 01_basic_evaluate.py          — AGRClient evaluate
-│   ├── 02_approval_flow.py           — wait_for_approval
-│   ├── 03_langgraph_agent.py         — LangGraph integration
-│   ├── 04_crewai_agent.py            — CrewAI integration
-│   ├── 05_policy_import.py           — bulk import from Python
-│   └── 06_compliance_findings.py     — inspect compliance findings
-├── node/
-│   ├── 01_basic_evaluate.ts          — TypeScript SDK evaluate
-│   └── 02_approval_flow.ts           — TypeScript SDK waitForApproval
-└── policy_packs/
-    ├── fintech.yaml                   — financial services policies
-    ├── devops.yaml                    — DevOps/CI-CD policies
-    ├── healthcare_hipaa.yaml          — HIPAA compliance policies
-    ├── eu_ai_act.yaml                 — EU AI Act compliance policies
-    └── deny_all.yaml                  — lockdown: deny everything
-```
-
----
-
-## Architecture Decisions (Do Not Revisit Without Good Reason)
-
-| Decision | Rationale |
-|---|---|
-| FastAPI not Go | Solo founder knows Python. FastAPI is fast enough. Swap to Go post-Series A if latency demands it. |
-| Cedar not OPA | Formal verification, deny-by-default, 42x faster for this use case. |
-| Temporal not custom queue | Durable suspension is the hard problem. Temporal solves it correctly. Not worth reinventing. |
-| No FK on audit_events | Audit data must outlive organizations. If an org deletes their account, their audit trail must be preserved for compliance. |
-| API keys not JWTs for SDK | API keys are stateless, simple to rotate, easy for developers to understand. |
-| Cedar CLI → Python fallback | CLI used when available. Fallback lets development and testing proceed without cedar binary. |
-| SQLite for integration tests | No PostgreSQL service needed in local test runs. Trade-off: RLS, JSONB, partitioning not tested. |
-| Single schemas.py | All Pydantic models in one file — easy to find the full API surface. Split only if > ~300 lines. |
-| Redis authoritative for rate limits | Avoids a DB write on every single evaluate call. Background task syncs to DB for billing. |
-| Temporal graceful degradation | If TEMPORAL_HOST is unset, approval flow continues with DB-only tracking — no hard dependency. |
-
----
-
-## What This Repo Does NOT Do
-
-- **No LLM calls in the governance path.** Cedar is deterministic. The evaluate endpoint never calls an AI model.
-- **No agent execution.** AGR evaluates agent actions. It does not run agents.
-- **No LLM in the dashboard.** The Angular dashboard is a pure REST client — no AI calls.
-- **No secrets management.** If an agent tries to read `.env` files, Cedar blocks it.
-- **No real-time push.** All client SDK communication is polling or REST. Webhooks push to registered endpoints.
+- Cedar CLI subprocess wired end-to-end [policy_engine.py has the code; Docker build compiles cedar but integration needs verification]
+- Temporal actual durable workflows [graceful DB-only fallback when TEMPORAL_HOST unset]
+- Webhook dead-letter queue manual replay UI [API endpoint exists; dashboard UI not built]
+- Rollback scripts for migrations 014 and 015
+- `openapi.json` auto-generation in CI [currently manually maintained, can drift]
