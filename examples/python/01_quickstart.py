@@ -1,4 +1,5 @@
 """AGR Quickstart — protect any AI agent tool call in 3 lines."""
+
 import os
 
 from agr import AGRClient

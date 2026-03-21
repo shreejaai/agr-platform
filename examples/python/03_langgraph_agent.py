@@ -4,6 +4,7 @@ This example shows how to protect a LangGraph tool using AGR. No actual LLM
 calls are made — the agent decision is mocked with hardcoded values so you can
 run this script standalone.
 """
+
 import os
 from typing import Any
 
@@ -19,6 +20,7 @@ agr = AGRClient(api_key=API_KEY, base_url=BASE_URL)
 # Mock tool — in a real LangGraph agent this would be a @tool decorated fn
 # ---------------------------------------------------------------------------
 
+
 def search_web(query: str) -> str:
     """Search the web and return a summary."""
     # Real implementation would call a search API
@@ -28,6 +30,7 @@ def search_web(query: str) -> str:
 # ---------------------------------------------------------------------------
 # AGR-governed wrapper
 # ---------------------------------------------------------------------------
+
 
 def governed_search_web(agent_id: str, query: str, context: dict[str, Any] | None = None) -> str:
     """Call search_web only if AGR permits it."""
@@ -61,6 +64,7 @@ def governed_search_web(agent_id: str, query: str, context: dict[str, Any] | Non
 # ---------------------------------------------------------------------------
 # Simulated LangGraph agent decisions
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     print("=== AGR + LangGraph Governance Demo ===\n")

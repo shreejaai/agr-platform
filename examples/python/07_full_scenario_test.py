@@ -2,6 +2,7 @@
 
 Exit code 0 if all tests pass, 1 if any fail.
 """
+
 import os
 import sys
 import threading
@@ -27,6 +28,7 @@ def record(name: str, passed: bool, note: str = "") -> None:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_safe_read() -> None:
     result = agr.evaluate(
@@ -144,6 +146,7 @@ def test_approval_lifecycle() -> None:
 # ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("=== AGR Full Scenario Test Suite ===\n")

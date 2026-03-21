@@ -4,6 +4,7 @@ This example shows how to wrap any callable with AGR governance using a
 reusable wrapper class. No actual CrewAI import is needed — the pattern
 mirrors how you would use it in a real CrewAI agent.
 """
+
 import os
 from collections.abc import Callable
 from typing import Any
@@ -19,6 +20,7 @@ agr = AGRClient(api_key=API_KEY, base_url=BASE_URL)
 # ---------------------------------------------------------------------------
 # AGRToolWrapper — drop this into any CrewAI agent's tool list
 # ---------------------------------------------------------------------------
+
 
 class AGRToolWrapper:
     """Wraps a callable tool with AGR governance.
@@ -73,14 +75,13 @@ class AGRToolWrapper:
                 return self.tool(*args, **kwargs)
             raise PermissionError(f"Tool '{self.action}' approval rejected or timed out")
         else:
-            raise PermissionError(
-                f"Tool '{self.action}' blocked by AGR policy: {result.reason}"
-            )
+            raise PermissionError(f"Tool '{self.action}' blocked by AGR policy: {result.reason}")
 
 
 # ---------------------------------------------------------------------------
 # Mock tools — stand-ins for real CrewAI tools
 # ---------------------------------------------------------------------------
+
 
 def query_database(query: str) -> str:
     return f"[mock DB] Results for: {query}"
@@ -97,6 +98,7 @@ def read_file(path: str) -> str:
 # ---------------------------------------------------------------------------
 # Demo
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     print("=== AGR + CrewAI Tool Wrapper Demo ===\n")
