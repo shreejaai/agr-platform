@@ -1,3 +1,3 @@
-from agr.client import AGRClient, EvaluationResult
+from agr.client import AGRAuthError, AGRClient, AGRError, AGRRateLimitError, EvaluationResult
 
-__all__ = ["AGRClient", "EvaluationResult"]
+__all__ = ["AGRClient", "EvaluationResult", "AGRError", "AGRAuthError", "AGRRateLimitError"]
