@@ -240,3 +240,10 @@ out/
 # OS
 .DS_Store
 Thumbs.db
+
+# Documentation files — kept local, not committed
+# (Already-tracked files like README.md and AGR_CLAUDE.md are unaffected)
+*.md
+*.docx
+*.doc
+*.pdf
