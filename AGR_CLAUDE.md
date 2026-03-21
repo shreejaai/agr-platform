@@ -92,7 +92,7 @@ agr-platform/
 │       │   │   │   ├── login/login.component.ts    # Clerk sign-in flow
 │       │   │   │   ├── home/home.component.ts      # Stat cards + recent audit events
 │       │   │   │   ├── approvals/approvals.component.ts  # List + inline approve/reject
-│       │   │   │   ├── policies/policies.component.ts    # CRUD + enable/disable toggle
+│       │   │   │   ├── policies/policies.component.ts    # CRUD + enable/disable toggle; bulk Import (JSON/YAML, drag-and-drop modal with dry-run preview and confirm step); Export (downloads agr_policies_YYYY-MM-DD.json)
 │       │   │   │   ├── audit/audit.component.ts    # Filtered table + pagination
 │       │   │   │   ├── agents/agents.component.ts  # Register + list, API key reveal
 │       │   │   │   ├── webhooks/webhooks.component.ts    # Create + list + delete
@@ -241,6 +241,12 @@ agr-platform/
 ├── docker-compose.onprem.yml           # On-prem self-hosted deployment (uses ghcr.io images, single-tenant)
 ├── docker-compose.test.yml             # Isolated postgres:5433 + redis:6380 for PostgreSQL integration tests
 ├── .env                                # Root-level Docker Compose overrides (gitignored) — CLERK_*, ENV, CORS_ORIGINS
+├── examples/
+│   ├── README.md
+│   ├── curl/          # 12 curl scripts (00_setup through 12_full_demo)
+│   ├── python/        # 7 Python SDK examples + requirements.txt
+│   ├── node/          # 3 TypeScript SDK examples
+│   └── policy_packs/  # 6 policy pack files (finance, devops, data_access, security, starter)
 ├── tools/
 │   ├── generate_keypair.py             # One-time Ed25519 key pair generator
 │   └── generate_license.py            # Issue signed license keys per customer
@@ -594,6 +600,79 @@ apiKeyInterceptor:
 
 ---
 
+## Python SDK (`packages/agr-sdk-python/`)
+
+### Methods
+```
+evaluate(agent, action, resource, context={}, approver_email=None) -> EvaluationResult
+wait_for_approval(approval_id, timeout=3600, poll_interval=5) -> bool
+register_agent(agent_id, metadata={}) -> dict
+import_policies(policies=[], overwrite=False, dry_run=False) -> dict
+    # Bulk import PolicyImportItem dicts. Returns PolicyImportResponse.
+export_policies(active_only=True) -> list[dict]
+    # Export all org policies. Returns list of PolicyImportItem-compatible dicts.
+```
+
+### EvaluationResult fields
+```
+decision: str                         # "ALLOW" | "DENY" | "APPROVAL_REQUIRED"
+reason: str | None
+policy_id: str | None
+approval_id: str | None
+requires_approval: bool               # True when decision == "APPROVAL_REQUIRED"
+latency_ms: float | None
+eval_id: str | None
+risk_score: int | None                # 0-100 risk score (None if risk scoring disabled)
+risk_level: str | None                # "LOW" | "MEDIUM" | "HIGH"
+risk_factors: dict | None             # factor breakdown e.g. {"action_severity": 40}
+compliance_findings: list | None      # [{plugin, compliant, findings, framework}]
+```
+
+### Exports from `__init__.py`
+```
+AGRClient, EvaluationResult, AGRError, AGRAuthError, AGRRateLimitError
+```
+
+### Plugins
+- `agr.plugins.langgraph` — `@agr_governed(agr_client=agr, agent_id=...)` decorator for LangGraph tools
+- `agr.plugins.crewai` — `AGRToolWrapper` class decorator for CrewAI tools
+
+---
+
+## TypeScript SDK (`packages/agr-sdk-ts/`)
+
+### Methods
+```typescript
+evaluate(request: EvaluationRequest): Promise<EvaluationResult>
+waitForApproval(approvalId: string, timeoutMs?: number): Promise<boolean>
+registerAgent(agentId: string, metadata?: Record<string, unknown>): Promise<AgentApiResponse>
+importPolicies(request: PolicyImportRequest): Promise<PolicyImportResponse>
+exportPolicies(activeOnly?: boolean): Promise<PolicyImportItem[]>
+```
+
+### EvaluationResult fields
+```typescript
+decision: string
+reason: string | null
+policyId: string | null
+approvalId: string | null
+requiresApproval: boolean
+latencyMs: number | null
+evalId: string | null
+riskScore: number | null
+riskLevel: string | null
+riskFactors: Record<string, number> | null
+complianceFindings: ComplianceFinding[] | null
+```
+
+### Exported types from `index.ts`
+```
+AGRClient, EvaluationResult, AGRError, AGRAuthError, AGRRateLimitError,
+ComplianceFinding, PolicyImportItem, PolicyImportRequest, PolicyImportResponse, PolicyImportResult
+```
+
+---
+
 ## App Config (`app/config.py`)
 
 Uses `pydantic_settings.BaseSettings`. Reads from `.env`:
@@ -900,8 +979,8 @@ org: Organization = request.state.org
 
 ## What Is NOT Yet Implemented
 
-- Cedar CLI subprocess wired end-to-end [policy_engine.py has the code; Docker build compiles cedar but integration needs verification]
-- Temporal actual durable workflows [graceful DB-only fallback when TEMPORAL_HOST unset]
-- Webhook dead-letter queue manual replay UI [API endpoint exists; dashboard UI not built]
+- Cedar CLI subprocess wired end-to-end (policy_engine.py is Python regex fallback only)
+- Temporal actual durable workflows (graceful DB-only fallback when TEMPORAL_HOST unset)
+- Webhook dead-letter queue manual replay UI in dashboard
 - Rollback scripts for migrations 014 and 015
-- `openapi.json` auto-generation in CI [currently manually maintained, can drift]
+- `openapi.json` auto-generation in CI
