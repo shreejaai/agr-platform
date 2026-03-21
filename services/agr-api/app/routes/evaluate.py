@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 from sqlalchemy import or_
 
+from app.config import settings
 from app.database import get_session
 from app.schemas import ErrorResponse, EvaluateRequest, EvaluateResponse
 from app.services.approval_service import create_approval_request
@@ -29,6 +30,7 @@ from app.services.redis_service import (
     set_cached_eval,
     sync_eval_count_to_db,
 )
+from app.services.risk_service import RiskResult, compute_risk_score
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +150,35 @@ async def evaluate(
         context=body.context,
     )
 
+    # -------------------------------------------------------------------------
+    # Risk scoring — runs after Cedar; can upgrade ALLOW to APPROVAL_REQUIRED/DENY
+    # Cedar DENY always wins; risk scoring only affects ALLOW decisions.
+    # -------------------------------------------------------------------------
+    risk: RiskResult | None = None
+    if settings.risk_scoring_enabled:
+        risk = compute_risk_score(
+            agent_id=body.agent_id,
+            action=body.action,
+            resource=body.resource,
+            context=body.context,
+            eval_count=org.eval_count,
+            eval_limit=org.eval_limit,
+        )
+        # Only override if Cedar said ALLOW — DENY/APPROVAL_REQUIRED are final
+        if result.decision == "ALLOW":
+            if risk.score > settings.risk_thresholds_approval_max:
+                result.decision = "DENY"
+                result.reason = (
+                    f"Risk score {risk.score}/100 ({risk.level}) exceeds threshold "
+                    f"{settings.risk_thresholds_approval_max}. Action denied."
+                )
+            elif risk.score > settings.risk_thresholds_allow_max:
+                result.decision = "APPROVAL_REQUIRED"
+                result.reason = (
+                    f"Risk score {risk.score}/100 ({risk.level}) requires human approval. "
+                    f"Threshold is {settings.risk_thresholds_allow_max}."
+                )
+
     if result.decision == "APPROVAL_REQUIRED":
         approval = await create_approval_request(
             session=session,
@@ -167,6 +198,14 @@ async def evaluate(
         else f"TOOL_{result.decision}"
     )
 
+    risk_payload: dict[str, object] = {}
+    if risk is not None:
+        risk_payload = {
+            "risk_score": risk.score,
+            "risk_level": risk.level,
+            "risk_factors": risk.factors,
+        }
+
     await create_audit_event(
         session=session,
         org_id=org_id,
@@ -177,7 +216,7 @@ async def evaluate(
         decision=result.decision,
         policy_id=uuid.UUID(result.policy_id) if result.policy_id else None,
         approval_id=uuid.UUID(approval_id) if approval_id else None,
-        payload={"context": body.context, "eval_id": eval_id},
+        payload={"context": body.context, "eval_id": eval_id, **risk_payload},
     )
 
     # Cache ALLOW/DENY results; sync DB eval_count in background
@@ -204,4 +243,7 @@ async def evaluate(
         approval_id=approval_id,
         latency_ms=result.latency_ms,
         eval_id=eval_id,
+        risk_score=risk.score if risk else None,
+        risk_level=risk.level if risk else None,
+        risk_factors=risk.factors if risk else None,
     )
