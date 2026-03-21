@@ -3,13 +3,21 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models import Policy
-from app.schemas import PolicyCreate, PolicyResponse, PolicyUpdate
+from app.schemas import (
+    PolicyCreate,
+    PolicyImportRequest,
+    PolicyImportResponse,
+    PolicyResponse,
+    PolicyUpdate,
+)
+from app.services.policy_import_service import export_policies, import_policies
 from app.services.redis_service import invalidate_org_eval_cache
 
 logger = logging.getLogger(__name__)
@@ -70,6 +78,43 @@ async def create_policy(
     await session.refresh(policy)
     await invalidate_org_eval_cache(org_id)
     return _policy_to_response(policy)
+
+
+# NOTE: /policies/import and /policies/export MUST be before /{policy_id}
+# so FastAPI does not attempt to parse "import"/"export" as a UUID.
+
+
+@router.post("/policies/import", response_model=PolicyImportResponse, status_code=200)
+async def bulk_import_policies(
+    body: PolicyImportRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> PolicyImportResponse:
+    """Bulk import policies from a JSON list.
+
+    Set dry_run=true to validate without writing.
+    Set overwrite=true to update existing policies with matching names.
+    """
+    org_id: uuid.UUID = request.state.org_id
+    result = await import_policies(session, org_id, body)
+    if not body.dry_run:
+        await invalidate_org_eval_cache(org_id)
+    return result
+
+
+@router.get("/policies/export")
+async def bulk_export_policies(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    active_only: bool = Query(False, description="Export only active policies"),
+) -> JSONResponse:
+    """Export all org policies as a JSON array suitable for re-import."""
+    org_id: uuid.UUID = request.state.org_id
+    policies = await export_policies(session, org_id, active_only=active_only)
+    return JSONResponse(
+        content={"policies": policies, "total": len(policies)},
+        headers={"Content-Disposition": "attachment; filename=policies_export.json"},
+    )
 
 
 @router.get("/policies/{policy_id}", response_model=PolicyResponse)
