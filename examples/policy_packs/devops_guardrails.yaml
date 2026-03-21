@@ -1,0 +1,37 @@
+# AGR Policy Pack: DevOps Guardrails
+# Suitable for: CI/CD pipelines, infrastructure automation, SRE tooling
+
+policies:
+  - name: "DevOps: Allow staging deployments"
+    level: org
+    cedar_rule: >-
+      permit(principal, action == Action::"deploy", resource)
+      when { context has environment && context.environment == "staging" };
+
+  - name: "DevOps: Require approval for production deployments"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"deploy", resource)
+      when { context has environment && context.environment == "production" }
+      unless { context has approval_status && context.approval_status == "approved" };
+
+  - name: "DevOps: Block production database schema changes"
+    level: org
+    cedar_rule: >-
+      forbid(principal,
+        action in [Action::"db.drop", Action::"db.truncate", Action::"db.alter"],
+        resource)
+      when { context has environment && context.environment == "production" };
+
+  - name: "DevOps: Allow read operations on all environments"
+    level: org
+    cedar_rule: >-
+      permit(principal,
+        action in [Action::"read", Action::"list", Action::"describe", Action::"get"],
+        resource);
+
+  - name: "DevOps: Block force-push to main branch"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"git.force_push", resource)
+      when { context has branch && context.branch == "main" };
