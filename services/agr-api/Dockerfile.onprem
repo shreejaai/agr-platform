@@ -34,7 +34,7 @@ COPY packages/ /packages/
 
 # Install build tools + Cython
 RUN pip install --no-cache-dir cython setuptools \
-    && apt-get update -qq && apt-get install -y --no-install-recommends gcc \
+    && apt-get update -qq && apt-get install -y --no-install-recommends gcc libc-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Compile .py → .so  (parallel, 4 threads)
