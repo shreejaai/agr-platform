@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models import Agent
-from app.schemas import AgentRegisterRequest, AgentResponse
+from app.schemas import AgentRegisterRequest, AgentResponse, AgentUpdateRequest
 
 router = APIRouter(prefix="/v1")
 
@@ -19,6 +19,7 @@ def _to_response(agent: Agent) -> AgentResponse:
         org_id=str(agent.org_id),
         agent_id=agent.agent_id,
         metadata=agent.agent_metadata,
+        active=agent.active,
         created_at=agent.created_at,
         updated_at=agent.updated_at,
     )
@@ -56,6 +57,56 @@ async def register_agent(
     await session.flush()
     await session.refresh(agent)
     return _to_response(agent)
+
+
+@router.patch("/agents/{agent_id}", response_model=AgentResponse)
+async def update_agent(
+    agent_id: uuid.UUID,
+    body: AgentUpdateRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> AgentResponse:
+    """Update an agent's metadata or active status."""
+    org_id: uuid.UUID = request.state.org_id
+    result = await session.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.org_id == org_id)
+    )
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+
+    meta = dict(agent.agent_metadata or {})
+    if body.name is not None:
+        meta["name"] = body.name
+    if body.description is not None:
+        meta["description"] = body.description
+    if body.framework is not None:
+        meta["framework"] = body.framework
+    agent.agent_metadata = meta
+
+    if body.active is not None:
+        agent.active = body.active
+
+    await session.flush()
+    await session.refresh(agent)
+    return _to_response(agent)
+
+
+@router.delete("/agents/{agent_id}", status_code=204)
+async def delete_agent(
+    agent_id: uuid.UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Delete a registered agent."""
+    org_id: uuid.UUID = request.state.org_id
+    result = await session.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.org_id == org_id)
+    )
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    await session.delete(agent)
 
 
 @router.get("/agents/{agent_id}", response_model=AgentResponse)

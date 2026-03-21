@@ -9,9 +9,14 @@ interface PolicyForm {
   name: string;
   effect: 'allow' | 'deny' | 'require_approval';
   action: string;
-  resource_attr: string;    // e.g. "environment"
-  resource_value: string;   // e.g. "production"
+  resource_attr: string;
+  resource_value: string;
   level: 'org' | 'project' | 'agent';
+}
+
+interface PolicyEditForm {
+  name: string;
+  cedar_rule: string;
 }
 
 /** Generate a Cedar rule string from friendly form fields. */
@@ -62,11 +67,11 @@ function deriveAction(cedar_rule: string): string {
           <h1 class="text-2xl font-bold text-slate-100">Policies</h1>
           <p class="text-sm text-slate-400 mt-1">Cedar-based governance rules evaluated on every tool call.</p>
         </div>
-        <button (click)="showForm.set(true)" class="btn-primary text-sm">+ New policy</button>
+        <button (click)="openCreate()" class="btn-primary text-sm">+ New policy</button>
       </div>
 
       <!-- Create form -->
-      @if (showForm()) {
+      @if (showForm() && !editingPolicy()) {
         <div class="card border border-indigo-500/30">
           <h2 class="text-base font-semibold text-slate-100 mb-4">New Policy</h2>
           <div class="space-y-3">
@@ -135,6 +140,39 @@ function deriveAction(cedar_rule: string): string {
         </div>
       }
 
+      <!-- Edit form -->
+      @if (editingPolicy()) {
+        <div class="card border border-amber-500/30">
+          <h2 class="text-base font-semibold text-slate-100 mb-4">Edit Policy</h2>
+          <div class="space-y-3">
+            <div>
+              <label for="edit-policy-name" class="block text-xs text-slate-400 mb-1">Policy name</label>
+              <input id="edit-policy-name" [(ngModel)]="editForm.name" class="input w-full" />
+            </div>
+            <div>
+              <label for="edit-policy-rule" class="block text-xs text-slate-400 mb-1">Cedar rule</label>
+              <textarea id="edit-policy-rule" [(ngModel)]="editForm.cedar_rule"
+                        class="input w-full font-mono text-xs"
+                        rows="5"></textarea>
+            </div>
+
+            @if (formError()) {
+              <p class="text-sm text-red-400">{{ formError() }}</p>
+            }
+
+            <div class="flex gap-2">
+              <button (click)="saveEdit()" [disabled]="saving()" class="btn-primary text-sm">
+                {{ saving() ? 'Saving…' : 'Save changes' }}
+              </button>
+              <button (click)="cancelForm()"
+                      class="px-3 py-1.5 text-sm text-slate-400 hover:text-slate-200 transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      }
+
       <!-- List -->
       @if (loading()) {
         <div class="py-16 text-center text-slate-500 text-sm">Loading…</div>
@@ -176,6 +214,10 @@ function deriveAction(cedar_rule: string): string {
                   </td>
                   <td class="table-cell text-right">
                     <button
+                      (click)="openEdit(p)"
+                      class="text-xs text-slate-500 hover:text-slate-200 mr-3 transition-colors"
+                    >Edit</button>
+                    <button
                       (click)="toggle(p)"
                       class="text-xs text-slate-500 hover:text-slate-200 mr-3 transition-colors"
                     >{{ p.active ? 'Disable' : 'Enable' }}</button>
@@ -201,8 +243,10 @@ export class PoliciesComponent implements OnInit {
   readonly showForm = signal(false);
   readonly formError = signal('');
   readonly items = signal<Policy[]>([]);
+  readonly editingPolicy = signal<Policy | null>(null);
 
   form: PolicyForm = this.emptyForm();
+  editForm: PolicyEditForm = { name: '', cedar_rule: '' };
 
   readonly deriveEffect = deriveEffect;
   readonly deriveAction = deriveAction;
@@ -224,6 +268,20 @@ export class PoliciesComponent implements OnInit {
   previewRule(): string {
     if (!this.form.action.trim()) return '';
     return buildCedarRule(this.form);
+  }
+
+  openCreate(): void {
+    this.editingPolicy.set(null);
+    this.form = this.emptyForm();
+    this.formError.set('');
+    this.showForm.set(true);
+  }
+
+  openEdit(p: Policy): void {
+    this.showForm.set(true);
+    this.editingPolicy.set(p);
+    this.editForm = { name: p.name, cedar_rule: p.cedar_rule };
+    this.formError.set('');
   }
 
   create(): void {
@@ -251,6 +309,28 @@ export class PoliciesComponent implements OnInit {
     });
   }
 
+  saveEdit(): void {
+    const p = this.editingPolicy();
+    if (!p) return;
+    if (!this.editForm.name.trim() || !this.editForm.cedar_rule.trim()) {
+      this.formError.set('Name and Cedar rule are required.');
+      return;
+    }
+    this.saving.set(true);
+    this.formError.set('');
+    this.svc.update(p.id, { name: this.editForm.name.trim(), cedar_rule: this.editForm.cedar_rule.trim() }).subscribe({
+      next: (updated) => {
+        this.items.update((list) => list.map((x) => (x.id === p.id ? updated : x)));
+        this.saving.set(false);
+        this.cancelForm();
+      },
+      error: () => {
+        this.formError.set('Failed to save changes. Please try again.');
+        this.saving.set(false);
+      },
+    });
+  }
+
   toggle(p: Policy): void {
     this.svc.update(p.id, { active: !p.active }).subscribe({
       next: (updated) => this.items.update((list) => list.map((x) => (x.id === p.id ? updated : x))),
@@ -265,7 +345,9 @@ export class PoliciesComponent implements OnInit {
 
   cancelForm(): void {
     this.showForm.set(false);
+    this.editingPolicy.set(null);
     this.form = this.emptyForm();
+    this.editForm = { name: '', cedar_rule: '' };
     this.formError.set('');
   }
 

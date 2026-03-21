@@ -3,8 +3,16 @@ export interface Agent {
   org_id: string;
   agent_id: string;
   metadata: Record<string, unknown> | null;
+  active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface AgentUpdate {
+  name?: string;
+  description?: string;
+  framework?: string;
+  active?: boolean;
 }
 
 /** Friendly form type used by the dashboard (converted to AgentRegisterRequest by AgentService). */

@@ -96,11 +96,19 @@ class AgentRegisterRequest(BaseModel):
     metadata: dict[str, object] = Field(default_factory=dict)
 
 
+class AgentUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=256)
+    description: str | None = Field(default=None, max_length=1024)
+    framework: str | None = Field(default=None, max_length=64)
+    active: bool | None = None
+
+
 class AgentResponse(BaseModel):
     id: str
     org_id: str
     agent_id: str
     metadata: dict[str, object] | None
+    active: bool
     created_at: datetime
     updated_at: datetime
 
@@ -142,6 +150,12 @@ class WebhookDeliveryResponse(BaseModel):
     attempts: int
     last_error: str | None
     created_at: datetime
+
+
+class WebhookUpdate(BaseModel):
+    url: str | None = Field(default=None, min_length=8, max_length=512)
+    events: list[str] | None = None
+    active: bool | None = None
 
 
 class WebhookCreate(BaseModel):
