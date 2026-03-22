@@ -72,7 +72,6 @@ COPY --from=cedar-builder /usr/local/cargo/bin/cedar /usr/local/bin/cedar
 
 # Compiled app (mix of .so + the few .py files kept above)
 COPY --from=cython-build --chown=agr:agr /src/app ./app
-COPY --from=cython-build --chown=agr:agr /src/infra ./infra
 
 # agr-core package
 COPY --chown=agr:agr packages/ /packages/
