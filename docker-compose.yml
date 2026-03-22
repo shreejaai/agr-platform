@@ -5,9 +5,9 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: agr_svc_usr
-      POSTGRES_PASSWORD: gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl
-      POSTGRES_DB: agr_platform
+      POSTGRES_USER: ${POSTGRES_USER:-agr_svc_usr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-agr_platform}
     ports:
       - "5432:5432"
     volumes:
@@ -52,7 +52,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://agr_svc_usr:gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl@postgres:5432/agr_platform
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-agr_svc_usr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-agr_platform}
       REDIS_URL: redis://redis:6379
       SECRET_KEY: ${SECRET_KEY:-4e993a8cbcb458e9823be7cc7215d42a57e1e56a3f90e8cdaa9334e9930d8dbf}
       ENV: ${ENV:-development}
@@ -112,7 +112,7 @@ services:
     image: agr-api:latest
     command: ["python", "-m", "app.workers.approval_worker"]
     environment:
-      DATABASE_URL: postgresql+asyncpg://agr_svc_usr:gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl@postgres:5432/agr_platform
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-agr_svc_usr}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-agr_platform}
       REDIS_URL: redis://redis:6379
       SECRET_KEY: ${SECRET_KEY:-4e993a8cbcb458e9823be7cc7215d42a57e1e56a3f90e8cdaa9334e9930d8dbf}
       ENV: ${ENV:-development}

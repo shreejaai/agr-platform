@@ -1,8 +1,8 @@
 import { Component, inject, OnInit, ChangeDetectionStrategy, signal, HostListener } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { PolicyService, PolicyImportResponse, PolicyImportResult } from '../../services/policy.service';
+import { PolicyService } from '../../services/policy.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
-import { Policy, PolicyCreate } from '../../core/models/policy.model';
+import { Policy, PolicyCreate, PolicyImportResponse, PolicyImportResult } from '../../core/models/policy.model';
 
 /** Friendly form fields — converted to PolicyCreate (cedar_rule) on submit. */
 interface PolicyForm {

@@ -774,9 +774,9 @@ These were identified in a full code audit and fixed:
 
 ### Credentials (docker-compose.yml)
 ```
-DB user:     agr_svc_usr
-DB password: gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl
-DB name:     agr_platform
+DB user:     ${POSTGRES_USER} (default: agr_svc_usr)
+DB password: Set in .env file (POSTGRES_PASSWORD)
+DB name:     ${POSTGRES_DB} (default: agr_platform)
 SECRET_KEY:  4e993a8cbcb458e9823be7cc7215d42a57e1e56a3f90e8cdaa9334e9930d8dbf
 ```
 
@@ -869,18 +869,15 @@ cd services/agr-api
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# Run migrations (new DB credentials)
-PGPASSWORD=gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl \
-  psql -h localhost -U agr_svc_usr -d agr_platform \
-  -f ../../infra/migrations/001_initial_schema.sql
-# ... repeat for 002 through 015, or:
+# Run migrations (load credentials from .env)
+source ../../.env  # load POSTGRES_PASSWORD
 for i in $(seq -w 1 15); do
   f=$(ls ../../infra/migrations/0${i}_*.sql 2>/dev/null | head -1)
-  [ -f "$f" ] && psql postgresql://agr_svc_usr:gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl@localhost:5432/agr_platform -f "$f"
+  [ -f "$f" ] && PGPASSWORD=$POSTGRES_PASSWORD psql -h localhost -U ${POSTGRES_USER:-agr_svc_usr} -d ${POSTGRES_DB:-agr_platform} -f "$f"
 done
 
 # Update .env for local run
-echo "DATABASE_URL=postgresql+asyncpg://agr_svc_usr:gKHTwJOC7SbVHUQw1hLfUcjLaJtnZvYfR_M2hixl@localhost:5432/agr_platform" >> .env
+echo "DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-agr_svc_usr}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB:-agr_platform}" >> .env
 
 uvicorn app.main:app --reload --port 8000
 ```
