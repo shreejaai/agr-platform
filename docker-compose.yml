@@ -41,6 +41,11 @@ services:
       - ./infra/migrate.sh:/migrate.sh:ro
     entrypoint: ["sh", "/migrate.sh"]
     restart: "no"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-agr_svc_usr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-agr_platform}
+      POSTGRES_HOST: postgres
 
   # ── AGR API ────────────────────────────────────────────────────────────────
 
