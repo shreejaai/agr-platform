@@ -143,8 +143,7 @@ def test_classify_register_keyword() -> None:
 def test_classify_create_webhook() -> None:
     svc = _make_service()
     assert (
-        svc._classify_intent("create a webhook for https://example.com/events")
-        == "create_webhook"
+        svc._classify_intent("create a webhook for https://example.com/events") == "create_webhook"
     )
 
 

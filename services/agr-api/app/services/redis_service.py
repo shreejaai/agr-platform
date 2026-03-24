@@ -280,6 +280,7 @@ async def get_conversation_cache(conversation_id: str) -> list[dict] | None:
         if raw is None:
             return None
         import json as _json
+
         return _json.loads(raw)
     except Exception:
         return None
@@ -292,6 +293,7 @@ async def set_conversation_cache(conversation_id: str, messages: list[dict]) -> 
         return
     try:
         import json as _json
+
         await r.setex(
             f"copilot:hist:{conversation_id}",
             _COPILOT_CACHE_TTL,

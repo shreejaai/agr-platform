@@ -246,12 +246,16 @@ async def test_copilot_create_policy_preview(
     org, headers = startup_org_and_headers
 
     fake_llm_response = MagicMock()
-    fake_llm_response.content = [MagicMock(text=(
-        '{"name": "block_prod_deploy", "cedar_rule": '
-        '"forbid(principal, action == Action::\\"deploy\\", resource)\\n'
-        'when { context has \\"environment\\" && context.environment == \\"production\\" };", '
-        '"description": "Block all deploys to production", "level": "org"}'
-    ))]
+    fake_llm_response.content = [
+        MagicMock(
+            text=(
+                '{"name": "block_prod_deploy", "cedar_rule": '
+                '"forbid(principal, action == Action::\\"deploy\\", resource)\\n'
+                'when { context has \\"environment\\" && context.environment == \\"production\\" };", '
+                '"description": "Block all deploys to production", "level": "org"}'
+            )
+        )
+    ]
 
     app_settings.anthropic_api_key = "sk-ant-fake-key-for-testing"
     app_settings.copilot_enabled = True
@@ -289,12 +293,16 @@ async def test_copilot_create_policy_auto_confirm(
     org, headers = startup_org_and_headers
 
     fake_llm_response = MagicMock()
-    fake_llm_response.content = [MagicMock(text=(
-        '{"name": "block_prod_deploy_auto", "cedar_rule": '
-        '"forbid(principal, action == Action::\\"deploy\\", resource)\\n'
-        'when { context has \\"environment\\" && context.environment == \\"production\\" };", '
-        '"description": "Block all deploys to production", "level": "org"}'
-    ))]
+    fake_llm_response.content = [
+        MagicMock(
+            text=(
+                '{"name": "block_prod_deploy_auto", "cedar_rule": '
+                '"forbid(principal, action == Action::\\"deploy\\", resource)\\n'
+                'when { context has \\"environment\\" && context.environment == \\"production\\" };", '
+                '"description": "Block all deploys to production", "level": "org"}'
+            )
+        )
+    ]
 
     app_settings.anthropic_api_key = "sk-ant-fake-key-for-testing"
     app_settings.copilot_enabled = True

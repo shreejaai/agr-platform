@@ -270,7 +270,8 @@ class CopilotService:
                     "suggestions": response.suggestions,
                 }.items()
                 if v is not None
-            } or None,
+            }
+            or None,
         )
 
         self.session.add(user_record)
@@ -281,10 +282,12 @@ class CopilotService:
         # Update Redis cache — append new messages
         conv_id_str = str(conv.id)
         cached = await get_conversation_cache(conv_id_str) or []
-        cached.extend([
-            {"role": "user", "content": user_message},
-            {"role": "assistant", "content": response.message},
-        ])
+        cached.extend(
+            [
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "content": response.message},
+            ]
+        )
         # Keep last 20 messages in cache
         await set_conversation_cache(conv_id_str, cached[-20:])
 
@@ -466,9 +469,7 @@ class CopilotService:
     # Create policy handler
     # ──────────────────────────────────────────────────────────────────────────
 
-    async def _handle_create_policy(
-        self, message: str, auto_confirm: bool
-    ) -> CopilotResponse:
+    async def _handle_create_policy(self, message: str, auto_confirm: bool) -> CopilotResponse:
         llm_response = await self._call_llm(
             system_prompt=POLICY_GENERATION_SYSTEM_PROMPT,
             user_message=message,
@@ -561,9 +562,7 @@ class CopilotService:
     # Register agent handler
     # ──────────────────────────────────────────────────────────────────────────
 
-    async def _handle_register_agent(
-        self, message: str, auto_confirm: bool
-    ) -> CopilotResponse:
+    async def _handle_register_agent(self, message: str, auto_confirm: bool) -> CopilotResponse:
         llm_response = await self._call_llm(
             system_prompt=AGENT_REGISTRATION_SYSTEM_PROMPT,
             user_message=message,
@@ -661,9 +660,7 @@ class CopilotService:
     # Create webhook handler
     # ──────────────────────────────────────────────────────────────────────────
 
-    async def _handle_create_webhook(
-        self, message: str, auto_confirm: bool
-    ) -> CopilotResponse:
+    async def _handle_create_webhook(self, message: str, auto_confirm: bool) -> CopilotResponse:
         # Extract URL from the message directly
         url_match = re.search(r"https?://[^\s]+", message)
         if not url_match:

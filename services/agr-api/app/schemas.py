@@ -370,10 +370,17 @@ class CopilotPreview(BaseModel):
 class CopilotResponse(BaseModel):
     message: str
     action_type: Literal[
-        "create_policy", "list_policies", "delete_policy",
-        "register_agent", "list_agents",
-        "create_webhook", "list_webhooks",
-        "explain", "sample", "general", "error",
+        "create_policy",
+        "list_policies",
+        "delete_policy",
+        "register_agent",
+        "list_agents",
+        "create_webhook",
+        "list_webhooks",
+        "explain",
+        "sample",
+        "general",
+        "error",
         "confirm_pending",
         "confirmed",
         "cancelled",
