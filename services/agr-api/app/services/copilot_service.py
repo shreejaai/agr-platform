@@ -305,6 +305,15 @@ class CopilotService:
         """Classify user intent from message text using keyword heuristics."""
         lower = message.lower()
 
+        # Strip URLs early so "example.com" / "https://example.com/..." never
+        # trigger the sample-keyword check below.
+        lower_no_urls = re.sub(r"https?://\S+", "", lower)
+
+        # Sample / example intent — checked FIRST so "show me sample policies"
+        # or "give me an example policy" wins before list/create heuristics.
+        if re.search(r"\b(sample|example|template|demo|starter)\b", lower_no_urls):
+            return "sample"
+
         # List intents
         if re.search(r"\b(list|show|get|fetch|display)\b", lower):
             if "polic" in lower:
@@ -318,13 +327,12 @@ class CopilotService:
         if re.search(r"\b(explain|what is|what are|how does|describe|tell me about)\b", lower):
             return "explain"
 
-        # Create / register intents — checked BEFORE sample so URLs like example.com don't misfire
+        # Create / register intents
         if re.search(r"\b(create|add|make|generate|build|write)\b", lower):
             if "webhook" in lower:
                 return "create_webhook"
             if "agent" in lower:
                 return "register_agent"
-            # default create → policy
             return "create_policy"
 
         if re.search(r"\b(register)\b", lower):
@@ -341,12 +349,6 @@ class CopilotService:
             lower,
         ):
             return "create_policy"
-
-        # Sample / example intents — checked after create/webhook to avoid URL false-positives
-        # Strip URLs before matching so "example.com" doesn't trigger this
-        lower_no_urls = re.sub(r"https?://\S+", "", lower)
-        if re.search(r"\b(sample|example|template|demo|starter)\b", lower_no_urls):
-            return "sample"
 
         return "general"
 
