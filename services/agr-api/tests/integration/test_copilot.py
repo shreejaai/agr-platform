@@ -251,7 +251,8 @@ async def test_copilot_create_policy_preview(
             text=(
                 '{"name": "block_prod_deploy", "cedar_rule": '
                 '"forbid(principal, action == Action::\\"deploy\\", resource)\\n'
-                'when { context has \\"environment\\" && context.environment == \\"production\\" };", '
+                'when { context has \\"environment\\"'
+                ' && context.environment == \\"production\\" };", '
                 '"description": "Block all deploys to production", "level": "org"}'
             )
         )
@@ -298,7 +299,8 @@ async def test_copilot_create_policy_auto_confirm(
             text=(
                 '{"name": "block_prod_deploy_auto", "cedar_rule": '
                 '"forbid(principal, action == Action::\\"deploy\\", resource)\\n'
-                'when { context has \\"environment\\" && context.environment == \\"production\\" };", '
+                'when { context has \\"environment\\"'
+                ' && context.environment == \\"production\\" };", '
                 '"description": "Block all deploys to production", "level": "org"}'
             )
         )
