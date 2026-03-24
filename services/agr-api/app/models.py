@@ -176,7 +176,9 @@ class CopilotConversation(Base):
     )
 
     messages: Mapped[list["CopilotMessageRecord"]] = relationship(
-        back_populates="conversation", cascade="all, delete-orphan", order_by="CopilotMessageRecord.created_at"
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="CopilotMessageRecord.created_at",
     )
 
 

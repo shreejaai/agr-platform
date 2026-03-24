@@ -3,8 +3,6 @@
 import uuid
 from unittest.mock import MagicMock
 
-import pytest
-
 from app.services.copilot_service import CopilotService
 
 

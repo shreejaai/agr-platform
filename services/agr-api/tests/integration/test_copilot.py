@@ -6,10 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 from app.config import settings as app_settings
-from app.models import Agent, Organization, Policy, Webhook
+from app.models import Organization, Policy
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-
 
 # ── Plan-gating tests (no LLM needed) ────────────────────────────────────────
 

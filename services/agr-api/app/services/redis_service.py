@@ -15,6 +15,7 @@ Rate limiting:
             is authoritative for rate limiting.
 """
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -305,7 +306,5 @@ async def invalidate_conversation_cache(conversation_id: str) -> None:
     r = _get_redis()
     if r is None:
         return
-    try:
+    with contextlib.suppress(Exception):
         await r.delete(f"copilot:hist:{conversation_id}")
-    except Exception:
-        pass

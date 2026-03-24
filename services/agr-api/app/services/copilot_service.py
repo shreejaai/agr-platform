@@ -14,7 +14,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Agent, CopilotConversation, CopilotMessageRecord, Organization, Policy, Webhook
+from app.models import (
+    Agent,
+    CopilotConversation,
+    CopilotMessageRecord,
+    Organization,
+    Policy,
+    Webhook,
+)
 from app.schemas import (
     CopilotMessage,
     CopilotPreview,
@@ -48,7 +55,8 @@ _SAMPLE_POLICIES: list[dict[str, str]] = [
         "description": "Require human approval before transferring funds over $10,000",
         "cedar_rule": (
             'forbid(principal, action == Action::"transfer_funds", resource)\n'
-            "unless { context has \"approval_status\" && context.approval_status == \"approved\" }\n"
+            'unless { context has "approval_status"'
+            ' && context.approval_status == "approved" }\n'
             'when { context has "amount" && context.amount > 10000 };'
         ),
     },
@@ -57,7 +65,8 @@ _SAMPLE_POLICIES: list[dict[str, str]] = [
         "description": "Block writes to .env and secrets files",
         "cedar_rule": (
             'forbid(principal, action in [Action::"fs.write", Action::"fs.delete"], resource)\n'
-            'when { context has "path" && (context.path like "*.env*" || context.path like "*secrets*") };'
+            'when { context has "path"'
+            ' && (context.path like "*.env*" || context.path like "*secrets*") };'
         ),
     },
     {
@@ -223,7 +232,9 @@ class CopilotService:
         history = [CopilotMessage(role=m.role, content=m.content) for m in db_msgs]
 
         # Warm the cache
-        await set_conversation_cache(conv_id_str, [{"role": m.role, "content": m.content} for m in history])
+        await set_conversation_cache(
+            conv_id_str, [{"role": m.role, "content": m.content} for m in history]
+        )
         return history
 
     async def _save_messages(
@@ -468,7 +479,8 @@ class CopilotService:
             return CopilotResponse(
                 message=(
                     "I couldn't generate a valid policy from your description. "
-                    "Try being more specific, e.g. 'create a policy that blocks deploys to production'."
+                    "Try being more specific, e.g. "
+                    "'create a policy that blocks deploys to production'."
                 ),
                 action_type="error",
                 suggestions=[
@@ -708,7 +720,10 @@ class CopilotService:
         await self.session.refresh(webhook)
 
         return CopilotResponse(
-            message=f"Webhook for `{url}` has been created. Store the secret securely — it won't be shown again.",
+            message=(
+                f"Webhook for `{url}` has been created. "
+                "Store the secret securely — it won't be shown again."
+            ),
             action_type="confirmed",
             created_resource={
                 "id": str(webhook.id),

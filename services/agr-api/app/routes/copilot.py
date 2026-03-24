@@ -6,8 +6,8 @@ Gated to paid plans (startup, business, enterprise).
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request, Depends
-from sqlalchemy import select, delete
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session

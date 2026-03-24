@@ -64,7 +64,11 @@ import {
               [class]="currentConversationId() === conv.id
                 ? 'bg-indigo-600/20 border border-indigo-600/40'
                 : 'hover:bg-slate-800 border border-transparent'"
+              role="button"
+              tabindex="0"
               (click)="selectConversation(conv)"
+              (keydown.enter)="selectConversation(conv)"
+              (keydown.space)="selectConversation(conv)"
             >
               <div class="flex-1 min-w-0">
                 <p class="text-xs font-medium truncate"

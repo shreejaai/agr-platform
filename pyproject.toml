@@ -17,6 +17,7 @@ ignore = ["B008", "N999"]
 "services/agr-api/app/routes/*" = ["TCH003"]
 "examples/**" = ["E501", "T201"]
 "services/agr-api/tests/postgres/*" = ["TC002", "TC003", "E402", "E501"]
+"services/agr-api/app/services/copilot_prompts.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"
