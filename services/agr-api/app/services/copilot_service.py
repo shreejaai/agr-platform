@@ -229,7 +229,13 @@ class CopilotService:
             .limit(20)
         )
         db_msgs = result.scalars().all()
-        history = [CopilotMessage(role=m.role, content=m.content) for m in db_msgs]
+        history = [
+            CopilotMessage(
+                role="user" if m.role == "user" else "assistant",
+                content=m.content,
+            )
+            for m in db_msgs
+        ]
 
         # Warm the cache
         await set_conversation_cache(
@@ -791,10 +797,11 @@ class CopilotService:
         """Call Anthropic Claude and return the text response."""
         try:
             import anthropic
+            from anthropic.types import MessageParam, TextBlock
 
             client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
-            messages: list[dict[str, str]] = []
+            messages: list[MessageParam] = []
             if conversation_history:
                 for msg in conversation_history:
                     messages.append({"role": msg.role, "content": msg.content})
@@ -807,7 +814,8 @@ class CopilotService:
                 messages=messages,
             )
 
-            return response.content[0].text if response.content else ""
+            text_blocks = [b for b in response.content if isinstance(b, TextBlock)]
+            return text_blocks[0].text if text_blocks else ""
 
         except Exception as exc:
             logger.error("Copilot LLM call failed: %s", exc)
