@@ -799,11 +799,10 @@ class CopilotService:
         """Call Anthropic Claude and return the text response."""
         try:
             import anthropic
-            from anthropic.types import MessageParam, TextBlock
 
             client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
-            messages: list[MessageParam] = []
+            messages: list[Any] = []
             if conversation_history:
                 for msg in conversation_history:
                     messages.append({"role": msg.role, "content": msg.content})
@@ -816,8 +815,12 @@ class CopilotService:
                 messages=messages,
             )
 
-            text_blocks = [b for b in response.content if isinstance(b, TextBlock)]
-            return text_blocks[0].text if text_blocks else ""
+            # Use getattr so this works with both real TextBlock objects and
+            # MagicMock stubs in tests (isinstance(mock, TextBlock) is False).
+            return next(
+                (t for t in (getattr(b, "text", None) for b in response.content) if t),
+                "",
+            )
 
         except Exception as exc:
             logger.error("Copilot LLM call failed: %s", exc)
