@@ -2,6 +2,7 @@ import re
 import urllib.parse
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -345,7 +346,70 @@ class HealthResponse(BaseModel):
     status: str
 
 
+class CopilotMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class CopilotRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    conversation_id: str | None = None  # None = start a new conversation
+    auto_confirm: bool = False
+    # When confirming a preview, pass the original preview back so the backend
+    # can create the resource directly without calling Claude again.
+    confirm_preview: dict | None = None
+
+
+class CopilotPreview(BaseModel):
+    resource_type: Literal["policy", "agent", "webhook"]
+    data: dict
+    cedar_rule: str | None = None
+    confirmation_prompt: str
+
+
+class CopilotResponse(BaseModel):
+    message: str
+    action_type: Literal[
+        "create_policy", "list_policies", "delete_policy",
+        "register_agent", "list_agents",
+        "create_webhook", "list_webhooks",
+        "explain", "sample", "general", "error",
+        "confirm_pending",
+        "confirmed",
+        "cancelled",
+    ]
+    conversation_id: str = ""  # always returned; empty only on plan-gate error
+    preview: CopilotPreview | None = None
+    created_resource: dict | None = None
+    suggestions: list[str] | None = None
+
+
 class ErrorResponse(BaseModel):
     error: str
     message: str
     upgrade_url: str | None = None
+
+
+class ConversationMessageOut(BaseModel):
+    id: str
+    role: str
+    content: str
+    action_type: str | None = None
+    metadata: dict | None = None
+    created_at: datetime
+
+
+class ConversationSummary(BaseModel):
+    id: str
+    title: str
+    message_count: int
+    updated_at: datetime
+
+
+class ConversationDetail(BaseModel):
+    id: str
+    title: str
+    message_count: int
+    created_at: datetime
+    updated_at: datetime
+    messages: list[ConversationMessageOut]

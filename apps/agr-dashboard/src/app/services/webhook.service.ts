@@ -30,6 +30,6 @@ export class WebhookService {
   }
 
   delete(id: string): Observable<void> {
-    return this.http.delete<void>(`/v1/webhooks/${id}`);
+    return this.http.delete<void>(`/v1/webhooks/${id}`, { responseType: 'text' as 'json' });
   }
 }

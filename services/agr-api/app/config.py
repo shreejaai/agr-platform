@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     # Webhook delivery — configurable timeout per attempt (seconds)
     webhook_timeout: float = 10.0
 
+    # Copilot (LLM-powered policy assistant) — paid plans only
+    anthropic_api_key: str = ""
+    copilot_model: str = "claude-sonnet-4-20250514"
+    copilot_max_tokens: int = 1024
+    copilot_enabled: bool = True
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
     def validate_production_settings(self) -> None:

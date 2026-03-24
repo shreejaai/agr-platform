@@ -263,3 +263,49 @@ async def sync_eval_count_to_db(org_id: UUID) -> None:
             await session.commit()
     except Exception as exc:
         logger.warning("Failed to sync eval_count to DB for org %s: %s", org_id, exc)
+
+
+# ── Copilot conversation cache ────────────────────────────────────────────────
+_COPILOT_CACHE_TTL = 3600  # 1 hour
+
+
+async def get_conversation_cache(conversation_id: str) -> list[dict] | None:
+    """Return cached message list for a conversation, or None on miss/error."""
+    r = _get_redis()
+    if r is None:
+        return None
+    try:
+        raw = await r.get(f"copilot:hist:{conversation_id}")
+        if raw is None:
+            return None
+        import json as _json
+        return _json.loads(raw)
+    except Exception:
+        return None
+
+
+async def set_conversation_cache(conversation_id: str, messages: list[dict]) -> None:
+    """Cache the full message list for a conversation (1 h TTL)."""
+    r = _get_redis()
+    if r is None:
+        return
+    try:
+        import json as _json
+        await r.setex(
+            f"copilot:hist:{conversation_id}",
+            _COPILOT_CACHE_TTL,
+            _json.dumps(messages),
+        )
+    except Exception:
+        pass
+
+
+async def invalidate_conversation_cache(conversation_id: str) -> None:
+    """Remove cached messages for a conversation."""
+    r = _get_redis()
+    if r is None:
+        return
+    try:
+        await r.delete(f"copilot:hist:{conversation_id}")
+    except Exception:
+        pass

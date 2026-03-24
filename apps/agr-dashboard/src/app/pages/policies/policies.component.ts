@@ -490,7 +490,7 @@ export class PoliciesComponent implements OnInit {
   }
 
   loadList(): void {
-    this.svc.list({ limit: 100 }).subscribe({
+    this.svc.list({ limit: 100, active: true }).subscribe({
       next: (res) => {
         this.items.set(res);
         this.loading.set(false);
@@ -574,6 +574,7 @@ export class PoliciesComponent implements OnInit {
   remove(id: string): void {
     this.svc.delete(id).subscribe({
       next: () => this.items.update((list) => list.filter((x) => x.id !== id)),
+      error: (err) => console.error('Failed to delete policy', err),
     });
   }
 

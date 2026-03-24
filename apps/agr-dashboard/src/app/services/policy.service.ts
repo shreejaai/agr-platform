@@ -39,7 +39,7 @@ export class PolicyService {
   }
 
   delete(id: string): Observable<void> {
-    return this.http.delete<void>(`/v1/policies/${id}`);
+    return this.http.delete<void>(`/v1/policies/${id}`, { responseType: 'text' as 'json' });
   }
 
   importPolicies(body: PolicyImportRequest): Observable<PolicyImportResponse> {

@@ -53,6 +53,12 @@ export const routes: Routes = [
           import('./pages/webhooks/webhooks.component').then((m) => m.WebhooksComponent),
       },
       {
+        path: 'copilot',
+        canActivate: [apiKeyGuard],
+        loadComponent: () =>
+          import('./pages/copilot/copilot.component').then((m) => m.CopilotComponent),
+      },
+      {
         path: 'settings',
         loadComponent: () =>
           import('./pages/settings/settings.component').then((m) => m.SettingsComponent),

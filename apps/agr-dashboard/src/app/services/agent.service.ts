@@ -39,6 +39,6 @@ export class AgentService {
   }
 
   delete(id: string): Observable<void> {
-    return this.http.delete<void>(`/v1/agents/${id}`);
+    return this.http.delete<void>(`/v1/agents/${id}`, { responseType: 'text' as 'json' });
   }
 }
