@@ -4,9 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "ai:plan": "node --enable-source-maps scripts/cli.mjs plan",
+    "cp:plan": "node scripts/claude-pro.mjs plan",
+    "cp:review": "node scripts/claude-pro.mjs review",
+    "cp:fix": "node scripts/claude-pro.mjs fix",
     "ai:execute": "node --enable-source-maps scripts/cli.mjs execute",
-    "ai:review": "node --enable-source-maps scripts/cli.mjs review",
     "ai:fix": "node --enable-source-maps scripts/cli.mjs fix"
   }
 }
