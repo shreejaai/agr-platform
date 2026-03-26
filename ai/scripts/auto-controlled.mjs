@@ -1,27 +1,26 @@
 import fs from 'fs/promises';
 import { loadContext } from './context-loader.mjs';
 
-const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 const OLLAMA_API = 'http://localhost:11434/api/generate';
 const MAX_ITERATIONS = Number(process.env.AI_MAX_LOOPS || 5);
 const STOP_FILE = process.env.AI_STOP_FILE || 'ai/tmp/STOP';
 
-async function callClaude(prompt) {
-  const res = await fetch(CLAUDE_API, {
-    method: 'POST',
-    headers: {
-      'x-api-key': process.env.CLAUDE_API_KEY,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 3000,
-      messages: [{ role: 'user', content: prompt }]
-    })
-  });
-  const data = await res.json();
-  return data.content?.[0]?.text || '';
-}
+// async function callClaude(prompt) {
+//   const res = await fetch(CLAUDE_API, {
+//     method: 'POST',
+//     headers: {
+//       'x-api-key': process.env.CLAUDE_API_KEY,
+//       'content-type': 'application/json'
+//     },
+//     body: JSON.stringify({
+//       model: 'claude-sonnet-4-5',
+//       max_tokens: 3000,
+//       messages: [{ role: 'user', content: prompt }]
+//     })
+//   });
+//   const data = await res.json();
+//   return data.content?.[0]?.text || '';
+// }
 
 async function callOllama(prompt) {
   const res = await fetch(OLLAMA_API, {
