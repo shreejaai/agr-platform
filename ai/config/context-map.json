@@ -2,7 +2,7 @@
   "version": 1,
   "project": "AGR",
   "defaultClaudeModel": "claude-sonnet-4-5",
-  "defaultOllamaModel": "qwen2.5-coder:14b",
+  "defaultOllamaModel": "qwen3.5-coder:14b",
   "contextGroups": {
     "api": [
       "README.md",

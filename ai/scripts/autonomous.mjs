@@ -6,7 +6,7 @@ export async function runAutonomous(task) {
 
   const context = await loadContext(task);
 
-  await fs.writeFile('ai/tmp/context.txt', context);
+  await fs.writeFile('/tmp/context.txt', context);
 
   console.log('Context loaded and saved');
 

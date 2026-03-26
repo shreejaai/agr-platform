@@ -48,8 +48,8 @@ async function shouldStopFromFile() {
 async function run(task) {
   console.log('Loading context...');
   const context = await loadContext(task);
-  const planner = await fs.readFile('ai/prompts/planner-advanced.md', 'utf-8');
-  const reviewer = await fs.readFile('ai/prompts/reviewer-structured.md', 'utf-8');
+  const planner = await fs.readFile('/prompts/planner-advanced.md', 'utf-8');
+  const reviewer = await fs.readFile('/prompts/reviewer-structured.md', 'utf-8');
 
   console.log('Planning...');
   let plan = await callClaude(`${context}\n\n${planner}\n\nTask:\n${task}`);
@@ -76,7 +76,7 @@ async function run(task) {
     previousOutput = output;
 
     const review = await callClaude(`${reviewer}\n\n${output}`);
-    await fs.writeFile('ai/tmp/review.txt', review);
+    await fs.writeFile('/tmp/review.txt', review);
 
     if (isPass(review)) {
       console.log('PASS achieved. Stopping loop.');
@@ -87,7 +87,7 @@ async function run(task) {
     iteration += 1;
   }
 
-  await fs.writeFile('ai/tmp/final.txt', output);
+  await fs.writeFile('/tmp/final.txt', output);
   console.log('Final output saved to ai/tmp/final.txt');
 }
 

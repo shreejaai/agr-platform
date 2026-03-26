@@ -41,26 +41,26 @@ async function main() {
 
   if (cmd === 'plan') {
     const task = process.argv.slice(3).join(' ');
-    const planner = await readFile('ai/prompts/planner-advanced.md');
+    const planner = await readFile('/prompts/planner-advanced.md');
     const output = await callClaude(`${planner}\n\nTask:\n${task}`);
     console.log(output);
   }
 
   if (cmd === 'execute') {
-    const input = await readFile('ai/tmp/plan.txt');
+    const input = await readFile('/tmp/plan.txt');
     const output = await callOllama(input);
     console.log(output);
   }
 
   if (cmd === 'review') {
-    const code = await readFile('ai/tmp/output.txt');
-    const reviewer = await readFile('ai/prompts/reviewer.md');
+    const code = await readFile('/tmp/output.txt');
+    const reviewer = await readFile('/prompts/reviewer.md');
     const output = await callClaude(`${reviewer}\n\n${code}`);
     console.log(output);
   }
 
   if (cmd === 'fix') {
-    const review = await readFile('ai/tmp/review.txt');
+    const review = await readFile('/tmp/review.txt');
     const output = await callOllama(review);
     console.log(output);
   }
