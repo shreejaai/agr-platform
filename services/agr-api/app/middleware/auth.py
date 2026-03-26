@@ -92,6 +92,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         request.state.org_id = org.id
         request.state.org = org
+        request.state.role = org.role
         return await call_next(request)
 
     @staticmethod

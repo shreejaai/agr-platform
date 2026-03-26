@@ -1,6 +1,6 @@
 import { Component, inject, OnInit, ChangeDetectionStrategy, signal, HostListener } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { PolicyService } from '../../services/policy.service';
+import { PolicyService, SimulateRequest, SimulateResponse } from '../../services/policy.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { Policy, PolicyCreate, PolicyImportResponse, PolicyImportResult } from '../../core/models/policy.model';
 
@@ -451,6 +451,129 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
           </table>
         </div>
       }
+
+      <!-- Policy Simulation Panel -->
+      <div class="card border border-slate-700">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-base font-semibold text-slate-100">Policy Simulation</h2>
+            <p class="text-xs text-slate-400 mt-0.5">Test how your policies evaluate a hypothetical tool call without executing it.</p>
+          </div>
+          <button
+            (click)="toggleSimPanel()"
+            class="text-xs text-slate-500 hover:text-slate-200 transition-colors"
+          >{{ showSimPanel() ? 'Collapse ▲' : 'Expand ▼' }}</button>
+        </div>
+
+        @if (showSimPanel()) {
+          <div class="space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label for="sim-agent-id" class="block text-xs text-slate-400 mb-1">Agent ID</label>
+                <input
+                  id="sim-agent-id"
+                  [(ngModel)]="simForm.agent_id"
+                  class="input w-full text-sm font-mono"
+                  placeholder="agent-abc123"
+                />
+              </div>
+              <div>
+                <label for="sim-action" class="block text-xs text-slate-400 mb-1">Action (tool name)</label>
+                <input
+                  id="sim-action"
+                  [(ngModel)]="simForm.action"
+                  class="input w-full text-sm font-mono"
+                  placeholder="web_search"
+                />
+              </div>
+            </div>
+            <div>
+              <label for="sim-resource" class="block text-xs text-slate-400 mb-1">Resource</label>
+              <input
+                id="sim-resource"
+                [(ngModel)]="simForm.resource"
+                class="input w-full text-sm font-mono"
+                placeholder="https://example.com"
+              />
+            </div>
+            <div>
+              <label for="sim-context" class="block text-xs text-slate-400 mb-1">Context (JSON, optional)</label>
+              <textarea
+                id="sim-context"
+                [(ngModel)]="simContextRaw"
+                class="input w-full font-mono text-xs"
+                rows="3"
+                placeholder='{"environment": "production"}'
+              ></textarea>
+            </div>
+
+            @if (simError()) {
+              <p class="text-sm text-red-400">{{ simError() }}</p>
+            }
+
+            <button
+              (click)="runSimulation()"
+              [disabled]="simulating()"
+              class="btn-primary text-sm"
+            >
+              {{ simulating() ? 'Simulating…' : 'Run Simulation' }}
+            </button>
+
+            <!-- Simulation Result -->
+            @if (simResult()) {
+              <div class="mt-4 rounded-xl border border-slate-700 overflow-hidden">
+                <!-- Decision header -->
+                <div [class]="simDecisionBg(simResult()!.decision) + ' px-5 py-4 flex items-center gap-3'">
+                  <span [class]="simDecisionBadgeClass(simResult()!.decision)" class="text-sm font-bold tracking-wide px-3 py-1 rounded-full border">
+                    {{ simResult()!.decision }}
+                  </span>
+                  <span class="text-sm text-slate-300">{{ simResult()!.reason }}</span>
+                </div>
+
+                <!-- Risk + trace details -->
+                <div class="px-5 py-4 grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-900/40">
+                  <!-- Risk -->
+                  <div>
+                    <p class="text-xs text-slate-500 uppercase tracking-wider mb-2">Risk</p>
+                    <div class="flex items-center gap-3">
+                      <div class="flex-1 bg-slate-800 rounded-full h-2 overflow-hidden">
+                        <div
+                          [style.width.%]="simResult()!.risk_score"
+                          [class]="simRiskBarColor(simResult()!.risk_score)"
+                          class="h-2 rounded-full transition-all"
+                        ></div>
+                      </div>
+                      <span class="text-sm font-mono text-slate-200 w-8 text-right">{{ simResult()!.risk_score }}</span>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-1">Level: <span class="font-medium text-slate-200">{{ simResult()!.risk_level }}</span></p>
+                  </div>
+
+                  <!-- Decision trace -->
+                  <div>
+                    <p class="text-xs text-slate-500 uppercase tracking-wider mb-2">Decision Trace</p>
+                    <dl class="space-y-1 text-xs">
+                      <div class="flex gap-2">
+                        <dt class="text-slate-500 w-28 shrink-0">Policy source</dt>
+                        <dd class="text-slate-300 font-mono truncate">{{ simResult()!.decision_trace.policy_source ?? '—' }}</dd>
+                      </div>
+                      <div class="flex gap-2">
+                        <dt class="text-slate-500 w-28 shrink-0">Cedar decision</dt>
+                        <dd class="text-slate-300 font-mono">{{ simResult()!.decision_trace.cedar_decision ?? '—' }}</dd>
+                      </div>
+                      <div class="flex gap-2">
+                        <dt class="text-slate-500 w-28 shrink-0">Risk override</dt>
+                        <dd [class]="simResult()!.decision_trace.risk_override ? 'text-amber-400' : 'text-slate-400'">
+                          {{ simResult()!.decision_trace.risk_override ? 'Yes' : 'No' }}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+                </div>
+              </div>
+            }
+          </div>
+        }
+      </div>
     </div>
   `,
 })
@@ -479,6 +602,14 @@ export class PoliciesComponent implements OnInit {
 
   readonly deriveEffect = deriveEffect;
   readonly deriveAction = deriveAction;
+
+  // Simulation state
+  readonly showSimPanel = signal(false);
+  readonly simulating = signal(false);
+  readonly simError = signal('');
+  readonly simResult = signal<SimulateResponse | null>(null);
+  simForm: SimulateRequest = { agent_id: '', action: '', resource: '' };
+  simContextRaw = '';
 
   @HostListener('document:keydown.escape')
   onEscapeKey(): void {
@@ -723,6 +854,74 @@ export class PoliciesComponent implements OnInit {
       error: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-500/15 text-red-400',
     };
     return map[status] ?? map['skipped'];
+  }
+
+  // --- Simulation ---
+
+  toggleSimPanel(): void {
+    this.showSimPanel.update((v) => !v);
+    if (!this.showSimPanel()) {
+      this.simResult.set(null);
+      this.simError.set('');
+    }
+  }
+
+  runSimulation(): void {
+    if (!this.simForm.agent_id.trim() || !this.simForm.action.trim() || !this.simForm.resource.trim()) {
+      this.simError.set('Agent ID, action, and resource are required.');
+      return;
+    }
+
+    let context: Record<string, unknown> | undefined;
+    if (this.simContextRaw.trim()) {
+      try {
+        context = JSON.parse(this.simContextRaw.trim());
+      } catch {
+        this.simError.set('Context must be valid JSON.');
+        return;
+      }
+    }
+
+    this.simError.set('');
+    this.simResult.set(null);
+    this.simulating.set(true);
+
+    const req: SimulateRequest = {
+      agent_id: this.simForm.agent_id.trim(),
+      action: this.simForm.action.trim(),
+      resource: this.simForm.resource.trim(),
+      ...(context ? { context } : {}),
+    };
+
+    this.svc.simulate(req).subscribe({
+      next: (res) => {
+        this.simResult.set(res);
+        this.simulating.set(false);
+      },
+      error: (err) => {
+        const msg = err?.error?.detail ?? err?.error?.message ?? 'Simulation failed. Check your inputs and try again.';
+        this.simError.set(msg);
+        this.simulating.set(false);
+      },
+    });
+  }
+
+  simDecisionBg(decision: string): string {
+    if (decision === 'ALLOW') return 'bg-emerald-500/10 border-b border-emerald-500/20';
+    if (decision === 'DENY') return 'bg-red-500/10 border-b border-red-500/20';
+    return 'bg-amber-500/10 border-b border-amber-500/20';
+  }
+
+  simDecisionBadgeClass(decision: string): string {
+    if (decision === 'ALLOW') return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40';
+    if (decision === 'DENY') return 'bg-red-500/20 text-red-400 border-red-500/40';
+    return 'bg-amber-500/20 text-amber-400 border-amber-500/40';
+  }
+
+  simRiskBarColor(score: number): string {
+    if (score < 35) return 'bg-emerald-500';
+    if (score < 70) return 'bg-amber-500';
+    return 'bg-red-500';
   }
 
   private emptyForm(): PolicyForm {

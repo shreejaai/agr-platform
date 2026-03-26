@@ -96,6 +96,8 @@ class PolicyCreate(BaseModel):
     cedar_rule: str = Field(..., min_length=1)
     project_id: uuid.UUID | None = None
     agent_id: str | None = None
+    # New policies start as drafts — call /activate to put them into evaluation
+    state: str = Field(default="draft", pattern=r"^(draft|active)$")
 
     @field_validator("cedar_rule")
     @classmethod
@@ -105,6 +107,7 @@ class PolicyCreate(BaseModel):
 
 class PolicyUpdate(BaseModel):
     cedar_rule: str | None = None
+    # active is kept for backward compat; prefer the /activate and /archive endpoints
     active: bool | None = None
     name: str | None = None
 
@@ -126,8 +129,24 @@ class PolicyResponse(BaseModel):
     cedar_rule: str
     version: int
     active: bool
+    state: str
     created_at: datetime
     updated_at: datetime
+    # Advisory conflict warnings — populated on create/update, None on list/get
+    conflicts: list[str] | None = None
+
+
+class ApprovalStepResponse(BaseModel):
+    id: str
+    approval_id: str
+    approver_email: str
+    status: str
+    decided_at: datetime | None
+    created_at: datetime
+
+
+class ApprovalStepCreate(BaseModel):
+    approver_email: str = Field(..., min_length=1, max_length=256)
 
 
 class ApprovalResponse(BaseModel):
@@ -141,6 +160,9 @@ class ApprovalResponse(BaseModel):
     approver_email: str | None
     decision_at: datetime | None
     expires_at: datetime
+    quorum_type: str = "any"
+    sla_hours: int | None = None
+    escalation_email: str | None = None
     created_at: datetime
 
 
@@ -175,12 +197,22 @@ class AuditEventResponse(BaseModel):
 class AgentRegisterRequest(BaseModel):
     agent_id: str = Field(..., min_length=1, max_length=256)
     metadata: dict[str, object] = Field(default_factory=dict)
+    name: str | None = Field(default=None, max_length=256)
+    owner: str | None = Field(default=None, max_length=256)
+    framework: str | None = Field(default=None, max_length=64)
+    environment: str | None = Field(default=None, max_length=64)
+    trust_level: str = Field(default="unknown", pattern=r"^(trusted|verified|unknown|untrusted)$")
+    capabilities: list[str] = Field(default_factory=list)
 
 
 class AgentUpdateRequest(BaseModel):
     name: str | None = Field(default=None, max_length=256)
     description: str | None = Field(default=None, max_length=1024)
     framework: str | None = Field(default=None, max_length=64)
+    owner: str | None = Field(default=None, max_length=256)
+    environment: str | None = Field(default=None, max_length=64)
+    trust_level: str | None = Field(default=None, pattern=r"^(trusted|verified|unknown|untrusted)$")
+    capabilities: list[str] | None = None
     active: bool | None = None
 
 
@@ -189,9 +221,39 @@ class AgentResponse(BaseModel):
     org_id: str
     agent_id: str
     metadata: dict[str, object] | None
+    name: str | None
+    owner: str | None
+    framework: str | None
+    environment: str | None
+    trust_level: str
+    capabilities: list[str]
     active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class OrgRiskConfigResponse(BaseModel):
+    org_id: str
+    weight_action_severity: float
+    weight_context_signals: float
+    weight_rate_pattern: float
+    weight_agent_trust: float
+    weight_amount_scale: float
+    weight_resource_sensitivity: float
+    threshold_allow_max: int
+    threshold_approval_max: int
+    updated_at: datetime
+
+
+class OrgRiskConfigUpdate(BaseModel):
+    weight_action_severity: float | None = Field(default=None, ge=0.0, le=1.0)
+    weight_context_signals: float | None = Field(default=None, ge=0.0, le=1.0)
+    weight_rate_pattern: float | None = Field(default=None, ge=0.0, le=1.0)
+    weight_agent_trust: float | None = Field(default=None, ge=0.0, le=1.0)
+    weight_amount_scale: float | None = Field(default=None, ge=0.0, le=1.0)
+    weight_resource_sensitivity: float | None = Field(default=None, ge=0.0, le=1.0)
+    threshold_allow_max: int | None = Field(default=None, ge=0, le=100)
+    threshold_approval_max: int | None = Field(default=None, ge=0, le=100)
 
 
 class ApprovalEscalateRequest(BaseModel):
@@ -204,6 +266,39 @@ class AuditVerifyResponse(BaseModel):
     first_invalid_sequence: int | None = None
 
 
+class AuditSearchRequest(BaseModel):
+    """POST body for /v1/audit/search — structured filter query."""
+
+    event_type: str | None = None
+    agent_id: str | None = None
+    action: str | None = None
+    resource: str | None = None
+    decision: str | None = None
+    policy_id: uuid.UUID | None = None
+    start_date: datetime | None = None
+    end_date: datetime | None = None
+    limit: int = Field(default=50, ge=1, le=200)
+    offset: int = Field(default=0, ge=0)
+
+
+class ComplianceFindingResponse(BaseModel):
+    plugin: str
+    standard: str
+    rule_id: str
+    severity: str
+    message: str
+    passed: bool
+
+
+class ComplianceSummaryResponse(BaseModel):
+    period_days: int
+    total_evaluations: int
+    decisions: dict[str, int]  # ALLOW/DENY/APPROVAL_REQUIRED counts
+    high_risk_count: int
+    findings_by_standard: dict[str, dict[str, int]]  # standard → {pass, fail}
+    overall_pass: bool
+
+
 class OrgMeResponse(BaseModel):
     id: str
     name: str
@@ -212,6 +307,7 @@ class OrgMeResponse(BaseModel):
     eval_count: int
     eval_limit: int
     eval_week_start: datetime | None = None
+    role: str = "admin"
     created_at: datetime
 
 
@@ -234,7 +330,13 @@ class WebhookDeliveryResponse(BaseModel):
     created_at: datetime
 
 
-_VALID_WEBHOOK_EVENTS = frozenset(["approval.approved", "approval.rejected"])
+_VALID_WEBHOOK_EVENTS = frozenset([
+    "approval.approved",
+    "approval.rejected",
+    "evaluation.completed",
+    "policy.changed",
+    "agent.updated",
+])
 
 
 def _validate_webhook_url(url: str) -> str:
@@ -305,6 +407,17 @@ class WebhookResponse(BaseModel):
     created_at: datetime
 
 
+class WebhookRotateSecretResponse(BaseModel):
+    id: str
+    new_secret: str
+
+
+class WebhookTestResponse(BaseModel):
+    delivery_id: str
+    status: str
+    http_status: int | None
+
+
 class PolicyImportItem(BaseModel):
     """Single policy entry in a bulk import request."""
 
@@ -314,6 +427,7 @@ class PolicyImportItem(BaseModel):
     project_id: uuid.UUID | None = None
     agent_id: str | None = None
     active: bool = True
+    state: str = Field(default="active", pattern=r"^(draft|active|archived)$")
 
     @field_validator("cedar_rule")
     @classmethod
@@ -388,6 +502,7 @@ class CopilotResponse(BaseModel):
         "create_webhook",
         "list_webhooks",
         "explain",
+        "explain_policy",
         "sample",
         "general",
         "error",
@@ -399,6 +514,47 @@ class CopilotResponse(BaseModel):
     preview: CopilotPreview | None = None
     created_resource: dict | None = None
     suggestions: list[str] | None = None
+
+
+class PolicyVersionResponse(BaseModel):
+    id: str
+    policy_id: str
+    org_id: str
+    cedar_rule: str
+    name: str
+    level: str
+    state: str
+    version: int
+    created_at: datetime
+
+
+class SimulateRequest(BaseModel):
+    agent_id: str = Field(..., min_length=1, max_length=256)
+    action: str = Field(..., min_length=1, max_length=256)
+    resource: str = Field(..., min_length=1, max_length=512)
+    context: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("agent_id", "action", "resource")
+    @classmethod
+    def strip_control_chars(cls, v: str) -> str:
+        return _strip_ctrl(v)
+
+    @field_validator("context")
+    @classmethod
+    def context_size_limit(cls, v: dict[str, object]) -> dict[str, object]:
+        if len(v) > 50:
+            raise ValueError("context must have at most 50 keys.")
+        return v
+
+
+class SimulateResponse(BaseModel):
+    decision: str
+    reason: str
+    policy_id: str | None = None
+    risk_score: int | None = None
+    risk_level: str | None = None
+    risk_factors: dict[str, int] | None = None
+    decision_trace: DecisionTrace
 
 
 class ErrorResponse(BaseModel):

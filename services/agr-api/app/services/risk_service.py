@@ -28,11 +28,12 @@ class RiskResult:
 # Factor weights (must sum to 1.0)
 # ---------------------------------------------------------------------------
 _WEIGHTS = {
-    "action_severity": 0.35,
-    "context_signals": 0.25,
+    "action_severity": 0.30,
+    "context_signals": 0.20,
     "rate_pattern": 0.15,
     "agent_trust": 0.15,
     "amount_scale": 0.10,
+    "resource_sensitivity": 0.10,
 }
 
 # ---------------------------------------------------------------------------
@@ -78,8 +79,16 @@ _HIGH_RISK_CONTEXT_VALUES = re.compile(
     re.IGNORECASE,
 )
 
-# Agent prefixes that imply elevated trust
+# Agent prefixes that imply elevated trust (fallback when trust_level is unknown)
 _TRUSTED_AGENT_PREFIXES = ("trusted-", "verified-", "approved-", "internal-")
+
+# trust_level column values → risk score (lower = safer)
+_TRUST_LEVEL_SCORES: dict[str, int] = {
+    "trusted": 0,
+    "verified": 5,
+    "unknown": 15,
+    "untrusted": 50,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -133,18 +142,43 @@ def _score_rate_pattern(eval_count: int, eval_limit: int) -> int:
     return 0
 
 
-def _score_agent_trust(agent_id: str) -> int:
-    """Score based on agent naming conventions.
+def _score_agent_trust(agent_id: str, trust_level: str | None = None) -> int:
+    """Score based on agent trust_level (DB column) with name-prefix fallback.
 
-    Trusted/verified agents lower risk; unknown IDs carry mild risk.
+    If trust_level is provided (from the agents table), use it directly.
+    Otherwise fall back to the legacy name-prefix heuristic so existing
+    callers that don't pass trust_level continue to work.
     """
+    if trust_level is not None:
+        return _TRUST_LEVEL_SCORES.get(trust_level, 15)
+    # Legacy fallback: name-prefix heuristic
     lower = agent_id.lower()
     if any(lower.startswith(pfx) for pfx in _TRUSTED_AGENT_PREFIXES):
         return 0
-    # Generic agent IDs with numbers look automated
     if re.search(r"\d{4,}", agent_id):
         return 30
     return 15
+
+
+_HIGH_SENSITIVITY_RESOURCES = re.compile(
+    r"\b(prod(uction)?|live|pii|secret|credential|password|token|key|"
+    r"billing|payment|financial|health|medical|ssn|private|confidential)\b",
+    re.IGNORECASE,
+)
+_MED_SENSITIVITY_RESOURCES = re.compile(
+    r"\b(staging|internal|employee|customer|user|account|config|settings|"
+    r"database|db|backup|export|logs?)\b",
+    re.IGNORECASE,
+)
+
+
+def _score_resource_sensitivity(resource: str) -> int:
+    """Score 0-100 based on how sensitive the target resource appears."""
+    if _HIGH_SENSITIVITY_RESOURCES.search(resource):
+        return 85
+    if _MED_SENSITIVITY_RESOURCES.search(resource):
+        return 45
+    return 10  # unknown resource — minimal penalty
 
 
 def _score_amount_scale(context: dict[str, object]) -> int:
@@ -180,34 +214,44 @@ def compute_risk_score(
     context: dict[str, object],
     eval_count: int = 0,
     eval_limit: int = 0,
+    trust_level: str | None = None,
+    weights: dict[str, float] | None = None,
 ) -> RiskResult:
     """Compute the weighted risk score for an evaluate call.
 
     Args:
-        agent_id:   The requesting agent identifier.
-        action:     The action being requested.
-        resource:   The target resource (informational only for now).
-        context:    Arbitrary context key-value pairs.
-        eval_count: Current org eval usage (for rate pattern scoring).
-        eval_limit: Org eval limit (0 = unlimited).
+        agent_id:    The requesting agent identifier.
+        action:      The action being requested.
+        resource:    The target resource.
+        context:     Arbitrary context key-value pairs.
+        eval_count:  Current org eval usage (for rate pattern scoring).
+        eval_limit:  Org eval limit (0 = unlimited).
+        trust_level: Agent trust_level from the agents table
+                     (trusted|verified|unknown|untrusted). Falls back to
+                     name-prefix heuristic when None.
+        weights:     Per-org weight overrides from OrgRiskConfig. Falls back
+                     to module-level _WEIGHTS when None.
 
     Returns:
         RiskResult with score (0-100), level ("low"|"medium"|"high"),
         and per-factor breakdown.
     """
+    effective_weights = weights if weights is not None else _WEIGHTS
+
     raw: dict[str, float] = {
         "action_severity": _score_action_severity(action),
         "context_signals": _score_context_signals(context),
         "rate_pattern": _score_rate_pattern(eval_count, eval_limit),
-        "agent_trust": _score_agent_trust(agent_id),
+        "agent_trust": _score_agent_trust(agent_id, trust_level),
         "amount_scale": _score_amount_scale(context),
+        "resource_sensitivity": _score_resource_sensitivity(resource),
     }
 
-    weighted_score = sum(raw[k] * _WEIGHTS[k] for k in raw)
+    weighted_score = sum(raw[k] * effective_weights.get(k, _WEIGHTS[k]) for k in raw)
     final = min(100, max(0, round(weighted_score)))
 
     # Per-factor contribution (rounded integers for the response)
-    factors = {k: round(raw[k] * _WEIGHTS[k]) for k in raw}
+    factors = {k: round(raw[k] * effective_weights.get(k, _WEIGHTS[k])) for k in raw}
 
     if final <= 30:
         level = "low"

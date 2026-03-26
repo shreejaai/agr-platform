@@ -17,7 +17,9 @@ from app.middleware.auth import AuthMiddleware
 from app.middleware.logging_mw import RequestIDFormatter, RequestLoggingMiddleware
 from app.models import Organization
 from app.routes import agents, approvals, audit, clerk, evaluate, health, org, policies, webhooks
+from app.routes.compliance import router as compliance_router
 from app.routes.copilot import router as copilot_router
+from app.routes.risk_config import router as risk_config_router
 
 # Structured logging with request_id injected by RequestIDFormatter
 _handler = logging.StreamHandler()
@@ -126,3 +128,5 @@ app.include_router(clerk.router)
 app.include_router(webhooks.router)
 app.include_router(org.router)
 app.include_router(copilot_router)
+app.include_router(risk_config_router)
+app.include_router(compliance_router)

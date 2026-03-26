@@ -224,6 +224,88 @@ class AGRClient:
             )
         return response.json()  # type: ignore[no-any-return]
 
+    # ── Audit ──────────────────────────────────────────────────────────────────
+
+    def get_audit_events(
+        self,
+        *,
+        event_type: str | None = None,
+        agent_id: str | None = None,
+        action: str | None = None,
+        resource: str | None = None,
+        decision: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, object]]:
+        """Fetch audit events with optional filters."""
+        params: dict[str, object] = {"limit": limit, "offset": offset}
+        for k, v in {
+            "event_type": event_type,
+            "agent_id": agent_id,
+            "action": action,
+            "resource": resource,
+            "decision": decision,
+            "start_date": start_date,
+            "end_date": end_date,
+        }.items():
+            if v is not None:
+                params[k] = v
+        response = self._client.get("/v1/audit", params=params)
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Failed to fetch audit events ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
+    def search_audit(self, filters: dict[str, object]) -> list[dict[str, object]]:
+        """POST /v1/audit/search — structured filter query."""
+        response = self._client.post("/v1/audit/search", json=filters)
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Audit search failed ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
+    # ── Risk config ────────────────────────────────────────────────────────────
+
+    def get_risk_config(self) -> dict[str, object]:
+        """Return current per-org risk scoring configuration."""
+        response = self._client.get("/v1/org/risk-config")
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Failed to get risk config ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
+    def update_risk_config(self, updates: dict[str, object]) -> dict[str, object]:
+        """Update per-org risk scoring weights and thresholds."""
+        response = self._client.put("/v1/org/risk-config", json=updates)
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Failed to update risk config ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
+    # ── Compliance ─────────────────────────────────────────────────────────────
+
+    def get_compliance_summary(self, period_days: int = 7) -> dict[str, object]:
+        """Return aggregated compliance posture for the last N days."""
+        response = self._client.get(
+            "/v1/compliance/summary", params={"period_days": period_days}
+        )
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Failed to get compliance summary ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
     def close(self) -> None:
         self._client.close()
 

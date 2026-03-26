@@ -27,20 +27,23 @@ async def test_create_policy(client: AsyncClient, auth_headers: dict[str, str]) 
     data = response.json()
     assert data["name"] == "Custom policy"
     assert data["version"] == 1
-    assert data["active"] is True
+    # New policies default to draft — not yet active in evaluation
+    assert data["state"] == "draft"
+    assert data["active"] is False
 
 
 @pytest.mark.asyncio
 async def test_update_policy_increments_version(
     client: AsyncClient, auth_headers: dict[str, str]
 ) -> None:
-    # Create
+    # Create as active so it can be found by the update route
     create_resp = await client.post(
         "/v1/policies",
         json={
             "name": "Versioned policy",
             "level": "org",
             "cedar_rule": 'permit(principal, action == Action::"v1", resource);',
+            "state": "active",
         },
         headers=auth_headers,
     )
@@ -64,6 +67,7 @@ async def test_toggle_policy_active(client: AsyncClient, auth_headers: dict[str,
             "name": "Toggle policy",
             "level": "org",
             "cedar_rule": 'permit(principal, action == Action::"test", resource);',
+            "state": "active",
         },
         headers=auth_headers,
     )
@@ -76,6 +80,7 @@ async def test_toggle_policy_active(client: AsyncClient, auth_headers: dict[str,
     )
     assert update_resp.status_code == 200
     assert update_resp.json()["active"] is False
+    assert update_resp.json()["state"] == "archived"
 
 
 @pytest.mark.asyncio
@@ -86,6 +91,7 @@ async def test_delete_policy(client: AsyncClient, auth_headers: dict[str, str]) 
             "name": "Delete me",
             "level": "org",
             "cedar_rule": 'permit(principal, action == Action::"del", resource);',
+            "state": "active",
         },
         headers=auth_headers,
     )

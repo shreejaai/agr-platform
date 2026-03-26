@@ -178,6 +178,8 @@ class CopilotService:
             response = await self._handle_register_agent(message, auto_confirm)
         elif intent == "create_webhook":
             response = await self._handle_create_webhook(message, auto_confirm)
+        elif intent == "explain_policy":
+            response = await self._handle_explain_policy(message)
         elif intent == "explain":
             response = await self._handle_explain(message, history)
         else:
@@ -322,6 +324,10 @@ class CopilotService:
                 return "list_agents"
             if "webhook" in lower:
                 return "list_webhooks"
+
+        # Explain policy (specific policy lookup — before generic explain)
+        if re.search(r"\b(explain|describe|what does|tell me about)\b", lower) and "polic" in lower:
+            return "explain_policy"
 
         # Explain intents
         if re.search(r"\b(explain|what is|what are|how does|describe|tell me about)\b", lower):
@@ -738,6 +744,77 @@ class CopilotService:
                 "active": webhook.active,
             },
             suggestions=["List webhooks", "Create another webhook"],
+        )
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Explain policy handler — looks up a specific policy and explains its rule
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def _handle_explain_policy(self, message: str) -> CopilotResponse:
+        """Look up a policy by name (substring match) and explain its Cedar rule."""
+        # Try to extract policy name from message
+        lower = message.lower()
+        policies_result = await self.session.execute(
+            select(Policy)
+            .where(Policy.org_id == self.org_id, Policy.state == "active")
+            .order_by(Policy.created_at.desc())
+            .limit(50)
+        )
+        policies = policies_result.scalars().all()
+
+        if not policies:
+            return CopilotResponse(
+                message="You have no active policies to explain.",
+                action_type="explain_policy",
+                suggestions=["Create your first policy", "Show sample policies"],
+            )
+
+        # Find best match by name substring
+        match = None
+        for p in policies:
+            if p.name.lower() in lower or any(
+                word in lower for word in p.name.lower().split() if len(word) > 3
+            ):
+                match = p
+                break
+
+        if match is None:
+            # Show list and ask them to pick
+            names = ", ".join(f"**{p.name}**" for p in policies[:5])
+            return CopilotResponse(
+                message=f"Which policy would you like explained? Your active policies: {names}",
+                action_type="explain_policy",
+                suggestions=[f"Explain policy {p.name}" for p in policies[:3]],
+            )
+
+        rule = match.cedar_rule
+        lines = [
+            f"## Policy: {match.name}",
+            f"**Level**: {match.level}  |  **State**: {match.state}",
+            "",
+            "**Cedar rule**:",
+            f"```cedar\n{rule}\n```",
+            "",
+        ]
+
+        # Plain-language interpretation
+        if rule.startswith("permit"):
+            lines.append("This policy **allows** matching requests to proceed.")
+        elif rule.startswith("forbid"):
+            lines.append("This policy **blocks** matching requests.")
+        if "when" in rule.lower():
+            lines.append(
+                "It has conditional logic — requests only match if the `when` clause is satisfied."
+            )
+
+        return CopilotResponse(
+            message="\n".join(lines),
+            action_type="explain_policy",
+            suggestions=[
+                "Explain another policy",
+                "Modify this policy",
+                "List all policies",
+            ],
         )
 
     # ──────────────────────────────────────────────────────────────────────────

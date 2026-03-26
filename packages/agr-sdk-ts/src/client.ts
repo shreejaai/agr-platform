@@ -220,6 +220,55 @@ export class AGRClient {
     return this._request<PolicyImportItem[]>("GET", `/v1/policies/export${qs}`);
   }
 
+  // ── Audit ────────────────────────────────────────────────────────────────
+
+  /** Fetch audit events with optional filters. */
+  async getAuditEvents(params: {
+    event_type?: string;
+    agent_id?: string;
+    action?: string;
+    resource?: string;
+    decision?: string;
+    start_date?: string;
+    end_date?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<Record<string, unknown>[]> {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined) qs.set(k, String(v));
+    }
+    const query = qs.toString() ? `?${qs.toString()}` : "";
+    return this._request<Record<string, unknown>[]>("GET", `/v1/audit${query}`);
+  }
+
+  /** POST /v1/audit/search — structured filter query. */
+  async searchAudit(filters: Record<string, unknown>): Promise<Record<string, unknown>[]> {
+    return this._request<Record<string, unknown>[]>("POST", "/v1/audit/search", filters);
+  }
+
+  // ── Risk config ──────────────────────────────────────────────────────────
+
+  /** Return current per-org risk scoring configuration. */
+  async getRiskConfig(): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>("GET", "/v1/org/risk-config");
+  }
+
+  /** Update per-org risk scoring weights and thresholds. */
+  async updateRiskConfig(updates: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>("PUT", "/v1/org/risk-config", updates);
+  }
+
+  // ── Compliance ───────────────────────────────────────────────────────────
+
+  /** Return aggregated compliance posture for the last N days. */
+  async getComplianceSummary(periodDays = 7): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      "GET",
+      `/v1/compliance/summary?period_days=${periodDays}`,
+    );
+  }
+
   /**
    * No-op. Kept for API parity with the Python SDK.
    * The fetch-based client has no persistent connections to close.

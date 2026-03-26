@@ -6,6 +6,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     Text,
@@ -34,6 +35,8 @@ class Organization(Base):
     eval_count: Mapped[int] = mapped_column(BigInteger, default=0)
     eval_limit: Mapped[int] = mapped_column(BigInteger, default=100)
     eval_week_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # RBAC role for the org's API key: admin | operator | viewer
+    role: Mapped[str] = mapped_column(Text, nullable=False, default="admin")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -57,12 +60,46 @@ class Policy(Base):
     cedar_rule: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=1)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Lifecycle state: draft → active → archived
+    # active=True is kept in sync (active iff state='active') for backward compat
+    state: Mapped[str] = mapped_column(Text, nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     organization: Mapped["Organization"] = relationship(back_populates="policies")
+    versions: Mapped[list["PolicyVersion"]] = relationship(
+        back_populates="policy",
+        cascade="all, delete-orphan",
+        order_by="PolicyVersion.version.desc()",
+    )
+
+
+class PolicyVersion(Base):
+    """Immutable snapshot of a policy taken before each content-changing PATCH.
+
+    policy_id has no FK so snapshots survive if the policy is later hard-deleted.
+    org_id is stored directly to allow RLS-compatible queries without a join.
+    """
+
+    __tablename__ = "policy_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    policy_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("policies.id", ondelete="CASCADE"), nullable=False
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    cedar_rule: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    level: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    policy: Mapped["Policy"] = relationship(back_populates="versions")
 
 
 class ApprovalRequest(Base):
@@ -83,7 +120,35 @@ class ApprovalRequest(Base):
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # Multi-step approval (migration 023)
+    quorum_type: Mapped[str] = mapped_column(Text, nullable=False, default="any")
+    sla_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    escalation_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     organization: Mapped["Organization"] = relationship(back_populates="approval_requests")
+    steps: Mapped[list["ApprovalStep"]] = relationship(
+        back_populates="approval",
+        cascade="all, delete-orphan",
+        order_by="ApprovalStep.created_at",
+    )
+
+
+class ApprovalStep(Base):
+    """Individual approver decision within a multi-step approval (migration 023)."""
+
+    __tablename__ = "approval_steps"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    approval_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("approval_requests.id", ondelete="CASCADE"), nullable=False
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    approver_email: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    approval: Mapped["ApprovalRequest"] = relationship(back_populates="steps")
 
 
 class Agent(Base):
@@ -95,6 +160,14 @@ class Agent(Base):
     agent_metadata: Mapped[dict[str, object] | None] = mapped_column(
         "metadata", JSONType, nullable=True
     )
+    # Typed profile fields (migration 020)
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owner: Mapped[str | None] = mapped_column(Text, nullable=True)
+    framework: Mapped[str | None] = mapped_column(Text, nullable=True)
+    environment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trust_level: Mapped[str] = mapped_column(Text, nullable=False, default="unknown")
+    # Capability list (migration 021)
+    capabilities: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -160,6 +233,29 @@ class AuditEvent(Base):
     entry_hash: Mapped[str] = mapped_column(Text, nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class OrgRiskConfig(Base):
+    """Per-org risk scoring weights and thresholds (migration 022)."""
+
+    __tablename__ = "org_risk_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    weight_action_severity: Mapped[float] = mapped_column(Float, nullable=False, default=0.30)
+    weight_context_signals: Mapped[float] = mapped_column(Float, nullable=False, default=0.20)
+    weight_rate_pattern: Mapped[float] = mapped_column(Float, nullable=False, default=0.15)
+    weight_agent_trust: Mapped[float] = mapped_column(Float, nullable=False, default=0.15)
+    weight_amount_scale: Mapped[float] = mapped_column(Float, nullable=False, default=0.10)
+    weight_resource_sensitivity: Mapped[float] = mapped_column(Float, nullable=False, default=0.10)
+    threshold_allow_max: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    threshold_approval_max: Mapped[int] = mapped_column(Integer, nullable=False, default=70)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 

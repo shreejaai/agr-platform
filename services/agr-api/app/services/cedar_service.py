@@ -30,7 +30,7 @@ async def load_active_policies(
     """Load active Cedar policies for an organization from the database."""
     stmt = select(Policy).where(
         Policy.org_id == org_id,
-        Policy.active.is_(True),
+        Policy.state == "active",
     )
     if agent_id:
         stmt = stmt.where((Policy.agent_id.is_(None)) | (Policy.agent_id == agent_id))

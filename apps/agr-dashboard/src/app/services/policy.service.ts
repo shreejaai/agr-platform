@@ -15,6 +15,35 @@ export interface PolicyListParams {
   limit?: number;
 }
 
+export interface SimulateRequest {
+  agent_id: string;
+  action: string;
+  resource: string;
+  context?: Record<string, unknown>;
+}
+
+export interface DecisionTrace {
+  policy_source: string | null;
+  cedar_decision: string | null;
+  risk_override: boolean;
+}
+
+export interface SimulateResponse {
+  decision: 'ALLOW' | 'DENY' | 'APPROVAL_REQUIRED';
+  reason: string;
+  risk_score: number;
+  risk_level: string;
+  decision_trace: DecisionTrace;
+}
+
+export interface PolicyVersion {
+  version: number;
+  cedar_rule: string;
+  name: string;
+  updated_at: string;
+  updated_by: string | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class PolicyService {
   private http = inject(HttpClient);
@@ -50,5 +79,17 @@ export class PolicyService {
     let p = new HttpParams();
     if (activeOnly) p = p.set('active_only', 'true');
     return this.http.get<PolicyImportItem[]>('/v1/policies/export', { params: p });
+  }
+
+  simulate(req: SimulateRequest): Observable<SimulateResponse> {
+    return this.http.post<SimulateResponse>('/v1/policies/simulate', req);
+  }
+
+  getVersions(policyId: string): Observable<PolicyVersion[]> {
+    return this.http.get<PolicyVersion[]>(`/v1/policies/${policyId}/versions`);
+  }
+
+  rollback(policyId: string, version: number): Observable<Policy> {
+    return this.http.post<Policy>(`/v1/policies/${policyId}/rollback`, { version });
   }
 }

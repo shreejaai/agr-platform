@@ -34,4 +34,20 @@ $PSQL -f /migrations/014_audit_sequence_per_org.sql
 echo "  014 done"
 $PSQL -f /migrations/015_audit_agent_index.sql
 echo "  015 done"
+$PSQL -f /migrations/016_copilot_history.sql
+echo "  016 done"
+$PSQL -f /migrations/017_policy_state.sql
+echo "  017 done"
+$PSQL -f /migrations/018_policy_versions.sql
+echo "  018 done"
+$PSQL -f /migrations/019_org_roles.sql
+echo "  019 done"
+$PSQL -f /migrations/020_agent_profile.sql
+echo "  020 done"
+$PSQL -f /migrations/021_agent_capabilities.sql
+echo "  021 done"
+$PSQL -f /migrations/022_org_risk_config.sql
+echo "  022 done"
+$PSQL -f /migrations/023_approval_steps.sql
+echo "  023 done"
 echo "All migrations complete."

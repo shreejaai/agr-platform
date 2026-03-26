@@ -68,6 +68,7 @@ def test_risk_result_fields() -> None:
         "rate_pattern",
         "agent_trust",
         "amount_scale",
+        "resource_sensitivity",
     }
 
 

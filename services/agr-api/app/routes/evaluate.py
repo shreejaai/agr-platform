@@ -165,6 +165,45 @@ async def evaluate(
     cedar_decision = result.decision
 
     # -------------------------------------------------------------------------
+    # Agent trust_level lookup — used by risk scoring (Task 8)
+    # -------------------------------------------------------------------------
+    from sqlalchemy import select as sa_select
+
+    from app.models import Agent as AgentModel
+    from app.models import OrgRiskConfig
+
+    agent_trust_level: str | None = None
+    agent_row = await session.execute(
+        sa_select(AgentModel.trust_level).where(
+            AgentModel.org_id == org_id,
+            AgentModel.agent_id == body.agent_id,
+        )
+    )
+    agent_trust_row = agent_row.one_or_none()
+    if agent_trust_row is not None:
+        agent_trust_level = agent_trust_row[0]
+
+    # Load per-org risk weights if configured
+    risk_cfg_row = await session.execute(
+        sa_select(OrgRiskConfig).where(OrgRiskConfig.org_id == org_id)
+    )
+    risk_cfg = risk_cfg_row.scalar_one_or_none()
+    org_weights: dict[str, float] | None = None
+    org_allow_max: int = settings.risk_thresholds_allow_max
+    org_approval_max: int = settings.risk_thresholds_approval_max
+    if risk_cfg is not None:
+        org_weights = {
+            "action_severity": risk_cfg.weight_action_severity,
+            "context_signals": risk_cfg.weight_context_signals,
+            "rate_pattern": risk_cfg.weight_rate_pattern,
+            "agent_trust": risk_cfg.weight_agent_trust,
+            "amount_scale": risk_cfg.weight_amount_scale,
+            "resource_sensitivity": risk_cfg.weight_resource_sensitivity,
+        }
+        org_allow_max = risk_cfg.threshold_allow_max
+        org_approval_max = risk_cfg.threshold_approval_max
+
+    # -------------------------------------------------------------------------
     # Risk scoring — runs after Cedar; can upgrade ALLOW to APPROVAL_REQUIRED/DENY
     # Cedar DENY always wins; risk scoring only affects ALLOW decisions.
     # -------------------------------------------------------------------------
@@ -177,20 +216,22 @@ async def evaluate(
             context=body.context,
             eval_count=org.eval_count,
             eval_limit=org.eval_limit,
+            trust_level=agent_trust_level,
+            weights=org_weights,
         )
         # Only override if Cedar said ALLOW — DENY/APPROVAL_REQUIRED are final
         if result.decision == "ALLOW":
-            if risk.score > settings.risk_thresholds_approval_max:
+            if risk.score > org_approval_max:
                 result.decision = "DENY"
                 result.reason = (
                     f"Risk score {risk.score}/100 ({risk.level}) exceeds threshold "
-                    f"{settings.risk_thresholds_approval_max}. Action denied."
+                    f"{org_approval_max}. Action denied."
                 )
-            elif risk.score > settings.risk_thresholds_allow_max:
+            elif risk.score > org_allow_max:
                 result.decision = "APPROVAL_REQUIRED"
                 result.reason = (
                     f"Risk score {risk.score}/100 ({risk.level}) requires human approval. "
-                    f"Threshold is {settings.risk_thresholds_allow_max}."
+                    f"Threshold is {org_allow_max}."
                 )
 
     # -------------------------------------------------------------------------
@@ -257,6 +298,14 @@ async def evaluate(
         approval_id=uuid.UUID(approval_id) if approval_id else None,
         payload={"context": body.context, "eval_id": eval_id, **extra_payload},
     )
+
+    # Record Prometheus metrics (non-blocking, fail-open)
+    try:
+        from app.services.metrics_service import record_evaluation
+
+        record_evaluation(result.decision, risk.score if risk else None)
+    except Exception:
+        pass
 
     # Cache ALLOW/DENY results; sync DB eval_count in background
     background_tasks.add_task(

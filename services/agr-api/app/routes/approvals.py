@@ -10,12 +10,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.models import ApprovalRequest
+from app.models import ApprovalRequest, ApprovalStep
 from app.schemas import (
     ApprovalDecideRequest,
     ApprovalDecisionRequest,
     ApprovalEscalateRequest,
     ApprovalResponse,
+    ApprovalStepCreate,
+    ApprovalStepResponse,
 )
 from app.services.audit_service import create_audit_event
 from app.services.notification_service import send_approval_email, verify_decision_token
@@ -40,6 +42,9 @@ def _to_response(a: ApprovalRequest) -> ApprovalResponse:
         approver_email=a.approver_email,
         decision_at=a.decision_at,
         expires_at=a.expires_at,
+        quorum_type=a.quorum_type,
+        sla_hours=a.sla_hours,
+        escalation_email=a.escalation_email,
         created_at=a.created_at,
     )
 
@@ -490,6 +495,85 @@ async def escalate_approval(
     background_tasks.add_task(send_approval_email, approval)
     logger.info("Escalated approval %s to %s", approval_id, body.approver_email)
     return _to_response(approval)
+
+
+@router.get("/approvals/{approval_id}/steps", response_model=list[ApprovalStepResponse])
+async def list_approval_steps(
+    approval_id: uuid.UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> list[ApprovalStepResponse]:
+    """List all approver steps for this approval request."""
+    org_id: uuid.UUID = request.state.org_id
+    # Verify ownership
+    result = await session.execute(
+        select(ApprovalRequest).where(
+            ApprovalRequest.id == approval_id,
+            ApprovalRequest.org_id == org_id,
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Approval request not found.")
+
+    steps_result = await session.execute(
+        select(ApprovalStep)
+        .where(ApprovalStep.approval_id == approval_id, ApprovalStep.org_id == org_id)
+        .order_by(ApprovalStep.created_at)
+    )
+    return [
+        ApprovalStepResponse(
+            id=str(s.id),
+            approval_id=str(s.approval_id),
+            approver_email=s.approver_email,
+            status=s.status,
+            decided_at=s.decided_at,
+            created_at=s.created_at,
+        )
+        for s in steps_result.scalars().all()
+    ]
+
+
+@router.post("/approvals/{approval_id}/steps", response_model=ApprovalStepResponse, status_code=201)
+async def add_approval_step(
+    approval_id: uuid.UUID,
+    body: ApprovalStepCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> ApprovalStepResponse:
+    """Add an approver step to a pending approval request."""
+    org_id: uuid.UUID = request.state.org_id
+    result = await session.execute(
+        select(ApprovalRequest).where(
+            ApprovalRequest.id == approval_id,
+            ApprovalRequest.org_id == org_id,
+        )
+    )
+    approval = result.scalar_one_or_none()
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval request not found.")
+    if approval.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot add step: approval is already '{approval.status}'.",
+        )
+
+    step = ApprovalStep(
+        id=uuid.uuid4(),
+        approval_id=approval_id,
+        org_id=org_id,
+        approver_email=body.approver_email,
+    )
+    session.add(step)
+    await session.flush()
+    await session.refresh(step)
+    return ApprovalStepResponse(
+        id=str(step.id),
+        approval_id=str(step.approval_id),
+        approver_email=step.approver_email,
+        status=step.status,
+        decided_at=step.decided_at,
+        created_at=step.created_at,
+    )
 
 
 def _html_page(message: str, kind: str) -> str:
