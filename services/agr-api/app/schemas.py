@@ -37,6 +37,15 @@ class EvaluateRequest(BaseModel):
         return v
 
 
+class DecisionTrace(BaseModel):
+    policy_source: str  # "cedar_cli" | "python_fallback" | "no_policies" | "cache"
+    matched_policy_id: str | None = None
+    cedar_decision: str  # raw Cedar/Python decision before risk override
+    risk_score: int | None = None
+    risk_level: str | None = None
+    risk_override: bool = False
+
+
 class EvaluateResponse(BaseModel):
     decision: str
     reason: str
@@ -48,6 +57,7 @@ class EvaluateResponse(BaseModel):
     risk_level: str | None = None
     risk_factors: dict[str, int] | None = None
     compliance_findings: list[dict[str, object]] | None = None
+    decision_trace: DecisionTrace | None = None
 
 
 def _validate_cedar_rule(rule: str) -> str:

@@ -233,3 +233,110 @@ async def test_evaluate_deny_default_no_policies(
     assert response.status_code == 200
     data = response.json()
     assert data["decision"] == "DENY"
+
+
+@pytest.mark.asyncio
+async def test_evaluate_trace_allow(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    """decision_trace is present and correct on an ALLOW response."""
+    response = await client.post(
+        "/v1/evaluate",
+        json={
+            "agent_id": "coder-001",
+            "action": "deploy",
+            "resource": "staging-server",
+            "context": {"environment": "staging"},
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["decision"] == "ALLOW"
+    trace = data["decision_trace"]
+    assert trace is not None
+    assert trace["policy_source"] == "python_fallback"
+    assert trace["cedar_decision"] == "ALLOW"
+    assert trace["risk_override"] is False
+
+
+@pytest.mark.asyncio
+async def test_evaluate_trace_deny_no_policies(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_session: AsyncSession,
+    test_org: Organization,
+) -> None:
+    """decision_trace shows policy_source=no_policies when no policies exist."""
+    from sqlalchemy import delete
+
+    await db_session.execute(delete(Policy).where(Policy.org_id == test_org.id))
+    await db_session.commit()
+
+    response = await client.post(
+        "/v1/evaluate",
+        json={"agent_id": "coder-001", "action": "read", "resource": "docs"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    trace = data["decision_trace"]
+    assert trace["cedar_decision"] == "DENY"
+    assert trace["policy_source"] == "no_policies"
+    assert trace["risk_override"] is False
+
+
+@pytest.mark.asyncio
+async def test_evaluate_trace_approval_required(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    """decision_trace reflects APPROVAL_REQUIRED without risk override."""
+    response = await client.post(
+        "/v1/evaluate",
+        json={
+            "agent_id": "coder-001",
+            "action": "deploy",
+            "resource": "production-server",
+            "context": {"environment": "production"},
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["decision"] == "APPROVAL_REQUIRED"
+    trace = data["decision_trace"]
+    assert trace["cedar_decision"] == "APPROVAL_REQUIRED"
+    assert trace["risk_override"] is False
+
+
+@pytest.mark.asyncio
+async def test_evaluate_trace_risk_override(
+    client: AsyncClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """decision_trace marks risk_override=True when risk scoring changes the decision."""
+    import app.routes.evaluate as evaluate_module
+    from app.services.risk_service import RiskResult
+
+    monkeypatch.setattr(
+        evaluate_module,
+        "compute_risk_score",
+        lambda **kwargs: RiskResult(score=95, level="critical", factors={}),
+    )
+    response = await client.post(
+        "/v1/evaluate",
+        json={
+            "agent_id": "coder-001",
+            "action": "deploy",
+            "resource": "staging-server",
+            "context": {"environment": "staging"},
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    trace = data["decision_trace"]
+    assert trace["cedar_decision"] == "ALLOW"
+    assert trace["risk_override"] is True
+    assert trace["risk_score"] == 95
+    assert trace["risk_level"] == "critical"
+    assert data["decision"] != "ALLOW"

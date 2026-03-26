@@ -32,6 +32,7 @@ class EvaluationResult:
     policy_id: str | None
     requires_approval: bool
     latency_ms: float
+    policy_source: str = "python_fallback"  # "cedar_cli" | "python_fallback" | "no_policies"
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +67,7 @@ def evaluate_policies(
             policy_id=None,
             requires_approval=False,
             latency_ms=elapsed,
+            policy_source="no_policies",
         )
 
     cedar_binary = _find_cedar_cli()
@@ -173,6 +175,7 @@ def _cedar_cli_evaluator(
             policy_id=None,  # Cedar CLI does not report which policy matched
             requires_approval=False,
             latency_ms=0,
+            policy_source="cedar_cli",
         )
 
     # DENY — check if injecting approval_status=approved flips it to ALLOW.
@@ -190,6 +193,7 @@ def _cedar_cli_evaluator(
                     policy_id=None,
                     requires_approval=True,
                     latency_ms=0,
+                    policy_source="cedar_cli",
                 )
         except Exception as exc:
             logger.warning("Cedar CLI second-pass (approval check) failed: %s", exc)
@@ -200,6 +204,7 @@ def _cedar_cli_evaluator(
         policy_id=None,
         requires_approval=False,
         latency_ms=0,
+        policy_source="cedar_cli",
     )
 
 

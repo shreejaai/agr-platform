@@ -19,7 +19,7 @@ from sqlalchemy import or_
 
 from app.config import settings
 from app.database import get_session
-from app.schemas import ErrorResponse, EvaluateRequest, EvaluateResponse
+from app.schemas import DecisionTrace, ErrorResponse, EvaluateRequest, EvaluateResponse
 from app.services.approval_service import create_approval_request
 from app.services.audit_service import create_audit_event
 from app.services.cedar_service import evaluate_request
@@ -141,6 +141,12 @@ async def evaluate(
             approval_id=None,
             latency_ms=latency_ms,
             eval_id=eval_id,
+            decision_trace=DecisionTrace(
+                policy_source="cache",
+                matched_policy_id=str(policy_id) if policy_id else None,
+                cedar_decision=decision,
+                risk_override=False,
+            ),
         )
 
     # -------------------------------------------------------------------------
@@ -154,6 +160,9 @@ async def evaluate(
         resource=body.resource,
         context=body.context,
     )
+
+    # Capture raw policy engine decision before risk scoring can override it
+    cedar_decision = result.decision
 
     # -------------------------------------------------------------------------
     # Risk scoring — runs after Cedar; can upgrade ALLOW to APPROVAL_REQUIRED/DENY
@@ -277,4 +286,12 @@ async def evaluate(
         risk_level=risk.level if risk else None,
         risk_factors=risk.factors if risk else None,
         compliance_findings=compliance_findings,
+        decision_trace=DecisionTrace(
+            policy_source=result.policy_source,
+            matched_policy_id=result.policy_id,
+            cedar_decision=cedar_decision,
+            risk_score=risk.score if risk else None,
+            risk_level=risk.level if risk else None,
+            risk_override=risk is not None and result.decision != cedar_decision,
+        ),
     )
