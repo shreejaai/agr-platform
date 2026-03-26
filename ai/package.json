@@ -1,0 +1,12 @@
+{
+  "name": "agr-ai-workflow",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "ai:plan": "node --enable-source-maps scripts/cli.mjs plan",
+    "ai:execute": "node --enable-source-maps scripts/cli.mjs execute",
+    "ai:review": "node --enable-source-maps scripts/cli.mjs review",
+    "ai:fix": "node --enable-source-maps scripts/cli.mjs fix"
+  }
+}
