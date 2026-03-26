@@ -1,5 +1,19 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(ruff check *)",
+      "Bash(ruff format *)",
+      "Bash(python -m mypy *)",
+      "Bash(python -m pytest *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(docker compose *)",
+      "Bash(npm run *)"
+    ],
     "deny": [
       "Read(./.env)",
       "Read(./.env.*)",
@@ -13,18 +27,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ai/scripts/test-runner.sh || true"
+            "command": "file=$(echo $CLAUDE_TOOL_INPUT | python3 -c \"import json,sys; d=json.load(sys.stdin); print(d.get('file_path',''))\" 2>/dev/null); if [[ \"$file\" == *.py ]]; then cd /Users/navneet/Shreejaai/AGR/agr-platform && ruff check \"$file\" --quiet 2>&1 | head -20; fi"
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "Write",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'About to write files in AGR repo...'"
+            "command": "cmd=$(echo $CLAUDE_TOOL_INPUT | python3 -c \"import json,sys; d=json.load(sys.stdin); print(d.get('command',''))\" 2>/dev/null); if echo \"$cmd\" | grep -q 'git commit'; then cd /Users/navneet/Shreejaai/AGR/agr-platform && ruff check services/agr-api/app/ --quiet && echo 'ruff: ok'; fi"
           }
         ]
       }
