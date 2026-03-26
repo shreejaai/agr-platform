@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "project": "AGR",
+  "defaultClaudeModel": "claude-sonnet-4-5",
+  "defaultOllamaModel": "qwen2.5-coder:14b",
+  "contextGroups": {
+    "api": [
+      "README.md",
+      "services/agr-api/requirements.txt",
+      "services/agr-api/app"
+    ],
+    "dashboard": [
+      "README.md",
+      "apps/agr-dashboard/package.json",
+      "apps/agr-dashboard/src"
+    ],
+    "python-sdk": [
+      "README.md",
+      "packages/agr-sdk-python"
+    ],
+    "ts-sdk": [
+      "README.md",
+      "packages/agr-sdk-ts"
+    ],
+    "policy-engine": [
+      "README.md",
+      "packages/agr-core"
+    ],
+    "infra": [
+      "README.md",
+      "infra/migrations",
+      "docker-compose.yml"
+    ]
+  },
+  "pathKeywords": {
+    "risk": "api",
+    "approval": "api",
+    "audit": "api",
+    "policy": "policy-engine",
+    "cedar": "policy-engine",
+    "dashboard": "dashboard",
+    "angular": "dashboard",
+    "ui": "dashboard",
+    "python": "python-sdk",
+    "sdk": "python-sdk",
+    "typescript": "ts-sdk",
+    "node": "ts-sdk",
+    "migration": "infra",
+    "docker": "infra"
+  }
+}
