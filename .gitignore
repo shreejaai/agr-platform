@@ -247,3 +247,9 @@ Thumbs.db
 *.docx
 *.doc
 *.pdf
+
+# Claude Code
+.claude/worktrees/
+
+# AI temp files
+ai/tmp/
