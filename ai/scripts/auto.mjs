@@ -39,8 +39,8 @@ async function run(task) {
   console.log('Loading context...');
   const context = await loadContext(task);
 
-  const planner = await fs.readFile('ai/prompts/planner-advanced.md', 'utf-8');
-  const reviewer = await fs.readFile('ai/prompts/reviewer-structured.md', 'utf-8');
+  const planner = await fs.readFile('/prompts/planner-advanced.md', 'utf-8');
+  const reviewer = await fs.readFile('/prompts/reviewer-structured.md', 'utf-8');
 
   console.log('Planning...');
   let plan = await callClaude(`${context}\n\n${planner}\n\nTask:\n${task}`);
@@ -68,7 +68,7 @@ async function run(task) {
     iteration++;
   }
 
-  await fs.writeFile('ai/tmp/final.txt', output);
+  await fs.writeFile('/tmp/final.txt', output);
   console.log('Final output saved to ai/tmp/final.txt');
 }
 

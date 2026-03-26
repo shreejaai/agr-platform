@@ -1,27 +1,26 @@
 import fs from 'fs/promises';
 import { loadContext } from './context-loader.mjs';
 
-const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 const OLLAMA_API = 'http://localhost:11434/api/generate';
 const MAX_ITERATIONS = Number(process.env.AI_MAX_LOOPS || 5);
 const STOP_FILE = process.env.AI_STOP_FILE || 'ai/tmp/STOP';
 
-async function callClaude(prompt) {
-  const res = await fetch(CLAUDE_API, {
-    method: 'POST',
-    headers: {
-      'x-api-key': process.env.CLAUDE_API_KEY,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 3000,
-      messages: [{ role: 'user', content: prompt }]
-    })
-  });
-  const data = await res.json();
-  return data.content?.[0]?.text || '';
-}
+// async function callClaude(prompt) {
+//   const res = await fetch(CLAUDE_API, {
+//     method: 'POST',
+//     headers: {
+//       'x-api-key': process.env.CLAUDE_API_KEY,
+//       'content-type': 'application/json'
+//     },
+//     body: JSON.stringify({
+//       model: 'claude-sonnet-4-5',
+//       max_tokens: 3000,
+//       messages: [{ role: 'user', content: prompt }]
+//     })
+//   });
+//   const data = await res.json();
+//   return data.content?.[0]?.text || '';
+// }
 
 async function callOllama(prompt) {
   const res = await fetch(OLLAMA_API, {
@@ -49,8 +48,8 @@ async function shouldStopFromFile() {
 async function run(task) {
   console.log('Loading context...');
   const context = await loadContext(task);
-  const planner = await fs.readFile('ai/prompts/planner-advanced.md', 'utf-8');
-  const reviewer = await fs.readFile('ai/prompts/reviewer-structured.md', 'utf-8');
+  const planner = await fs.readFile('/prompts/planner-advanced.md', 'utf-8');
+  const reviewer = await fs.readFile('/prompts/reviewer-structured.md', 'utf-8');
 
   console.log('Planning...');
   let plan = await callClaude(`${context}\n\n${planner}\n\nTask:\n${task}`);
@@ -77,7 +76,7 @@ async function run(task) {
     previousOutput = output;
 
     const review = await callClaude(`${reviewer}\n\n${output}`);
-    await fs.writeFile('ai/tmp/review.txt', review);
+    await fs.writeFile('/tmp/review.txt', review);
 
     if (isPass(review)) {
       console.log('PASS achieved. Stopping loop.');
@@ -88,7 +87,7 @@ async function run(task) {
     iteration += 1;
   }
 
-  await fs.writeFile('ai/tmp/final.txt', output);
+  await fs.writeFile('/tmp/final.txt', output);
   console.log('Final output saved to ai/tmp/final.txt');
 }
 

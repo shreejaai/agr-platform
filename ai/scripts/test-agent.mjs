@@ -13,13 +13,13 @@ async function callOllama(prompt) {
 }
 
 async function run() {
-  const code = await fs.readFile('ai/tmp/final.txt', 'utf-8');
+  const code = await fs.readFile('/tmp/final.txt', 'utf-8');
 
   const prompt = `Generate unit tests for the following code. Focus on edge cases and production scenarios:\n\n${code}`;
 
   const tests = await callOllama(prompt);
 
-  await fs.writeFile('ai/tmp/tests.txt', tests);
+  await fs.writeFile('/tmp/tests.txt', tests);
 
   console.log('Tests generated at ai/tmp/tests.txt');
 }
