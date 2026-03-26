@@ -250,6 +250,10 @@ Thumbs.db
 
 # Claude Code
 .claude/worktrees/
+.claude/launch.json
+
+# uv lock file
+uv.lock
 
 # AI temp files
 ai/tmp/
