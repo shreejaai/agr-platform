@@ -52,3 +52,17 @@ python 07_full_scenario_test.py
   export AGR_BASE_URL="https://your-agr-instance.example.com"
   ```
 - `07_full_scenario_test.py` exits with code 0 if all tests pass, 1 if any fail.
+
+## Raw HTTP Examples (no SDK)
+
+The `raw/` subfolder contains equivalent examples using plain `httpx` calls instead of the SDK.
+These are useful for understanding the wire protocol or integrating AGR without the SDK dependency.
+
+| Script | Description |
+|--------|-------------|
+| `raw/01_basic_evaluate.py` | Raw POST /v1/evaluate |
+| `raw/02_wait_for_approval.py` | Polling for approval via raw HTTP |
+| `raw/03_risk_scoring_demo.py` | Risk score escalation over raw HTTP |
+| `raw/04_policy_import_export.py` | Policy import/export via raw HTTP |
+| `raw/05_compliance_findings.py` | Compliance findings via raw HTTP |
+| `raw/06_audit_trail.py` | Audit trail query via raw HTTP |
