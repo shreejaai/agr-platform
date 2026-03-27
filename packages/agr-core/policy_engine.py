@@ -132,7 +132,7 @@ def _cedar_cli_authorize(
     context: dict[str, object],
 ) -> str:
     """Run `cedar authorize` and return 'ALLOW' or 'DENY'. Raises on error."""
-    policy_text = "\n\n".join(p["cedar_rule"] for p in policies)
+    policy_text = _cedar_policy_text(policies)
 
     # Context dict doubles as resource attributes so `resource.X` conditions work.
     # This mirrors the Python evaluator which checks both `resource.X` and `context.X`
@@ -188,6 +188,27 @@ def _cedar_cli_authorize(
         f"Unexpected cedar output: stdout={proc.stdout!r} stderr={proc.stderr!r} "
         f"exit={proc.returncode}"
     )
+
+
+def _cedar_policy_text(policies: list[dict[str, str]]) -> str:
+    """Serialize Cedar policies, expanding approval-gated forbids for CLI parity."""
+    rules: list[str] = []
+    for policy in policies:
+        rule = policy["cedar_rule"].strip()
+        rules.append(rule)
+        companion_rule = _approval_companion_permit(rule)
+        if companion_rule:
+            rules.append(companion_rule)
+    return "\n\n".join(rules)
+
+
+def _approval_companion_permit(rule: str) -> str | None:
+    """Mirror `forbid ... unless approved` as `permit ... when approved` for Cedar CLI."""
+    if "forbid(" not in rule or "unless" not in rule or "approval_status" not in rule:
+        return None
+
+    permit_rule = re.sub(r"\bforbid\s*\(", "permit(", rule, count=1)
+    return re.sub(r"\bunless\b", "when", permit_rule, count=1)
 
 
 def _cedar_cli_evaluator(

@@ -11,6 +11,7 @@ import tempfile
 
 import pytest
 from policy_engine import (
+    _cedar_policy_text,
     _cedar_cli_authorize,
     _cedar_cli_evaluator,
     _find_cedar_cli,
@@ -64,6 +65,15 @@ class TestCedarCliRequestFormat:
             {"env": "staging"},
         )
         assert result == "ALLOW"
+
+    def test_approval_rules_emit_companion_permit_for_cli(self):
+        policy_text = _cedar_policy_text([APPROVAL_REQUIRED_POLICY])
+
+        assert APPROVAL_REQUIRED_POLICY["cedar_rule"] in policy_text
+        assert (
+            'permit(principal, action == Action::"deploy", resource) '
+            'when { context.approval_status == "approved" };'
+        ) in policy_text
 
 
 PERMIT_ALL_POLICY = {
