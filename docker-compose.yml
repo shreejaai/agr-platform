@@ -29,7 +29,7 @@ services:
       retries: 5
 
   # ── One-shot migration runner ───────────────────────────────────────────────
-  # Runs migrations 001–015 then exits. agr-api waits for this to complete.
+  # Runs migrations 001–025 then exits. agr-api waits for this to complete.
 
   migrate:
     image: postgres:16
