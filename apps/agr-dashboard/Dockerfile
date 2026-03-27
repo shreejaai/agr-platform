@@ -10,8 +10,9 @@ RUN npm install --legacy-peer-deps
 
 COPY . .
 
-# Inject the key into the production environment file before building
-RUN sed -i "s|pk_live_REPLACE_WITH_YOUR_CLERK_KEY|${CLERK_PUBLISHABLE_KEY}|g" \
+# Inject the key into the production environment file before building.
+# Keep the placeholder in sync with environment.prod.ts.
+RUN sed -i "s|pk_live_REPLACE_AT_BUILD_TIME|${CLERK_PUBLISHABLE_KEY}|g" \
       src/environments/environment.prod.ts
 
 RUN npm run build -- --configuration production
