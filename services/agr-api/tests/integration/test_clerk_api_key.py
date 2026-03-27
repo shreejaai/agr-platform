@@ -58,6 +58,7 @@ def _patch_clerk_api(monkeypatch: pytest.MonkeyPatch, *, email: str, user_id: st
             raise AssertionError(f"Unexpected Clerk URL: {url}")
 
     monkeypatch.setattr("app.routes.clerk.httpx.AsyncClient", _FakeClerkClient)
+    monkeypatch.setattr("app.routes.clerk._get_redis", lambda: None)
     monkeypatch.setattr(settings, "clerk_secret_key", "clerk_test_secret", raising=False)
 
 

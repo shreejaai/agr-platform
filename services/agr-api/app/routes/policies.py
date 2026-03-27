@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from typing import Literal, cast
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -25,7 +25,7 @@ from app.schemas import (
     SimulateResponse,
 )
 from app.services.cedar_service import evaluate_request
-from app.services.compliance_service import ComplianceContext, ComplianceFinding, get_registry
+from app.services.compliance_service import ComplianceContext, get_registry
 from app.services.policy_conflict_service import detect_conflicts
 from app.services.policy_import_service import export_policies, import_policies
 from app.services.redis_service import invalidate_org_eval_cache
@@ -41,27 +41,6 @@ _VALID_STATES = frozenset({"draft", "active", "archived"})
 def _state_to_active(state: str) -> bool:
     """Only 'active' policies participate in evaluation."""
     return state == "active"
-
-
-def _serialize_compliance_findings(
-    findings: list[ComplianceFinding],
-) -> list[ComplianceFindingResponse]:
-    return [
-        ComplianceFindingResponse(
-            plugin=finding.plugin,
-            standard=finding.standard,
-            rule_id=finding.rule_id,
-            severity=finding.severity,
-            message=finding.message,
-            passed=finding.passed,
-            remediation_steps=finding.remediation_steps,
-            severity_level=cast(
-                Literal["low", "medium", "high", "critical"], finding.severity_level
-            ),
-            compliance_score=finding.compliance_score,
-        )
-        for finding in findings
-    ]
 
 
 async def _snapshot_policy(session: AsyncSession, policy: Policy) -> None:
@@ -265,7 +244,7 @@ async def simulate_policy(
                     f"Threshold is {settings.risk_thresholds_allow_max}."
                 )
 
-    compliance_findings: list[ComplianceFindingResponse] | None = None
+    compliance_findings: list[dict[str, object]] | None = None
     try:
         comp_result = await get_registry().run_all(
             ComplianceContext(
@@ -280,9 +259,7 @@ async def simulate_policy(
                 risk_factors=risk.factors if risk else None,
             )
         )
-        compliance_findings = (
-            _serialize_compliance_findings(comp_result.findings) if comp_result.findings else None
-        )
+        compliance_findings = comp_result.to_dict() if comp_result.findings else None
     except Exception as exc:
         logger.warning("Compliance hooks failed during simulate (ignoring): %s", exc)
 
@@ -293,7 +270,7 @@ async def simulate_policy(
         risk_score=risk.score if risk else None,
         risk_level=risk.level if risk else None,
         risk_factors=risk.factors if risk else None,
-        compliance_findings=compliance_findings,
+        compliance_findings=cast(list[ComplianceFindingResponse] | None, compliance_findings),
         decision_trace=DecisionTrace(
             policy_source=result.policy_source,
             matched_policy_id=result.policy_id,
