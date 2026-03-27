@@ -3,6 +3,9 @@
 Uses httpx.MockTransport to avoid real HTTP calls.
 """
 
+import asyncio
+import json
+
 import httpx
 import pytest
 from agr.client import AGRAuthError, AGRError, AGRRateLimitError, AsyncAGRClient
@@ -145,3 +148,159 @@ class TestAsyncAGRClientMisconfiguration:
         monkeypatch.delenv("AGR_API_KEY", raising=False)
         with pytest.raises(AGRError, match="API key is required"):
             AsyncAGRClient(api_key="")
+
+
+class TestAsyncAGRClientParity:
+    @pytest.mark.asyncio
+    async def test_policy_management_methods(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "POST" and request.url.path == "/v1/agents/register":
+                payload = json.loads(request.content.decode())
+                assert payload == {"agent_id": "agent-1", "metadata": {"team": "ops"}}
+                return httpx.Response(200, json={"id": "agent-1", "status": "registered"})
+
+            if request.method == "POST" and request.url.path == "/v1/policies/import":
+                payload = json.loads(request.content.decode())
+                assert payload["overwrite"] is True
+                assert payload["dry_run"] is False
+                assert len(payload["policies"]) == 1
+                return httpx.Response(
+                    200,
+                    json={
+                        "dry_run": False,
+                        "total": 1,
+                        "created": 1,
+                        "updated": 0,
+                        "skipped": 0,
+                        "errors": [],
+                        "results": [{"name": "allow-read", "status": "created"}],
+                    },
+                )
+
+            if request.method == "GET" and request.url.path == "/v1/policies/export":
+                assert request.url.params["active_only"] == "false"
+                return httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "name": "allow-read",
+                            "level": "org",
+                            "cedar_rule": "permit(principal, action, resource);",
+                        }
+                    ],
+                )
+
+            raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+        transport = httpx.MockTransport(handler)
+        async with AsyncAGRClient(
+            api_key="agr_sk_test", base_url="http://test", transport=transport
+        ) as client:
+            agent = await client.register_agent("agent-1", metadata={"team": "ops"})
+            imported = await client.import_policies(
+                policies=[
+                    {
+                        "name": "allow-read",
+                        "level": "org",
+                        "cedar_rule": "permit(principal, action, resource);",
+                    }
+                ],
+                overwrite=True,
+            )
+            exported = await client.export_policies(active_only=False)
+
+        assert agent["status"] == "registered"
+        assert imported["created"] == 1
+        assert exported[0]["name"] == "allow-read"
+
+    @pytest.mark.asyncio
+    async def test_audit_risk_and_compliance_methods(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "GET" and request.url.path == "/v1/audit":
+                assert request.url.params["event_type"] == "evaluation"
+                assert request.url.params["agent_id"] == "agent-1"
+                assert request.url.params["limit"] == "25"
+                assert request.url.params["offset"] == "5"
+                return httpx.Response(200, json=[{"id": "audit-1"}])
+
+            if request.method == "POST" and request.url.path == "/v1/audit/search":
+                payload = json.loads(request.content.decode())
+                assert payload == {"decision": "DENY"}
+                return httpx.Response(200, json=[{"id": "audit-2"}])
+
+            if request.method == "GET" and request.url.path == "/v1/org/risk-config":
+                return httpx.Response(
+                    200,
+                    json={"weights": {"sensitive_data": 30}, "thresholds": {"high": 80}},
+                )
+
+            if request.method == "PUT" and request.url.path == "/v1/org/risk-config":
+                payload = json.loads(request.content.decode())
+                assert payload == {"weights": {"sensitive_data": 40}}
+                return httpx.Response(
+                    200,
+                    json={"weights": {"sensitive_data": 40}, "thresholds": {"high": 80}},
+                )
+
+            if request.method == "GET" and request.url.path == "/v1/compliance/summary":
+                assert request.url.params["period_days"] == "30"
+                return httpx.Response(200, json={"period_days": 30, "violations": 0})
+
+            raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+        transport = httpx.MockTransport(handler)
+        async with AsyncAGRClient(
+            api_key="agr_sk_test", base_url="http://test", transport=transport
+        ) as client:
+            audits = await client.get_audit_events(
+                event_type="evaluation",
+                agent_id="agent-1",
+                limit=25,
+                offset=5,
+            )
+            searched = await client.search_audit({"decision": "DENY"})
+            risk_config = await client.get_risk_config()
+            updated_risk_config = await client.update_risk_config(
+                {"weights": {"sensitive_data": 40}}
+            )
+            compliance = await client.get_compliance_summary(period_days=30)
+
+        assert audits[0]["id"] == "audit-1"
+        assert searched[0]["id"] == "audit-2"
+        assert risk_config["weights"] == {"sensitive_data": 30}
+        assert updated_risk_config["weights"] == {"sensitive_data": 40}
+        assert compliance["period_days"] == 30
+
+    @pytest.mark.asyncio
+    async def test_concurrent_evaluate_reuses_single_client(self):
+        seen_agents: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            payload = json.loads(request.content.decode())
+            agent_id = payload["agent_id"]
+            seen_agents.append(agent_id)
+            return httpx.Response(
+                200,
+                json={
+                    **ALLOW_RESPONSE,
+                    "eval_id": f"eval-{agent_id}",
+                    "reason": f"Permitted for {agent_id}",
+                },
+            )
+
+        transport = httpx.MockTransport(handler)
+        async with AsyncAGRClient(
+            api_key="agr_sk_test", base_url="http://test", transport=transport
+        ) as client:
+            results = await asyncio.gather(
+                client.evaluate("agent-a", "deploy", "prod"),
+                client.evaluate("agent-b", "deploy", "prod"),
+                client.evaluate("agent-c", "deploy", "prod"),
+            )
+
+        assert sorted(seen_agents) == ["agent-a", "agent-b", "agent-c"]
+        assert sorted(result.eval_id for result in results) == [
+            "eval-agent-a",
+            "eval-agent-b",
+            "eval-agent-c",
+        ]

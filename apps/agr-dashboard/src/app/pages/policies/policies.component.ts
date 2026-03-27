@@ -1,5 +1,6 @@
 import { Component, inject, OnInit, ChangeDetectionStrategy, signal, HostListener } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { PolicyService, SimulateRequest, SimulateResponse } from '../../services/policy.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { Policy, PolicyCreate, PolicyImportResponse, PolicyImportResult } from '../../core/models/policy.model';
@@ -579,6 +580,7 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
 })
 export class PoliciesComponent implements OnInit {
   private svc = inject(PolicyService);
+  private route = inject(ActivatedRoute);
 
   readonly loading = signal(true);
   readonly saving = signal(false);
@@ -618,6 +620,9 @@ export class PoliciesComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadList();
+    if (this.route.snapshot.queryParamMap.get('onboarding') === 'sample') {
+      this.openOnboardingSample();
+    }
   }
 
   loadList(): void {
@@ -638,6 +643,20 @@ export class PoliciesComponent implements OnInit {
   openCreate(): void {
     this.editingPolicy.set(null);
     this.form = this.emptyForm();
+    this.formError.set('');
+    this.showForm.set(true);
+  }
+
+  openOnboardingSample(): void {
+    this.editingPolicy.set(null);
+    this.form = {
+      name: 'Sample policy: allow web search',
+      effect: 'allow',
+      action: 'web_search',
+      resource_attr: '',
+      resource_value: '',
+      level: 'org',
+    };
     this.formError.set('');
     this.showForm.set(true);
   }

@@ -209,6 +209,7 @@ async def list_deliveries(
 @router.post(
     "/webhooks/{webhook_id}/deliveries/{delivery_id}/retry",
     response_model=WebhookDeliveryResponse,
+    dependencies=[Depends(require_role("admin"))],
 )
 async def retry_delivery(
     webhook_id: uuid.UUID,

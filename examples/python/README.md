@@ -30,6 +30,8 @@ python 04_crewai_agent.py
 python 05_import_policies.py
 python 06_risk_score_demo.py
 python 07_full_scenario_test.py
+python 08_async_evaluate.py
+python 09_async_concurrent_usage.py
 ```
 
 ## Script Reference
@@ -43,6 +45,8 @@ python 07_full_scenario_test.py
 | `05_import_policies.py` | Bulk policy import with dry-run preview |
 | `06_risk_score_demo.py` | 5 scenarios showing risk score escalation |
 | `07_full_scenario_test.py` | Automated pass/fail test suite (exit 0 = all pass) |
+| `08_async_evaluate.py` | Single async evaluation using `AsyncAGRClient` |
+| `09_async_concurrent_usage.py` | Concurrent evaluations over one shared async client |
 
 ## Notes
 

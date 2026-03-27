@@ -60,6 +60,109 @@ class EvaluationResult:
         return self.decision == "APPROVAL_REQUIRED"
 
 
+def _get_required_str(data: dict[str, object], key: str) -> str:
+    value = data.get(key)
+    if isinstance(value, str):
+        return value
+    raise AGRError(f"AGR API error: invalid evaluation response missing '{key}'.", status_code=500)
+
+
+def _get_optional_str(data: dict[str, object], key: str) -> str | None:
+    value = data.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _get_required_float(data: dict[str, object], key: str) -> float:
+    value = data.get(key)
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        raise AGRError(
+            f"AGR API error: invalid evaluation response missing '{key}'.", status_code=500
+        )
+    return float(value)
+
+
+def _get_optional_int(data: dict[str, object], key: str) -> int | None:
+    value = data.get(key)
+    if isinstance(value, bool):
+        return None
+    return value if isinstance(value, int) else None
+
+
+def _get_optional_risk_factors(data: dict[str, object]) -> dict[str, int] | None:
+    value = data.get("risk_factors")
+    if not isinstance(value, dict):
+        return None
+
+    normalized: dict[str, int] = {}
+    for factor_key, factor_value in value.items():
+        if not isinstance(factor_key, str) or isinstance(factor_value, bool):
+            return None
+        if not isinstance(factor_value, int):
+            return None
+        normalized[factor_key] = factor_value
+    return normalized
+
+
+def _get_optional_compliance_findings(
+    data: dict[str, object],
+) -> list[dict[str, object]] | None:
+    value = data.get("compliance_findings")
+    if not isinstance(value, list):
+        return None
+
+    findings: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            return None
+        findings.append(item)
+    return findings
+
+
+def _parse_evaluation_result(data: dict[str, object]) -> EvaluationResult:
+    return EvaluationResult(
+        decision=_get_required_str(data, "decision"),
+        reason=_get_required_str(data, "reason"),
+        policy_id=_get_optional_str(data, "policy_id"),
+        approval_id=_get_optional_str(data, "approval_id"),
+        latency_ms=_get_required_float(data, "latency_ms"),
+        eval_id=_get_required_str(data, "eval_id"),
+        risk_score=_get_optional_int(data, "risk_score"),
+        risk_level=_get_optional_str(data, "risk_level"),
+        risk_factors=_get_optional_risk_factors(data),
+        compliance_findings=_get_optional_compliance_findings(data),
+    )
+
+
+def _raise_evaluate_error(response: httpx.Response) -> None:
+    if response.status_code == 401:
+        data = response.json()
+        if isinstance(data, dict):
+            message = data.get(
+                "message",
+                "Unauthorized. Check your API key at https://dashboard.agr.dev/settings",
+            )
+            raise AGRAuthError(str(message), status_code=401)
+        raise AGRAuthError(
+            "Unauthorized. Check your API key at https://dashboard.agr.dev/settings",
+            status_code=401,
+        )
+
+    if response.status_code == 429:
+        data = response.json()
+        if isinstance(data, dict):
+            upgrade_url = data.get("upgrade_url")
+            raise AGRRateLimitError(
+                message=str(data.get("message", "Rate limit exceeded.")),
+                upgrade_url=str(upgrade_url) if isinstance(upgrade_url, str) else None,
+            )
+        raise AGRRateLimitError(message="Rate limit exceeded.")
+
+    raise AGRError(
+        f"AGR API error ({response.status_code}): {response.text}",
+        status_code=response.status_code,
+    )
+
+
 class AGRClient:
     def __init__(
         self,
@@ -97,43 +200,13 @@ class AGRClient:
             "context": context or {},
         }
         response = self._client.post("/v1/evaluate", json=payload)
-
-        if response.status_code == 401:
-            data = response.json()
-            raise AGRAuthError(
-                data.get(
-                    "message",
-                    "Unauthorized. Check your API key at https://dashboard.agr.dev/settings",
-                ),
-                status_code=401,
-            )
-
-        if response.status_code == 429:
-            data = response.json()
-            raise AGRRateLimitError(
-                message=data.get("message", "Rate limit exceeded."),
-                upgrade_url=data.get("upgrade_url"),
-            )
-
         if response.status_code >= 400:
-            raise AGRError(
-                f"AGR API error ({response.status_code}): {response.text}",
-                status_code=response.status_code,
-            )
+            _raise_evaluate_error(response)
 
         data = response.json()
-        return EvaluationResult(
-            decision=data["decision"],
-            reason=data["reason"],
-            policy_id=data.get("policy_id"),
-            approval_id=data.get("approval_id"),
-            latency_ms=data["latency_ms"],
-            eval_id=data["eval_id"],
-            risk_score=data.get("risk_score"),
-            risk_level=data.get("risk_level"),
-            risk_factors=data.get("risk_factors"),
-            compliance_findings=data.get("compliance_findings"),
-        )
+        if not isinstance(data, dict):
+            raise AGRError("AGR API error: invalid evaluation response.", status_code=500)
+        return _parse_evaluation_result(data)
 
     def wait_for_approval(
         self,
@@ -328,7 +401,7 @@ class AsyncAGRClient:
         api_key: str | None = None,
         base_url: str = "https://api.agr.dev",
         timeout: float = 10.0,
-        transport: object | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.api_key = api_key or os.environ.get("AGR_API_KEY", "")
         if not self.api_key:
@@ -363,43 +436,13 @@ class AsyncAGRClient:
             "context": context or {},
         }
         response = await self._client.post("/v1/evaluate", json=payload)
-
-        if response.status_code == 401:
-            data = response.json()
-            raise AGRAuthError(
-                data.get(
-                    "message",
-                    "Unauthorized. Check your API key at https://dashboard.agr.dev/settings",
-                ),
-                status_code=401,
-            )
-
-        if response.status_code == 429:
-            data = response.json()
-            raise AGRRateLimitError(
-                message=data.get("message", "Rate limit exceeded."),
-                upgrade_url=data.get("upgrade_url"),
-            )
-
         if response.status_code >= 400:
-            raise AGRError(
-                f"AGR API error ({response.status_code}): {response.text}",
-                status_code=response.status_code,
-            )
+            _raise_evaluate_error(response)
 
         data = response.json()
-        return EvaluationResult(
-            decision=data["decision"],
-            reason=data["reason"],
-            policy_id=data.get("policy_id"),
-            approval_id=data.get("approval_id"),
-            latency_ms=data["latency_ms"],
-            eval_id=data["eval_id"],
-            risk_score=data.get("risk_score"),
-            risk_level=data.get("risk_level"),
-            risk_factors=data.get("risk_factors"),
-            compliance_findings=data.get("compliance_findings"),
-        )
+        if not isinstance(data, dict):
+            raise AGRError("AGR API error: invalid evaluation response.", status_code=500)
+        return _parse_evaluation_result(data)
 
     async def wait_for_approval(
         self,
@@ -441,11 +484,127 @@ class AsyncAGRClient:
             )
         return response.json()  # type: ignore[no-any-return]
 
-    async def aclose(self) -> None:
+    async def import_policies(
+        self,
+        *,
+        policies: list[dict[str, object]] | None = None,
+        overwrite: bool = False,
+        dry_run: bool = False,
+    ) -> dict[str, object]:
+        """Bulk-import policies from a list of PolicyImportItem dicts (async)."""
+        if not policies:
+            raise AGRError("policies list is required and must not be empty.")
+        body: dict[str, object] = {
+            "policies": policies,
+            "overwrite": overwrite,
+            "dry_run": dry_run,
+        }
+        response = await self._client.post("/v1/policies/import", json=body)
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Failed to import policies ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
+    async def export_policies(self, *, active_only: bool = True) -> list[dict[str, object]]:
+        """Export all org policies as a list of PolicyImportItem dicts (async)."""
+        response = await self._client.get(
+            "/v1/policies/export",
+            params={"active_only": str(active_only).lower()},
+        )
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Failed to export policies ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
+    async def get_audit_events(
+        self,
+        *,
+        event_type: str | None = None,
+        agent_id: str | None = None,
+        action: str | None = None,
+        resource: str | None = None,
+        decision: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, object]]:
+        """Fetch audit events with optional filters (async)."""
+        params: dict[str, str | int] = {"limit": limit, "offset": offset}
+        for k, v in {
+            "event_type": event_type,
+            "agent_id": agent_id,
+            "action": action,
+            "resource": resource,
+            "decision": decision,
+            "start_date": start_date,
+            "end_date": end_date,
+        }.items():
+            if v is not None:
+                params[k] = v
+        response = await self._client.get("/v1/audit", params=params)
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Failed to fetch audit events ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
+    async def search_audit(self, filters: dict[str, object]) -> list[dict[str, object]]:
+        """POST /v1/audit/search — structured filter query (async)."""
+        response = await self._client.post("/v1/audit/search", json=filters)
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Audit search failed ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
+    async def get_risk_config(self) -> dict[str, object]:
+        """Return current per-org risk scoring configuration (async)."""
+        response = await self._client.get("/v1/org/risk-config")
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Failed to get risk config ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
+    async def update_risk_config(self, updates: dict[str, object]) -> dict[str, object]:
+        """Update per-org risk scoring weights and thresholds (async)."""
+        response = await self._client.put("/v1/org/risk-config", json=updates)
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Failed to update risk config ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
+    async def get_compliance_summary(self, period_days: int = 7) -> dict[str, object]:
+        """Return aggregated compliance posture for the last N days (async)."""
+        response = await self._client.get(
+            "/v1/compliance/summary",
+            params={"period_days": period_days},
+        )
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Failed to get compliance summary ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
+    async def close(self) -> None:
         await self._client.aclose()
+
+    async def aclose(self) -> None:
+        await self.close()
 
     async def __aenter__(self) -> "AsyncAGRClient":
         return self
 
     async def __aexit__(self, *args: object) -> None:
-        await self.aclose()
+        await self.close()

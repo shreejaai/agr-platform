@@ -561,12 +561,12 @@ class CopilotRequest(BaseModel):
     auto_confirm: bool = False
     # When confirming a preview, pass the original preview back so the backend
     # can create the resource directly without calling Claude again.
-    confirm_preview: dict | None = None
+    confirm_preview: dict[str, object] | None = None
 
 
 class CopilotPreview(BaseModel):
     resource_type: Literal["policy", "agent", "webhook"]
-    data: dict
+    data: dict[str, object]
     cedar_rule: str | None = None
     confirmation_prompt: str
 
@@ -592,7 +592,7 @@ class CopilotResponse(BaseModel):
     ]
     conversation_id: str = ""  # always returned; empty only on plan-gate error
     preview: CopilotPreview | None = None
-    created_resource: dict | None = None
+    created_resource: dict[str, object] | None = None
     suggestions: list[str] | None = None
 
 
@@ -648,7 +648,7 @@ class ConversationMessageOut(BaseModel):
     role: str
     content: str
     action_type: str | None = None
-    metadata: dict | None = None
+    metadata: dict[str, object] | None = None
     created_at: datetime
 
 

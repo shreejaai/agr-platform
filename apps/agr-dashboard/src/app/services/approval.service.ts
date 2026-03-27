@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { Approval, ApprovalDecideRequest } from '../core/models/approval.model';
+import { Approval, ApprovalDecideRequest, ApprovalStep } from '../core/models/approval.model';
 
 export interface ApprovalListParams {
   status?: string;
@@ -23,6 +23,10 @@ export class ApprovalService {
 
   get(id: string): Observable<Approval> {
     return this.http.get<Approval>(`/v1/approvals/${id}`);
+  }
+
+  listSteps(id: string): Observable<ApprovalStep[]> {
+    return this.http.get<ApprovalStep[]>(`/v1/approvals/${id}/steps`);
   }
 
   decide(id: string, body: ApprovalDecideRequest): Observable<Approval> {

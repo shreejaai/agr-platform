@@ -5,6 +5,7 @@ import uuid
 import pytest
 from app.models import Organization
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.mark.asyncio
@@ -165,3 +166,20 @@ async def test_webhooks_isolated_between_orgs(
 async def test_webhooks_require_auth(client: AsyncClient) -> None:
     resp = await client.get("/v1/webhooks")
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_retry_delivery_requires_admin_role(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_session: AsyncSession,
+    test_org: Organization,
+) -> None:
+    test_org.role = "operator"
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/v1/webhooks/{uuid.uuid4()}/deliveries/{uuid.uuid4()}/retry",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 403

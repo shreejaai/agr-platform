@@ -270,7 +270,7 @@ async def sync_eval_count_to_db(org_id: UUID) -> None:
 _COPILOT_CACHE_TTL = 3600  # 1 hour
 
 
-async def get_conversation_cache(conversation_id: str) -> list[dict] | None:
+async def get_conversation_cache(conversation_id: str) -> list[dict[str, object]] | None:
     """Return cached message list for a conversation, or None on miss/error."""
     r = _get_redis()
     if r is None:
@@ -281,12 +281,20 @@ async def get_conversation_cache(conversation_id: str) -> list[dict] | None:
             return None
         import json as _json
 
-        return _json.loads(raw)
+        loaded = _json.loads(raw)
+        if not isinstance(loaded, list):
+            return None
+        if not all(isinstance(item, dict) for item in loaded):
+            return None
+        return loaded
     except Exception:
         return None
 
 
-async def set_conversation_cache(conversation_id: str, messages: list[dict]) -> None:
+async def set_conversation_cache(
+    conversation_id: str,
+    messages: list[dict[str, object]],
+) -> None:
     """Cache the full message list for a conversation (1 h TTL)."""
     r = _get_redis()
     if r is None:

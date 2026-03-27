@@ -1,7 +1,12 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { Webhook, WebhookCreate, WebhookUpdate } from '../core/models/webhook.model';
+import {
+  Webhook,
+  WebhookCreate,
+  WebhookDelivery,
+  WebhookUpdate,
+} from '../core/models/webhook.model';
 
 export interface WebhookListParams {
   limit?: number;
@@ -19,6 +24,17 @@ export class WebhookService {
 
   get(id: string): Observable<Webhook> {
     return this.http.get<Webhook>(`/v1/webhooks/${id}`);
+  }
+
+  listDeliveries(id: string): Observable<WebhookDelivery[]> {
+    return this.http.get<WebhookDelivery[]>(`/v1/webhooks/${id}/deliveries`);
+  }
+
+  retryDelivery(webhookId: string, deliveryId: string): Observable<WebhookDelivery> {
+    return this.http.post<WebhookDelivery>(
+      `/v1/webhooks/${webhookId}/deliveries/${deliveryId}/retry`,
+      {},
+    );
   }
 
   create(body: WebhookCreate): Observable<Webhook> {

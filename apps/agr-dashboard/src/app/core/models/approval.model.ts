@@ -9,6 +9,20 @@ export interface Approval {
   approver_email: string | null;
   decision_at: string | null;
   expires_at: string;
+  quorum_type: 'any' | 'all';
+  sla_hours: number | null;
+  escalation_email: string | null;
+  created_at: string;
+  workflow_mode: 'temporal' | 'db_only';
+  temporal_run_id: string | null;
+}
+
+export interface ApprovalStep {
+  id: string;
+  approval_id: string;
+  approver_email: string;
+  status: 'pending' | 'approved' | 'rejected';
+  decided_at: string | null;
   created_at: string;
 }
 

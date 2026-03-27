@@ -10,6 +10,19 @@ export interface Webhook {
   created_at: string;
 }
 
+export interface WebhookDelivery {
+  id: string;
+  webhook_id: string;
+  org_id: string;
+  event: string;
+  payload: Record<string, unknown>;
+  status: 'pending' | 'success' | 'failed';
+  http_status: number | null;
+  attempts: number;
+  last_error: string | null;
+  created_at: string;
+}
+
 export interface WebhookCreate {
   url: string;
   events: WebhookEvent[];

@@ -312,7 +312,9 @@ class CopilotMessageRecord(Base):
     role: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     action_type: Mapped[str | None] = mapped_column(Text, nullable=True)
-    msg_metadata: Mapped[dict | None] = mapped_column("metadata", JSONType, nullable=True)
+    msg_metadata: Mapped[dict[str, object] | None] = mapped_column(
+        "metadata", JSONType, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     conversation: Mapped["CopilotConversation"] = relationship(back_populates="messages")

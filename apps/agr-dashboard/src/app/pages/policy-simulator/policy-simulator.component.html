@@ -1,26 +1,71 @@
-<div class="p-6 max-w-3xl mx-auto space-y-6">
-  <div>
-    <h1 class="text-2xl font-semibold text-white">Policy Simulator</h1>
-    <p class="text-slate-400 mt-1">
-      Test a Cedar policy decision without side effects. No audit events are written.
-    </p>
+<div class="space-y-6">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-100">Policy Simulator</h1>
+      <p class="text-sm text-slate-400 mt-1">
+        Run the real simulation API from the dashboard without creating audit events or approval
+        records.
+      </p>
+    </div>
+    <div class="text-xs text-slate-500 max-w-xs">
+      @if (agentsLoading()) {
+        Loading registered agents...
+      } @else if (agents().length > 0) {
+        {{ agents().length }} registered agent{{ agents().length === 1 ? '' : 's' }} available
+        for quick selection.
+      } @else {
+        No registered agents yet. You can still simulate with a manual agent ID.
+      }
+    </div>
   </div>
 
-  <!-- Input form -->
-  <div class="card space-y-4">
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+  @if (agentLoadError()) {
+    <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+      {{ agentLoadError() }}
+    </div>
+  }
+
+  @if (!agentsLoading() && agents().length === 0) {
+    <div class="card border border-slate-700/80 bg-slate-900/60">
+      <p class="text-sm text-slate-300">No agents are registered for this org yet.</p>
+      <p class="text-xs text-slate-500 mt-1">
+        Registering an agent makes it easier to test real identities and reuse them across the
+        simulator.
+      </p>
+      <a routerLink="/agents" class="inline-flex mt-3 text-sm text-indigo-400 hover:text-indigo-300">
+        Open Agents ->
+      </a>
+    </div>
+  }
+
+  <div class="card space-y-6">
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <div>
         <label for="policy-simulator-agent-id" class="block text-sm font-medium text-slate-300 mb-1">
-          Agent ID
+          Agent
         </label>
         <input
           id="policy-simulator-agent-id"
           class="input w-full"
-          placeholder="my-langgraph-agent"
+          list="policy-simulator-agent-options"
+          placeholder="support-agent"
           [ngModel]="agentId()"
           (ngModelChange)="agentId.set($event)"
         />
+        @if (agents().length > 0) {
+          <datalist id="policy-simulator-agent-options">
+            @for (agent of agents(); track agent.id) {
+              <option [value]="agent.agent_id">
+                {{ displayAgentName(agent) }}
+              </option>
+            }
+          </datalist>
+        }
+        <p class="mt-1 text-xs text-slate-500">
+          Select a registered agent or enter an agent ID manually.
+        </p>
       </div>
+
       <div>
         <label for="policy-simulator-action" class="block text-sm font-medium text-slate-300 mb-1">
           Action
@@ -28,118 +73,209 @@
         <input
           id="policy-simulator-action"
           class="input w-full"
-          placeholder="deploy"
+          placeholder="transfer_funds"
           [ngModel]="action()"
           (ngModelChange)="action.set($event)"
         />
       </div>
+
       <div>
-        <label
-          for="policy-simulator-resource"
-          class="block text-sm font-medium text-slate-300 mb-1"
-        >
+        <label for="policy-simulator-resource" class="block text-sm font-medium text-slate-300 mb-1">
           Resource
         </label>
         <input
           id="policy-simulator-resource"
           class="input w-full"
-          placeholder="prod-database"
+          placeholder="bank-account-001"
           [ngModel]="resource()"
           (ngModelChange)="resource.set($event)"
         />
       </div>
     </div>
 
-    <!-- Context key/value builder -->
     <div>
-      <p class="block text-sm font-medium text-slate-300 mb-2">Context</p>
+      <div class="flex items-center justify-between gap-3 flex-wrap mb-2">
+        <div>
+          <p class="text-sm font-medium text-slate-300">Context</p>
+          <p class="text-xs text-slate-500 mt-1">
+            Values are auto-typed. Use
+            <code>true</code>,
+            <code>false</code>,
+            <code>null</code>,
+            numbers, or JSON for objects and arrays.
+          </p>
+        </div>
+        <button
+          type="button"
+          class="text-sm text-indigo-400 hover:text-indigo-300 transition-colors"
+          (click)="addContextRow()"
+        >
+          + Add key/value
+        </button>
+      </div>
+
       <div class="space-y-2">
         @for (entry of contextEntries(); track $index) {
-          <div class="flex gap-2 items-center">
+          <div class="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_auto] md:items-center">
             <input
-              class="input flex-1"
+              class="input w-full"
               placeholder="key"
-              [(ngModel)]="entry.key"
+              [ngModel]="entry.key"
+              (ngModelChange)="updateContextKey($index, $event)"
             />
             <input
-              class="input flex-1"
+              class="input w-full"
               placeholder="value"
-              [(ngModel)]="entry.value"
+              [ngModel]="entry.value"
+              (ngModelChange)="updateContextValue($index, $event)"
             />
-            @if (contextEntries().length > 1) {
-              <button
-                type="button"
-                class="text-slate-400 hover:text-red-400 transition-colors"
-                (click)="removeContextRow($index)"
-              >
-                ✕
-              </button>
-            }
+            <button
+              type="button"
+              class="px-3 py-2 text-sm text-slate-400 hover:text-red-300 transition-colors"
+              [disabled]="contextEntries().length === 1"
+              (click)="removeContextRow($index)"
+            >
+              Remove
+            </button>
           </div>
         }
       </div>
-      <button
-        type="button"
-        class="mt-2 text-sm text-indigo-400 hover:text-indigo-300 transition-colors"
-        (click)="addContextRow()"
-      >
-        + Add context key
-      </button>
     </div>
 
-    <button
-      class="btn-primary w-full sm:w-auto"
-      [disabled]="loading() || !agentId() || !action() || !resource()"
-      (click)="simulate()"
-    >
-      @if (loading()) { Simulating… } @else { Run Simulation }
-    </button>
+    @if (validationErrors().length > 0) {
+      <div class="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3">
+        <p class="text-sm font-medium text-red-300">Please fix the following before simulating:</p>
+        <ul class="mt-2 list-disc pl-5 text-sm text-red-200 space-y-1">
+          @for (validationError of validationErrors(); track validationError) {
+            <li>{{ validationError }}</li>
+          }
+        </ul>
+      </div>
+    }
+
+    <div class="flex items-center gap-3 flex-wrap">
+      <button class="btn-primary" [disabled]="!canSimulate()" (click)="simulate()">
+        {{ loading() ? 'Running simulation...' : 'Run simulation' }}
+      </button>
+      <button type="button" class="btn-secondary" [disabled]="loading()" (click)="resetForm()">
+        Reset
+      </button>
+    </div>
   </div>
 
-  <!-- Error -->
+  @if (loading()) {
+    <div class="card border border-slate-700/80 bg-slate-900/60">
+      <p class="text-sm text-slate-300">Running simulation...</p>
+      <p class="text-xs text-slate-500 mt-1">
+        Evaluating Cedar policies, risk scoring, and fallback metadata.
+      </p>
+    </div>
+  }
+
   @if (error()) {
-    <div class="rounded-lg bg-red-900/30 border border-red-700 p-4 text-red-300">
+    <div class="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
       {{ error() }}
     </div>
   }
 
-  <!-- Result -->
-  @if (result(); as r) {
-    <div class="card space-y-4">
-      <div class="flex items-center justify-between">
-        <span class="text-lg font-semibold text-white">Decision</span>
-        <span class="text-2xl font-bold" [ngClass]="decisionClass()">
-          {{ r.decision }}
-        </span>
+  @if (result(); as simulationResult) {
+    <div class="card space-y-5">
+      <div
+        class="rounded-xl border px-5 py-4"
+        [ngClass]="decisionPanelClass(simulationResult.decision)"
+      >
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Decision</p>
+            <p class="text-sm text-slate-300 mt-2">Latest simulation result</p>
+          </div>
+          <span
+            class="inline-flex items-center rounded-full border px-3 py-1 text-sm font-semibold tracking-wide"
+            [ngClass]="decisionBadgeClass(simulationResult.decision)"
+          >
+            {{ simulationResult.decision }}
+          </span>
+        </div>
+        <div class="mt-4">
+          <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Explanation</p>
+          <p class="mt-2 text-sm leading-6 text-slate-100">{{ simulationResult.reason }}</p>
+        </div>
       </div>
 
-      <p class="text-slate-300">{{ r.reason }}</p>
+      <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+        <div class="space-y-4">
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div class="rounded-lg border border-slate-700 bg-slate-900/70 px-4 py-3">
+              <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Matched policy</p>
+              <p class="mt-2 text-sm font-mono text-slate-200 break-all">
+                {{ matchedPolicyId(simulationResult) ?? 'No policy id returned' }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-slate-700 bg-slate-900/70 px-4 py-3">
+              <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Policy source</p>
+              <p class="mt-2 text-sm font-mono text-slate-200 break-all">
+                {{ simulationResult.decision_trace?.policy_source ?? 'Unavailable' }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-slate-700 bg-slate-900/70 px-4 py-3">
+              <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Raw Cedar decision</p>
+              <p class="mt-2 text-sm font-mono text-slate-200">
+                {{ simulationResult.decision_trace?.cedar_decision ?? 'Unavailable' }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-slate-700 bg-slate-900/70 px-4 py-3">
+              <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Risk override</p>
+              <p
+                class="mt-2 text-sm font-medium"
+                [ngClass]="simulationResult.decision_trace?.risk_override ? 'text-amber-300' : 'text-slate-300'"
+              >
+                {{ simulationResult.decision_trace?.risk_override ? 'Yes' : 'No' }}
+              </p>
+            </div>
+          </div>
 
-      @if (r.policy_id) {
-        <p class="text-xs text-slate-500">Matched policy: <code>{{ r.policy_id }}</code></p>
-      }
+          @if (simulationResult.decision_trace?.fallback_used) {
+            <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+              <p class="text-sm font-medium text-amber-200">Fallback evaluator was used</p>
+              <p class="mt-1 text-xs text-amber-100/80">
+                {{ simulationResult.decision_trace?.fallback_reason ?? 'Cedar CLI was unavailable for this simulation.' }}
+              </p>
+            </div>
+          }
 
-      @if (r.risk_score !== null) {
-        <div>
-          <p class="text-sm font-medium text-slate-300 mb-2">Risk Breakdown</p>
+          <details class="rounded-lg border border-slate-700 bg-slate-900/60 px-4 py-3">
+            <summary class="cursor-pointer text-sm font-medium text-slate-200 hover:text-white">
+              Raw decision trace
+            </summary>
+            <pre class="mt-3 overflow-auto rounded bg-slate-950 p-3 text-xs text-slate-300">{{ simulationResult.decision_trace | json }}</pre>
+          </details>
+        </div>
+
+        <div class="rounded-lg border border-slate-700 bg-slate-900/70 px-4 py-4 space-y-4">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Risk score</p>
+              <p class="mt-2 text-3xl font-semibold text-slate-100">
+                {{ simulationResult.risk_score ?? 'N/A' }}
+              </p>
+            </div>
+            <span
+              class="inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-wide"
+              [ngClass]="riskLevelClass(simulationResult.risk_level)"
+            >
+              {{ simulationResult.risk_level ?? 'unknown' }}
+            </span>
+          </div>
+
           <agr-risk-breakdown
-            [data]="{ score: r.risk_score, level: r.risk_level, factors: r.risk_factors }"
+            [data]="{
+              score: simulationResult.risk_score,
+              level: simulationResult.risk_level,
+              factors: simulationResult.risk_factors
+            }"
           />
         </div>
-      }
-
-      @if (r.decision_trace?.fallback_used) {
-        <div class="rounded-lg bg-yellow-900/30 border border-yellow-700 p-3 text-yellow-300 text-xs">
-          ⚠ Python fallback evaluator used (Cedar CLI not available). Results may differ from production.
-        </div>
-      }
-
-      @if (r.decision_trace) {
-        <details class="text-xs text-slate-500">
-          <summary class="cursor-pointer hover:text-slate-400">Decision trace</summary>
-          <pre class="mt-2 bg-slate-900 rounded p-3 overflow-auto">{{ r.decision_trace | json }}</pre>
-        </details>
-      }
+      </div>
     </div>
   }
 </div>

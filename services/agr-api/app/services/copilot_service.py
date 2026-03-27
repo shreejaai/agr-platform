@@ -108,7 +108,7 @@ class CopilotService:
         message: str,
         conversation_id: str | None,
         auto_confirm: bool = False,
-        confirm_preview: dict | None = None,
+        confirm_preview: dict[str, object] | None = None,
     ) -> CopilotResponse:
         """Route the user message to the appropriate handler."""
         if not settings.copilot_enabled or not settings.anthropic_api_key:
@@ -128,21 +128,31 @@ class CopilotService:
         if auto_confirm and confirm_preview:
             conv = await self._get_or_create_conversation(conversation_id)
             resource_type = confirm_preview.get("resource_type")
-            data = confirm_preview.get("data", {})
+            raw_data = confirm_preview.get("data")
+            data = raw_data if isinstance(raw_data, dict) else {}
+            preview_cedar_rule = confirm_preview.get("cedar_rule")
             if resource_type == "policy":
                 response = await self._create_policy_confirmed(
-                    name=data.get("name", "policy"),
-                    cedar_rule=confirm_preview.get("cedar_rule") or data.get("cedar_rule", ""),
-                    level=data.get("level", "org"),
-                    description=data.get("description", ""),
+                    name=str(data.get("name", "policy")),
+                    cedar_rule=(
+                        str(preview_cedar_rule)
+                        if isinstance(preview_cedar_rule, str)
+                        else str(data.get("cedar_rule", ""))
+                    ),
+                    level=str(data.get("level", "org")),
+                    description=str(data.get("description", "")),
                 )
             elif resource_type == "agent":
                 response = await self._register_agent_confirmed(
-                    agent_id=data.get("agent_id", ""),
-                    metadata=data.get("metadata", {}),
+                    agent_id=str(data.get("agent_id", "")),
+                    metadata=(
+                        data.get("metadata", {})
+                        if isinstance(data.get("metadata"), dict)
+                        else {}
+                    ),
                 )
             elif resource_type == "webhook":
-                response = await self._create_webhook_confirmed(url=data.get("url", ""))
+                response = await self._create_webhook_confirmed(url=str(data.get("url", "")))
             else:
                 response = CopilotResponse(
                     message="Unknown resource type in preview.",
@@ -875,7 +885,7 @@ class CopilotService:
     ) -> str:
         """Call Anthropic Claude and return the text response."""
         try:
-            import anthropic
+            import anthropic  # type: ignore[import-not-found]
 
             client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
@@ -917,7 +927,8 @@ class CopilotService:
 
         # Try direct parse first
         try:
-            return json.loads(text.strip())
+            parsed = json.loads(text.strip())
+            return parsed if isinstance(parsed, dict) else None
         except json.JSONDecodeError:
             pass
 
@@ -925,7 +936,8 @@ class CopilotService:
         match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
         if match:
             try:
-                return json.loads(match.group(1))
+                parsed = json.loads(match.group(1))
+                return parsed if isinstance(parsed, dict) else None
             except json.JSONDecodeError:
                 pass
 
@@ -933,7 +945,8 @@ class CopilotService:
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
             try:
-                return json.loads(match.group(0))
+                parsed = json.loads(match.group(0))
+                return parsed if isinstance(parsed, dict) else None
             except json.JSONDecodeError:
                 pass
 

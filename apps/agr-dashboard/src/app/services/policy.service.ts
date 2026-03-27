@@ -24,7 +24,10 @@ export interface SimulateRequest {
 
 export interface DecisionTrace {
   policy_source: string | null;
+  matched_policy_id: string | null;
   cedar_decision: string | null;
+  risk_score: number | null;
+  risk_level: string | null;
   risk_override: boolean;
   fallback_used: boolean;
   fallback_reason: string | null;

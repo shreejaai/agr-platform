@@ -10,6 +10,7 @@ export interface OrgMe {
   eval_count: number;
   eval_limit: number;
   eval_week_start: string | null;
+  role: 'admin' | 'operator' | 'viewer';
   created_at: string;
 }
 

@@ -1,5 +1,6 @@
 import { Component, inject, OnInit, ChangeDetectionStrategy, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { AgentService } from '../../services/agent.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { RelativeTimePipe } from '../../shared/pipes/relative-time.pipe';
@@ -190,6 +191,7 @@ interface AgentEditForm {
 })
 export class AgentsComponent implements OnInit {
   private svc = inject(AgentService);
+  private route = inject(ActivatedRoute);
 
   readonly loading = signal(true);
   readonly saving = signal(false);
@@ -204,6 +206,9 @@ export class AgentsComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadList();
+    if (this.route.snapshot.queryParamMap.get('onboarding') === 'register') {
+      this.openRegister();
+    }
   }
 
   loadList(): void {
