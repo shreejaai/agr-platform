@@ -24,9 +24,14 @@ export interface EvaluationResult {
 
 export interface ComplianceFinding {
   plugin: string;
-  compliant: boolean;
-  findings: string[];
-  framework: string;
+  standard: string;
+  rule_id: string;
+  severity: string;
+  message: string;
+  passed: boolean;
+  remediation_steps?: string[];
+  severity_level?: "low" | "medium" | "high" | "critical";
+  compliance_score?: number;
 }
 
 /** Raw shape of the API JSON response — snake_case as returned by the server. */

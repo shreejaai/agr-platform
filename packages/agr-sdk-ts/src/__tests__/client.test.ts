@@ -311,13 +311,24 @@ describe("evaluate() — risk and compliance fields", () => {
       risk_level: "LOW",
       risk_factors: {},
       compliance_findings: [
-        { plugin: "audit_trail_check", compliant: true, findings: [], framework: "internal" }
+        {
+          plugin: "audit_trail_check",
+          standard: "SOC2",
+          rule_id: "CC6.1",
+          severity: "warning",
+          message: "Action is specific and auditable.",
+          passed: true,
+          remediation_steps: [],
+          severity_level: "low",
+          compliance_score: 100,
+        }
       ],
     });
     const result = await client.evaluate("a", "read", "file");
     expect(result.complianceFindings).toHaveLength(1);
     expect(result.complianceFindings![0].plugin).toBe("audit_trail_check");
-    expect(result.complianceFindings![0].compliant).toBe(true);
+    expect(result.complianceFindings![0].passed).toBe(true);
+    expect(result.complianceFindings![0].compliance_score).toBe(100);
   });
 
   it("handles null risk fields gracefully (older API)", async () => {

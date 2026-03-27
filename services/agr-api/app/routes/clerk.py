@@ -31,6 +31,11 @@ from app.models import Organization
 from app.schemas import ClerkApiKeyResponse
 from app.services.org_service import seed_default_policies
 from app.services.redis_service import _get_redis  # noqa: PLC2701
+from app.services.sso_service import (
+    extract_email_from_clerk_user,
+    issue_auth_session,
+    resolve_session_access,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +124,8 @@ async def get_api_key_from_clerk_session(
             raise ValueError("not a JWT")
         padding = "=" * (-len(parts[1]) % 4)
         payload = json.loads(base64.urlsafe_b64decode(parts[1] + padding))
+        if not isinstance(payload, dict):
+            raise ValueError("unexpected JWT payload")
         user_id: str = payload["sub"]
         session_id: str = payload["sid"]
     except Exception:
@@ -162,7 +169,74 @@ async def get_api_key_from_clerk_session(
             media_type="application/json",
         )
 
-    # Look up org by Clerk user_id (stored as slug)
+    user_data: dict[str, object] = {}
+    display_name = user_id
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            user_resp = await client.get(
+                f"https://api.clerk.com/v1/users/{user_id}",
+                headers={"Authorization": f"Bearer {settings.clerk_secret_key}"},
+            )
+        if user_resp.status_code == 200:
+            loaded = user_resp.json()
+            if isinstance(loaded, dict):
+                user_data = loaded
+                first_name = loaded.get("first_name") or ""
+                last_name = loaded.get("last_name") or ""
+                display_name = f"{first_name} {last_name}".strip() or display_name
+    except httpx.RequestError:
+        logger.debug("Could not fetch Clerk profile for %s; continuing with token claims.", user_id)
+
+    identity_email = extract_email_from_clerk_user(user_data, payload)
+    if display_name == user_id and identity_email:
+        display_name = identity_email
+
+    try:
+        session_access = await resolve_session_access(
+            session,
+            user_id=user_id,
+            identity_email=identity_email,
+            claims=payload,
+        )
+    except ValueError:
+        return Response(
+            content=(
+                '{"error":"ambiguous_org_mapping",'
+                '"message":"This identity matches multiple organisations. Ask an administrator to narrow the SSO mapping."}'
+            ),
+            status_code=409,
+            media_type="application/json",
+        )
+    except PermissionError as exc:
+        message = (
+            "Your organisation account is configured for SSO, but this identity is not an active member."
+            if str(exc) == "sso_membership_required"
+            else "This identity is not allowed to access the requested organisation."
+        )
+        return Response(
+            content=json.dumps({"error": "forbidden", "message": message}),
+            status_code=403,
+            media_type="application/json",
+        )
+
+    if session_access is not None:
+        auth_session = await issue_auth_session(
+            session,
+            session_access.org,
+            identity_sub=user_id,
+            identity_email=session_access.identity_email,
+            role=session_access.role,
+        )
+        return ClerkApiKeyResponse(
+            api_key=auth_session.token,
+            org_id=str(session_access.org.id),
+            org_name=session_access.org.name,
+            role=session_access.role,
+            auth_mode="sso_session",
+            expires_at=auth_session.expires_at,
+        )
+
+    # Fall back to the legacy per-user org model
     result = await session.execute(select(Organization).where(Organization.slug == user_id))
     org = result.scalar_one_or_none()
 
@@ -172,28 +246,9 @@ async def get_api_key_from_clerk_session(
         # using the verified Clerk user data so the user can proceed immediately.
         logger.info("Auto-provisioning org for verified Clerk user %s", user_id)
         try:
-            # Fetch user profile from Clerk to get name/email for the org
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                user_resp = await client.get(
-                    f"https://api.clerk.com/v1/users/{user_id}",
-                    headers={"Authorization": f"Bearer {settings.clerk_secret_key}"},
-                )
-            if user_resp.status_code == 200:
-                user_data = user_resp.json()
-                email_addresses = user_data.get("email_addresses", [])
-                email = email_addresses[0]["email_address"] if email_addresses else ""
-                first_name = user_data.get("first_name") or ""
-                last_name = user_data.get("last_name") or ""
-                name = f"{first_name} {last_name}".strip() or email or user_id
-            else:
-                name = user_id
-        except httpx.RequestError:
-            name = user_id
-
-        try:
             org = Organization(
                 id=uuid.uuid4(),
-                name=name,
+                name=display_name or identity_email or user_id,
                 slug=user_id,
                 plan="developer",
                 api_key="agr_sk_" + secrets.token_hex(24),
@@ -221,6 +276,8 @@ async def get_api_key_from_clerk_session(
         api_key=org.api_key,
         org_id=str(org.id),
         org_name=org.name,
+        role=org.role,
+        auth_mode="api_key",
     )
 
 

@@ -107,6 +107,12 @@ function slaCountdown(expiresAt: string): { label: string; urgent: boolean } | n
                     >
                       {{ item.workflow_mode === 'temporal' ? 'Temporal' : 'DB only' }}
                     </span>
+                    <span
+                      class="inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide"
+                      [ngClass]="workflowStatusClass(item.workflow_status)"
+                    >
+                      {{ item.workflow_status }}
+                    </span>
 
                     @if (item.status === 'pending') {
                       <ng-container *ngIf="slaFor(item.id) as sla">
@@ -269,9 +275,25 @@ function slaCountdown(expiresAt: string): { label: string; urgent: boolean } | n
                           </dd>
                         </div>
                         <div class="flex justify-between gap-4">
+                          <dt class="text-slate-500">Workflow status</dt>
+                          <dd class="font-mono text-slate-300">{{ item.workflow_status }}</dd>
+                        </div>
+                        <div class="flex justify-between gap-4">
                           <dt class="text-slate-500">Temporal run ID</dt>
                           <dd class="font-mono text-slate-300 break-all text-right">
                             {{ item.temporal_run_id ?? 'Not running in Temporal' }}
+                          </dd>
+                        </div>
+                        <div class="flex justify-between gap-4">
+                          <dt class="text-slate-500">Fallback mode</dt>
+                          <dd class="font-mono text-slate-300 break-all text-right">
+                            {{ item.workflow_fallback_mode }}
+                          </dd>
+                        </div>
+                        <div class="flex justify-between gap-4">
+                          <dt class="text-slate-500">Last transition</dt>
+                          <dd class="font-mono text-slate-300 text-right">
+                            {{ item.workflow_last_transition_at ? (item.workflow_last_transition_at | date:'medium') : 'Not recorded' }}
                           </dd>
                         </div>
                         <div class="flex justify-between gap-4">
@@ -303,6 +325,11 @@ function slaCountdown(expiresAt: string): { label: string; urgent: boolean } | n
                           </dd>
                         </div>
                       </dl>
+                      @if (item.workflow_last_error) {
+                        <div class="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                          {{ item.workflow_last_error }}
+                        </div>
+                      }
                     </div>
 
                     <div class="rounded-lg border border-slate-700 bg-slate-900/60 p-4">
@@ -486,6 +513,24 @@ export class ApprovalsComponent implements OnInit, OnDestroy {
       });
     }
 
+    if (item.workflow_escalated_at) {
+      history.push({
+        label: 'Workflow escalated',
+        timestamp: item.workflow_escalated_at,
+        detail: item.approver_email ?? item.escalation_email ?? item.workflow_mode,
+        tone: 'warning',
+      });
+    }
+
+    if (item.workflow_status === 'failed' && item.workflow_last_transition_at) {
+      history.push({
+        label: 'Workflow failed',
+        timestamp: item.workflow_last_transition_at,
+        detail: item.workflow_last_error ?? item.workflow_fallback_mode,
+        tone: 'danger',
+      });
+    }
+
     return history.sort(
       (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime(),
     );
@@ -538,6 +583,19 @@ export class ApprovalsComponent implements OnInit, OnDestroy {
     return mode === 'temporal'
       ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300'
       : 'border-slate-600 bg-slate-700/50 text-slate-300';
+  }
+
+  workflowStatusClass(status: Approval['workflow_status']): string {
+    switch (status) {
+      case 'completed':
+        return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+      case 'failed':
+        return 'border-red-500/30 bg-red-500/10 text-red-300';
+      case 'escalated':
+        return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+      default:
+        return 'border-slate-600 bg-slate-700/50 text-slate-300';
+    }
   }
 
   historyToneClass(tone: HistoryTone): string {

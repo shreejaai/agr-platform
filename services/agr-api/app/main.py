@@ -21,6 +21,7 @@ from app.routes.compliance import router as compliance_router
 from app.routes.copilot import router as copilot_router
 from app.routes.members import router as members_router
 from app.routes.risk_config import router as risk_config_router
+from app.routes.usage import router as usage_router
 
 # Structured logging with request_id injected by RequestIDFormatter
 _handler = logging.StreamHandler()
@@ -162,3 +163,4 @@ app.include_router(copilot_router)
 app.include_router(risk_config_router)
 app.include_router(compliance_router)
 app.include_router(members_router)
+app.include_router(usage_router)

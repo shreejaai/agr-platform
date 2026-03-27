@@ -3,6 +3,8 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { PolicyService, SimulateRequest, SimulateResponse } from '../../services/policy.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
+import { ComplianceFindingsComponent } from '../../shared/components/compliance-findings/compliance-findings.component';
+import { RiskBreakdownComponent } from '../../shared/components/risk-breakdown/risk-breakdown.component';
 import { Policy, PolicyCreate, PolicyImportResponse, PolicyImportResult } from '../../core/models/policy.model';
 
 /** Friendly form fields — converted to PolicyCreate (cedar_rule) on submit. */
@@ -102,7 +104,7 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
   selector: 'agr-policies',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, BadgeComponent],
+  imports: [FormsModule, BadgeComponent, RiskBreakdownComponent, ComplianceFindingsComponent],
   template: `
     <div class="space-y-4">
       <!-- Toolbar -->
@@ -536,17 +538,13 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
                   <!-- Risk -->
                   <div>
                     <p class="text-xs text-slate-500 uppercase tracking-wider mb-2">Risk</p>
-                    <div class="flex items-center gap-3">
-                      <div class="flex-1 bg-slate-800 rounded-full h-2 overflow-hidden">
-                        <div
-                          [style.width.%]="simResult()!.risk_score"
-                          [class]="simRiskBarColor(simResult()!.risk_score)"
-                          class="h-2 rounded-full transition-all"
-                        ></div>
-                      </div>
-                      <span class="text-sm font-mono text-slate-200 w-8 text-right">{{ simResult()!.risk_score }}</span>
-                    </div>
-                    <p class="text-xs text-slate-400 mt-1">Level: <span class="font-medium text-slate-200">{{ simResult()!.risk_level }}</span></p>
+                    <agr-risk-breakdown
+                      [data]="{
+                        score: simResult()!.risk_score,
+                        level: simResult()!.risk_level,
+                        factors: simResult()!.risk_factors
+                      }"
+                    />
                   </div>
 
                   <!-- Decision trace -->
@@ -569,6 +567,10 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
                       </div>
                     </dl>
                   </div>
+                </div>
+
+                <div class="px-5 py-4 border-t border-slate-800 bg-slate-950/40">
+                  <agr-compliance-findings [findings]="simResult()!.compliance_findings" />
                 </div>
               </div>
             }
@@ -935,12 +937,6 @@ export class PoliciesComponent implements OnInit {
     if (decision === 'ALLOW') return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40';
     if (decision === 'DENY') return 'bg-red-500/20 text-red-400 border-red-500/40';
     return 'bg-amber-500/20 text-amber-400 border-amber-500/40';
-  }
-
-  simRiskBarColor(score: number): string {
-    if (score < 35) return 'bg-emerald-500';
-    if (score < 70) return 'bg-amber-500';
-    return 'bg-red-500';
   }
 
   private emptyForm(): PolicyForm {

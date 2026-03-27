@@ -223,3 +223,31 @@ async def test_simulate_no_policies_returns_deny(
     assert response.status_code == 200
     assert response.json()["decision"] == "DENY"
     assert response.json()["decision_trace"]["policy_source"] == "no_policies"
+
+
+@pytest.mark.asyncio
+async def test_simulate_returns_enriched_compliance_findings(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    response = await client.post(
+        "/v1/policies/simulate",
+        json={
+            "agent_id": "bot",
+            "action": "*",
+            "resource": "*",
+            "context": {},
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    findings = response.json()["compliance_findings"]
+    assert findings is not None
+
+    art13 = next(finding for finding in findings if finding["rule_id"] == "ART-13")
+    assert art13["passed"] is False
+    assert art13["severity_level"] == "medium"
+    assert 0 <= art13["compliance_score"] < 100
+    assert art13["remediation_steps"][0] == (
+        "Use a stable, descriptive `agent_id` instead of a generic identifier."
+    )

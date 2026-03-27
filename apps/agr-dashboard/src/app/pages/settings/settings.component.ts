@@ -2,7 +2,8 @@ import { Component, inject, ChangeDetectionStrategy, signal, OnInit } from '@ang
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiKeyService } from '../../services/api-key.service';
-import { OrgService, OrgMe } from '../../services/org.service';
+import { ComplianceService } from '../../services/compliance.service';
+import { OrgService, OrgMe, SsoSettings, UsageSummary } from '../../services/org.service';
 import { ClerkService } from '../../core/auth/clerk.service';
 
 @Component({
@@ -32,15 +33,15 @@ import { ClerkService } from '../../core/auth/clerk.service';
 
             <dt class="text-slate-400">Evaluations</dt>
             <dd class="text-slate-100">
-              @if (org()!.eval_limit === 0) {
-                {{ org()!.eval_count | number }} / Unlimited
+              @if ((usage()?.eval_limit ?? org()!.eval_limit) === 0) {
+                {{ (usage()?.total_evaluations ?? org()!.eval_count) | number }} / Unlimited
               } @else {
-                {{ org()!.eval_count | number }} / {{ org()!.eval_limit | number }}
+                {{ (usage()?.total_evaluations ?? org()!.eval_count) | number }} / {{ (usage()?.eval_limit ?? org()!.eval_limit) | number }}
                 <span class="text-xs text-slate-500 ml-1">this week</span>
               }
             </dd>
 
-            @if (org()!.eval_limit > 0) {
+            @if ((usage()?.eval_limit ?? org()!.eval_limit) > 0) {
               <dt class="text-slate-400">Usage</dt>
               <dd class="flex items-center gap-2">
                 <div class="flex-1 h-1.5 rounded-full bg-slate-700 overflow-hidden">
@@ -56,16 +57,163 @@ import { ClerkService } from '../../core/auth/clerk.service';
               <dt class="text-slate-400">Week resets</dt>
               <dd class="text-xs text-slate-400">{{ weekResetLabel() }}</dd>
             }
+
+            <dt class="text-slate-400">Auth mode</dt>
+            <dd class="text-slate-100">
+              {{ org()!.auth_mode === 'sso_session' ? 'Enterprise SSO session' : 'Stored API key' }}
+              @if (org()!.auth_expires_at) {
+                <span class="text-xs text-slate-500 ml-1">expires {{ org()!.auth_expires_at }}</span>
+              }
+            </dd>
           </dl>
+
+          @if (usage()?.warning_message) {
+            <div class="mt-4 rounded-lg border px-3 py-2 text-sm"
+                 [class]="usage()!.quota_state === 'exceeded'
+                   ? 'border-red-500/30 bg-red-500/10 text-red-300'
+                   : 'border-amber-500/30 bg-amber-500/10 text-amber-300'">
+              {{ usage()!.warning_message }}
+            </div>
+          }
+
+          @if (usage() && usage()!.per_agent.length > 0) {
+            <div class="mt-4">
+              <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
+                Top Agent Usage
+              </h3>
+              <div class="space-y-2">
+                @for (entry of usage()!.per_agent.slice(0, 5); track entry.agent_id) {
+                  <div class="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
+                    <div class="flex items-center justify-between gap-3">
+                      <span class="font-mono text-xs text-slate-200">{{ entry.agent_id }}</span>
+                      <span class="text-xs text-slate-400">{{ entry.total_evaluations | number }} evals</span>
+                    </div>
+                    <div class="mt-1 text-[11px] text-slate-500">{{ entry.share_pct }}% of org usage</div>
+                  </div>
+                }
+              </div>
+            </div>
+          }
         </div>
       }
+
+      <!-- Compliance Export -->
+      <div class="card mb-6">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h2 class="text-base font-semibold text-slate-100 mb-1">Compliance Report Export</h2>
+            <p class="text-sm text-slate-400">
+              Download an org-scoped compliance and audit report with policy violations, risk summary,
+              remediation guidance, and audit trail coverage.
+            </p>
+            <p class="text-xs text-slate-500 mt-2">
+              JSON export is supported directly. PDF requests currently fall back to JSON to avoid adding a heavy renderer.
+            </p>
+          </div>
+
+          <button
+            (click)="downloadComplianceExport()"
+            [disabled]="exportingCompliance()"
+            class="btn-primary"
+          >
+            {{ exportingCompliance() ? 'Preparing export…' : 'Export compliance JSON' }}
+          </button>
+        </div>
+
+        @if (complianceExportError()) {
+          <p class="text-xs text-red-400 mt-3">{{ complianceExportError() }}</p>
+        }
+      </div>
+
+      <!-- SSO / SAML -->
+      <div class="card mb-6">
+        <h2 class="text-base font-semibold text-slate-100 mb-1">Enterprise SSO / SAML</h2>
+        <p class="text-sm text-slate-400 mb-4">
+          Configure how Clerk-managed SAML identities map into this AGR organization. The IdP connection
+          still lives in your auth provider; AGR stores the org mapping, allowed domains, and default role.
+        </p>
+
+        @if (ssoError()) {
+          <div class="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+            {{ ssoError() }}
+          </div>
+        }
+
+        @if (ssoSaved()) {
+          <div class="mb-3 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm text-green-300">
+            SSO settings saved.
+          </div>
+        }
+
+        @if (org()?.role !== 'admin') {
+          <p class="text-sm text-slate-500">
+            Only admins can view and update SSO mapping settings for this organisation.
+          </p>
+        } @else {
+          <div class="grid gap-3 md:grid-cols-2">
+            <label class="text-sm text-slate-300">
+              <span class="block text-xs text-slate-400 mb-1">Provider</span>
+              <input [(ngModel)]="ssoProviderInput" class="input w-full" placeholder="Clerk SAML" />
+            </label>
+
+            <label class="text-sm text-slate-300">
+              <span class="block text-xs text-slate-400 mb-1">Entity ID</span>
+              <input [(ngModel)]="ssoEntityIdInput" class="input w-full" placeholder="urn:example:idp" />
+            </label>
+
+            <label class="text-sm text-slate-300 md:col-span-2">
+              <span class="block text-xs text-slate-400 mb-1">Metadata URL</span>
+              <input [(ngModel)]="ssoMetadataUrlInput" class="input w-full" placeholder="https://idp.example.com/metadata" />
+            </label>
+
+            <label class="text-sm text-slate-300 md:col-span-2">
+              <span class="block text-xs text-slate-400 mb-1">Allowed email domains</span>
+              <input [(ngModel)]="ssoDomainsInput" class="input w-full" placeholder="example.com, subsidiary.example.com" />
+            </label>
+
+            <label class="text-sm text-slate-300 md:col-span-2">
+              <span class="block text-xs text-slate-400 mb-1">Metadata XML (optional)</span>
+              <textarea [(ngModel)]="ssoMetadataXmlInput" class="input w-full min-h-[120px]" placeholder="<EntityDescriptor>…"></textarea>
+            </label>
+          </div>
+
+          <div class="mt-4 flex flex-wrap items-center gap-4 text-sm text-slate-300">
+            <label class="inline-flex items-center gap-2">
+              <input type="checkbox" [(ngModel)]="ssoEnabled" />
+              Enable SSO mapping
+            </label>
+            <label class="inline-flex items-center gap-2">
+              <input type="checkbox" [(ngModel)]="ssoAutoJoin" />
+              Auto-join matching identities
+            </label>
+            <label class="inline-flex items-center gap-2">
+              <span class="text-xs text-slate-400">Default role</span>
+              <select [(ngModel)]="ssoDefaultRole" class="input min-w-[140px]">
+                <option value="viewer">viewer</option>
+                <option value="operator">operator</option>
+                <option value="admin">admin</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="mt-4 flex items-center gap-3">
+            <button (click)="saveSsoSettings()" [disabled]="savingSso()" class="btn-primary">
+              {{ savingSso() ? 'Saving…' : 'Save SSO settings' }}
+            </button>
+            <span class="text-xs text-slate-500">
+              Recommended setup: configure the SAML connection in Clerk, then add the same metadata and domains here for AGR org mapping.
+            </span>
+          </div>
+        }
+      </div>
 
       <!-- API Key -->
       <div class="card mb-6">
         <h2 class="text-base font-semibold text-slate-100 mb-1">API Key</h2>
         <p class="text-sm text-slate-400 mb-4">
-          Your <code class="text-indigo-300 bg-slate-800 px-1 rounded">agr_sk_</code> secret key is
-          used to authenticate requests to the AGR API. It is stored only in this browser.
+          AGR stores either an org API key
+          <code class="text-indigo-300 bg-slate-800 px-1 rounded">agr_sk_</code> or an SSO session token
+          <code class="text-indigo-300 bg-slate-800 px-1 rounded">agr_usr_</code> in this browser to authenticate API requests.
         </p>
 
         @if (saved()) {
@@ -123,7 +271,7 @@ import { ClerkService } from '../../core/auth/clerk.service';
             <input
               [type]="showKey() ? 'text' : 'password'"
               [(ngModel)]="keyInput"
-              placeholder="agr_sk_…"
+              placeholder="agr_sk_… or agr_usr_…"
               class="input w-full font-mono pr-10"
               autocomplete="off"
             />
@@ -206,6 +354,7 @@ export class SettingsComponent implements OnInit {
   private apiKey = inject(ApiKeyService);
   private orgSvc = inject(OrgService);
   private clerkSvc = inject(ClerkService);
+  private complianceSvc = inject(ComplianceService);
 
   keyInput = this.apiKey.getKey() ?? '';
   readonly hasKey = this.apiKey.hasKey.bind(this.apiKey);
@@ -215,11 +364,27 @@ export class SettingsComponent implements OnInit {
   readonly fetchSuccess = signal(false);
   readonly fetching = signal(false);
   readonly org = signal<OrgMe | null>(null);
+  readonly usage = signal<UsageSummary | null>(null);
   readonly showKey = signal(false);
+  readonly complianceExportError = signal('');
+  readonly exportingCompliance = signal(false);
+  readonly savingSso = signal(false);
+  readonly ssoError = signal('');
+  readonly ssoSaved = signal(false);
+  readonly sso = signal<SsoSettings | null>(null);
+
+  ssoEnabled = false;
+  ssoAutoJoin = false;
+  ssoProviderInput = '';
+  ssoMetadataUrlInput = '';
+  ssoMetadataXmlInput = '';
+  ssoEntityIdInput = '';
+  ssoDomainsInput = '';
+  ssoDefaultRole: 'admin' | 'operator' | 'viewer' = 'viewer';
 
   ngOnInit(): void {
     if (this.hasKey()) {
-      this.orgSvc.getMe().subscribe({ next: (o) => this.org.set(o) });
+      this.loadOrgContext();
     } else {
       // No key in storage — attempt auto-fetch so the user doesn't have to manually paste it
       this.fetchFromClerk();
@@ -239,7 +404,7 @@ export class SettingsComponent implements OnInit {
       this.keyInput = this.apiKey.getKey() ?? '';
       this.fetchSuccess.set(true);
       setTimeout(() => this.fetchSuccess.set(false), 4000);
-      this.orgSvc.getMe().subscribe({ next: (o) => this.org.set(o) });
+      this.loadOrgContext();
       return;
     }
 
@@ -251,12 +416,18 @@ export class SettingsComponent implements OnInit {
       org_not_found:
         'Your account was not found yet — your registration may still be processing. ' +
         'Wait a moment and click "Fetch API Key Automatically" again.',
+      access_denied:
+        'Your SSO identity does not have an active AGR org membership yet. Ask an admin to review the SSO mapping.',
+      ambiguous_org_mapping:
+        'Your SSO identity matches multiple AGR organizations. Ask an admin to narrow the SSO domain or entity mapping.',
       error: 'Could not fetch API key automatically. Paste your key below.',
     };
     this.fetchError.set(messages[result.reason] ?? messages['error']);
   }
 
   usagePct(): number {
+    const summary = this.usage();
+    if (summary) return Math.min(100, summary.usage_pct);
     const o = this.org();
     if (!o || o.eval_limit === 0) return 0;
     return Math.min(100, Math.round((o.eval_count / o.eval_limit) * 100));
@@ -283,15 +454,15 @@ export class SettingsComponent implements OnInit {
 
   save(): void {
     const trimmed = this.keyInput.trim();
-    if (!trimmed.startsWith('agr_sk_')) {
-      this.error.set('Key must start with agr_sk_');
+    if (!trimmed.startsWith('agr_sk_') && !trimmed.startsWith('agr_usr_')) {
+      this.error.set('Token must start with agr_sk_ or agr_usr_');
       return;
     }
     this.apiKey.setKey(trimmed);
     this.error.set('');
     this.saved.set(true);
     setTimeout(() => this.saved.set(false), 3000);
-    this.orgSvc.getMe().subscribe({ next: (o) => this.org.set(o) });
+    this.loadOrgContext();
   }
 
   clear(): void {
@@ -301,6 +472,91 @@ export class SettingsComponent implements OnInit {
     this.fetchSuccess.set(false);
     this.fetchError.set('');
     this.org.set(null);
+    this.usage.set(null);
+    this.sso.set(null);
     this.showKey.set(false);
+  }
+
+  saveSsoSettings(): void {
+    this.savingSso.set(true);
+    this.ssoError.set('');
+    this.ssoSaved.set(false);
+    this.orgSvc
+      .updateSso({
+        enabled: this.ssoEnabled,
+        provider: this.ssoProviderInput.trim() || null,
+        metadata_url: this.ssoMetadataUrlInput.trim() || null,
+        metadata_xml: this.ssoMetadataXmlInput.trim() || null,
+        entity_id: this.ssoEntityIdInput.trim() || null,
+        domains: this.ssoDomainsInput
+          .split(',')
+          .map((item) => item.trim().toLowerCase())
+          .filter(Boolean),
+        default_role: this.ssoDefaultRole,
+        auto_join: this.ssoAutoJoin,
+      })
+      .subscribe({
+        next: (settings) => {
+          this.savingSso.set(false);
+          this.applySsoSettings(settings);
+          this.ssoSaved.set(true);
+          setTimeout(() => this.ssoSaved.set(false), 3000);
+        },
+        error: () => {
+          this.savingSso.set(false);
+          this.ssoError.set('Unable to save SSO settings right now.');
+        },
+      });
+  }
+
+  downloadComplianceExport(): void {
+    this.exportingCompliance.set(true);
+    this.complianceExportError.set('');
+    this.complianceSvc.exportReport({ format: 'json', period_days: 30 }).subscribe({
+      next: (blob) => {
+        this.exportingCompliance.set(false);
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = 'agr-compliance-report.json';
+        anchor.click();
+        URL.revokeObjectURL(url);
+      },
+      error: () => {
+        this.exportingCompliance.set(false);
+        this.complianceExportError.set('Unable to export the compliance report.');
+      },
+    });
+  }
+
+  private loadOrgContext(): void {
+    this.orgSvc.getMe().subscribe({ next: (o) => this.org.set(o) });
+    this.orgSvc.getUsage().subscribe({
+      next: (usage) => this.usage.set(usage),
+      error: () => this.usage.set(null),
+    });
+    this.orgSvc.getSso().subscribe({
+      next: (settings) => this.applySsoSettings(settings),
+      error: (err) => {
+        if (err?.status === 403) {
+          this.ssoError.set('Only admins can view or update SSO settings.');
+        } else {
+          this.ssoError.set('SSO settings are not available right now.');
+        }
+      },
+    });
+  }
+
+  private applySsoSettings(settings: SsoSettings): void {
+    this.sso.set(settings);
+    this.ssoEnabled = settings.enabled;
+    this.ssoAutoJoin = settings.auto_join;
+    this.ssoProviderInput = settings.provider ?? '';
+    this.ssoMetadataUrlInput = settings.metadata_url ?? '';
+    this.ssoMetadataXmlInput = settings.metadata_xml ?? '';
+    this.ssoEntityIdInput = settings.entity_id ?? '';
+    this.ssoDomainsInput = settings.domains.join(', ');
+    this.ssoDefaultRole = settings.default_role;
+    this.ssoError.set('');
   }
 }

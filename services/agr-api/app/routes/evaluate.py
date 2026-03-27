@@ -27,11 +27,17 @@ from app.services.compliance_service import ComplianceContext, get_registry
 from app.services.notification_service import send_approval_email
 from app.services.redis_service import (
     get_cached_eval,
+    increment_eval_count,
     rate_limit_incr,
     set_cached_eval,
     sync_eval_count_to_db,
 )
 from app.services.risk_service import RiskResult, compute_risk_score
+from app.services.usage_service import (
+    determine_quota_status,
+    record_evaluation_usage,
+    should_emit_soft_limit_warning,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,33 +85,59 @@ async def evaluate(
             org.eval_week_start = now_utc
 
     # -------------------------------------------------------------------------
-    # Rate limit — Redis INCR (fast path); falls back to DB check if Redis down
+    # Usage counting / quota enforcement
     # -------------------------------------------------------------------------
-    # H4: single rate-limit decision — rate_limit_incr returns True when the
-    # limit is hit via Redis (fast path) OR falls back to DB check when Redis
-    # is down. The secondary DB check below is the Redis-unavailable fallback:
-    # rate_limit_incr returned (False, db_count), so we check the DB value.
-    rate_limited, new_count = await rate_limit_incr(org_id, org.eval_limit, org.eval_count)
+    if org.eval_soft_limit_enabled:
+        rate_limited = False
+        new_count = await increment_eval_count(org_id, org.eval_count)
+    else:
+        rate_limited, new_count = await rate_limit_incr(org_id, org.eval_limit, org.eval_count)
+        if not rate_limited and org.eval_limit > 0 and new_count >= org.eval_limit:
+            rate_limited = True
 
-    if not rate_limited and org.eval_limit > 0 and new_count >= org.eval_limit:
-        # Redis was unavailable (new_count == db_count); enforce limit via DB
-        rate_limited = True
+        if rate_limited:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "eval_limit_exceeded",
+                    "message": (
+                        f"You have reached your evaluation limit of {org.eval_limit}. "
+                        "Upgrade your plan for more evaluations."
+                    ),
+                    "upgrade_url": "https://agr.dev/pricing",
+                },
+            )
 
-    if rate_limited:
-        # H2: raise HTTPException so response_model=EvaluateResponse is accurate
-        # FastAPI serialises HTTPException detail as {"detail": ...}; clients should
-        # check for status 429 rather than a specific body shape.
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "error": "eval_limit_exceeded",
-                "message": (
-                    f"You have reached your evaluation limit of {org.eval_limit}. "
-                    "Upgrade your plan for more evaluations."
-                ),
-                "upgrade_url": "https://agr.dev/pricing",
-            },
+    org.eval_count = new_count
+    quota_status = determine_quota_status(
+        total_evaluations=new_count,
+        eval_limit=org.eval_limit,
+        warning_threshold_pct=org.eval_warning_threshold_pct,
+        soft_limit_enabled=org.eval_soft_limit_enabled,
+    )
+    response.headers["X-AGR-Usage-State"] = quota_status.quota_state
+    response.headers["X-AGR-Usage-Count"] = str(new_count)
+    response.headers["X-AGR-Usage-Limit"] = str(org.eval_limit)
+    if quota_status.warning_message:
+        response.headers["X-AGR-Usage-Warning"] = quota_status.warning_message
+    if should_emit_soft_limit_warning(org, quota_status):
+        org.usage_last_warned_count = new_count
+        org.usage_soft_limit_warning_sent_at = now_utc
+
+    from app.models import Organization as OrgModel
+
+    await session.execute(
+        sa_update(OrgModel)
+        .where(OrgModel.id == org_id)
+        .values(
+            eval_count=new_count,
+            usage_last_warned_count=org.usage_last_warned_count,
+            usage_soft_limit_warning_sent_at=org.usage_soft_limit_warning_sent_at,
         )
+        .execution_options(synchronize_session=False)
+    )
+
+    await record_evaluation_usage(session, org_id, body.agent_id, now_utc)
 
     # -------------------------------------------------------------------------
     # Cache lookup — skip Cedar + policy DB query on hit
@@ -214,7 +246,7 @@ async def evaluate(
             action=body.action,
             resource=body.resource,
             context=body.context,
-            eval_count=org.eval_count,
+            eval_count=new_count,
             eval_limit=org.eval_limit,
             trust_level=agent_trust_level,
             weights=org_weights,
@@ -248,6 +280,7 @@ async def evaluate(
             decision=result.decision,
             risk_score=risk.score if risk else None,
             risk_level=risk.level if risk else None,
+            risk_factors=risk.factors if risk else None,
         )
         comp_result = await get_registry().run_all(comp_ctx)
         compliance_findings = comp_result.to_dict() if comp_result.findings else None

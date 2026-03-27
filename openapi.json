@@ -2156,6 +2156,66 @@
         }
       }
     },
+    "/v1/org/sso": {
+      "get": {
+        "tags": [
+          "org"
+        ],
+        "summary": "Get Org Sso Settings",
+        "operationId": "get_org_sso_settings_v1_org_sso_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSOSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "org"
+        ],
+        "summary": "Update Org Sso Settings",
+        "operationId": "update_org_sso_settings_v1_org_sso_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SSOSettingsUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSOSettingsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/copilot/chat": {
       "post": {
         "tags": [
@@ -2400,6 +2460,339 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/compliance/export": {
+      "get": {
+        "tags": [
+          "compliance"
+        ],
+        "summary": "Export compliance report",
+        "description": "Export a compliance posture report for the requested period. **Admin role required.** Supported formats: `json` (default), `csv`, and `pdf` (falls back to JSON when PDF rendering is unavailable). The JSON export includes org info, risk summary, audit trail summary, policy violations, per-standard pass/fail counts, and a row per compliance finding.",
+        "operationId": "export_compliance_v1_compliance_export_get",
+        "parameters": [
+          {
+            "name": "period_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "minimum": 1,
+              "default": 7,
+              "title": "Period Days"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(json|csv|pdf)$",
+              "default": "json",
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/org/members": {
+      "get": {
+        "tags": [
+          "org"
+        ],
+        "summary": "List team members",
+        "description": "Returns all members of the authenticated organization, including invited, active, and revoked members.",
+        "operationId": "list_members_v1_org_members_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OrgMemberResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Members V1 Org Members Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/org/members/invite": {
+      "post": {
+        "tags": [
+          "org"
+        ],
+        "summary": "Invite a team member",
+        "description": "Sends an invite to the given email address. Requires admin role. An audit event (MEMBER_INVITED) is written for every invite.",
+        "operationId": "invite_member_v1_org_members_invite_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgMemberInviteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgMemberResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/org/members/{member_id}": {
+      "patch": {
+        "tags": [
+          "org"
+        ],
+        "summary": "Update a member's role",
+        "description": "Changes the role of an existing member. Requires admin role. An audit event (MEMBER_ROLE_UPDATED) is written.",
+        "operationId": "update_member_role_v1_org_members__member_id__patch",
+        "parameters": [
+          {
+            "name": "member_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Member Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgMemberUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgMemberResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "org"
+        ],
+        "summary": "Revoke member access",
+        "description": "Revokes the member's access (sets status to 'revoked'). Does not delete the row \u2014 the member remains in the audit history. Requires admin role.",
+        "operationId": "revoke_member_v1_org_members__member_id__delete",
+        "parameters": [
+          {
+            "name": "member_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Member Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "tags": [
+          "org"
+        ],
+        "summary": "Get Usage",
+        "operationId": "get_usage_v1_usage_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
                 }
               }
             }
@@ -2708,6 +3101,43 @@
         "type": "object",
         "title": "AgentUpdateRequest"
       },
+      "AgentUsageResponse": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "total_evaluations": {
+            "type": "integer",
+            "title": "Total Evaluations"
+          },
+          "share_pct": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Share Pct"
+          },
+          "last_evaluated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Evaluated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "total_evaluations",
+          "share_pct"
+        ],
+        "title": "AgentUsageResponse"
+      },
       "ApprovalDecideRequest": {
         "properties": {
           "decision": {
@@ -2864,6 +3294,80 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "workflow_mode": {
+            "type": "string",
+            "title": "Workflow Mode",
+            "description": "Workflow tracking mode: 'temporal' when a durable Temporal workflow was started; 'db_only' when Temporal is not configured.",
+            "default": "db_only"
+          },
+          "temporal_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temporal Run Id",
+            "description": "Temporal workflow ID (present when workflow_mode='temporal')."
+          },
+          "workflow_status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed",
+              "escalated"
+            ],
+            "title": "Workflow Status",
+            "description": "Current durable workflow state for the approval lifecycle.",
+            "default": "running"
+          },
+          "workflow_last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Last Error",
+            "description": "Most recent workflow execution or signaling error, when present."
+          },
+          "workflow_last_transition_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Last Transition At",
+            "description": "Timestamp of the last workflow status transition."
+          },
+          "workflow_fallback_mode": {
+            "type": "string",
+            "title": "Workflow Fallback Mode",
+            "description": "Explicit fallback state. 'none' means normal Temporal tracking or no fallback was needed; other values explain why the approval is operating in a degraded mode.",
+            "default": "none"
+          },
+          "workflow_escalated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Escalated At",
+            "description": "Timestamp of the latest escalation event, if the workflow was escalated."
           }
         },
         "type": "object",
@@ -3222,6 +3726,32 @@
           "org_name": {
             "type": "string",
             "title": "Org Name"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": "admin"
+          },
+          "auth_mode": {
+            "type": "string",
+            "enum": [
+              "api_key",
+              "sso_session"
+            ],
+            "title": "Auth Mode",
+            "default": "api_key"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
           }
         },
         "type": "object",
@@ -3231,6 +3761,72 @@
           "org_name"
         ],
         "title": "ClerkApiKeyResponse"
+      },
+      "ComplianceFindingResponse": {
+        "properties": {
+          "plugin": {
+            "type": "string",
+            "title": "Plugin"
+          },
+          "standard": {
+            "type": "string",
+            "title": "Standard"
+          },
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "passed": {
+            "type": "boolean",
+            "title": "Passed"
+          },
+          "remediation_steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Remediation Steps",
+            "description": "Deterministic remediation guidance derived from the violated control and risk signals."
+          },
+          "severity_level": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "title": "Severity Level",
+            "description": "Normalized severity level derived from the finding and request risk factors."
+          },
+          "compliance_score": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Compliance Score",
+            "description": "Deterministic compliance score for this finding. Higher is better."
+          }
+        },
+        "type": "object",
+        "required": [
+          "plugin",
+          "standard",
+          "rule_id",
+          "severity",
+          "message",
+          "passed",
+          "severity_level",
+          "compliance_score"
+        ],
+        "title": "ComplianceFindingResponse"
       },
       "ComplianceSummaryResponse": {
         "properties": {
@@ -3266,6 +3862,13 @@
           "overall_pass": {
             "type": "boolean",
             "title": "Overall Pass"
+          },
+          "compliance_score": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Compliance Score",
+            "description": "Aggregate compliance score across sampled findings."
           }
         },
         "type": "object",
@@ -3275,7 +3878,8 @@
           "decisions",
           "high_risk_count",
           "findings_by_standard",
-          "overall_pass"
+          "overall_pass",
+          "compliance_score"
         ],
         "title": "ComplianceSummaryResponse"
       },
@@ -3566,7 +4170,8 @@
         "properties": {
           "policy_source": {
             "type": "string",
-            "title": "Policy Source"
+            "title": "Policy Source",
+            "description": "Policy engine that produced the decision. 'cedar_cli' = authoritative Cedar binary; 'python_fallback' = regex approximation (dev/degraded mode); 'no_policies' = no active policies found; 'cache' = served from Redis cache."
           },
           "matched_policy_id": {
             "anyOf": [
@@ -3581,7 +4186,8 @@
           },
           "cedar_decision": {
             "type": "string",
-            "title": "Cedar Decision"
+            "title": "Cedar Decision",
+            "description": "Raw policy engine decision before risk scoring could override it."
           },
           "risk_score": {
             "anyOf": [
@@ -3608,7 +4214,26 @@
           "risk_override": {
             "type": "boolean",
             "title": "Risk Override",
+            "description": "True when risk scoring upgraded the Cedar ALLOW to APPROVAL_REQUIRED or DENY.",
             "default": false
+          },
+          "fallback_used": {
+            "type": "boolean",
+            "title": "Fallback Used",
+            "description": "True when the Python regex fallback was used instead of Cedar CLI. Fallback results may differ from Cedar in edge cases \u2014 install cedar-policy-cli for authoritative enforcement.",
+            "default": false
+          },
+          "fallback_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Reason",
+            "description": "Machine-readable reason Cedar CLI was not used (populated when fallback_used=true)."
           }
         },
         "type": "object",
@@ -3810,8 +4435,7 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/ComplianceFindingResponse"
                 },
                 "type": "array"
               },
@@ -3902,6 +4526,16 @@
             "type": "integer",
             "title": "Eval Limit"
           },
+          "eval_warning_threshold_pct": {
+            "type": "integer",
+            "title": "Eval Warning Threshold Pct",
+            "default": 80
+          },
+          "eval_soft_limit_enabled": {
+            "type": "boolean",
+            "title": "Eval Soft Limit Enabled",
+            "default": true
+          },
           "eval_week_start": {
             "anyOf": [
               {
@@ -3918,6 +4552,43 @@
             "type": "string",
             "title": "Role",
             "default": "admin"
+          },
+          "auth_mode": {
+            "type": "string",
+            "enum": [
+              "api_key",
+              "sso_session"
+            ],
+            "title": "Auth Mode",
+            "default": "api_key"
+          },
+          "auth_expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auth Expires At"
+          },
+          "sso_enabled": {
+            "type": "boolean",
+            "title": "Sso Enabled",
+            "default": false
+          },
+          "sso_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sso Provider"
           },
           "created_at": {
             "type": "string",
@@ -3936,6 +4607,117 @@
           "created_at"
         ],
         "title": "OrgMeResponse"
+      },
+      "OrgMemberInviteRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 3,
+            "title": "Email",
+            "description": "Email address of the person to invite.",
+            "examples": [
+              "ops@example.com"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "pattern": "^(admin|operator|viewer)$",
+            "title": "Role",
+            "description": "Role to assign: admin | operator | viewer",
+            "default": "viewer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "OrgMemberInviteRequest"
+      },
+      "OrgMemberResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "org_id": {
+            "type": "string",
+            "title": "Org Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "description": "admin | operator | viewer"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "invited | active | revoked"
+          },
+          "invited_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invited By"
+          },
+          "joined_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Joined At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "org_id",
+          "email",
+          "role",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "OrgMemberResponse"
+      },
+      "OrgMemberUpdateRequest": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "pattern": "^(admin|operator|viewer)$",
+            "title": "Role",
+            "description": "New role: admin | operator | viewer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "title": "OrgMemberUpdateRequest"
       },
       "OrgRiskConfigResponse": {
         "properties": {
@@ -4531,6 +5313,189 @@
         ],
         "title": "PolicyVersionResponse"
       },
+      "SSOSettingsResponse": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "metadata_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Url"
+          },
+          "metadata_xml": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Xml"
+          },
+          "entity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Id"
+          },
+          "domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Domains"
+          },
+          "default_role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "operator",
+              "viewer"
+            ],
+            "title": "Default Role",
+            "default": "viewer"
+          },
+          "auto_join": {
+            "type": "boolean",
+            "title": "Auto Join",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "SSOSettingsResponse"
+      },
+      "SSOSettingsUpdateRequest": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "metadata_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Url"
+          },
+          "metadata_xml": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Xml"
+          },
+          "entity_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Id"
+          },
+          "domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domains"
+          },
+          "default_role": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "admin",
+                  "operator",
+                  "viewer"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Role"
+          },
+          "auto_join": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Join"
+          }
+        },
+        "type": "object",
+        "title": "SSOSettingsUpdateRequest"
+      },
       "SimulateRequest": {
         "properties": {
           "agent_id": {
@@ -4622,6 +5587,20 @@
             ],
             "title": "Risk Factors"
           },
+          "compliance_findings": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ComplianceFindingResponse"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compliance Findings"
+          },
           "decision_trace": {
             "$ref": "#/components/schemas/DecisionTrace"
           }
@@ -4633,6 +5612,75 @@
           "decision_trace"
         ],
         "title": "SimulateResponse"
+      },
+      "UsageResponse": {
+        "properties": {
+          "org_id": {
+            "type": "string",
+            "title": "Org Id"
+          },
+          "total_evaluations": {
+            "type": "integer",
+            "title": "Total Evaluations"
+          },
+          "eval_limit": {
+            "type": "integer",
+            "title": "Eval Limit"
+          },
+          "eval_warning_threshold_pct": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Eval Warning Threshold Pct"
+          },
+          "eval_soft_limit_enabled": {
+            "type": "boolean",
+            "title": "Eval Soft Limit Enabled"
+          },
+          "usage_pct": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Usage Pct"
+          },
+          "quota_state": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "warning",
+              "exceeded"
+            ],
+            "title": "Quota State"
+          },
+          "warning_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Message"
+          },
+          "per_agent": {
+            "items": {
+              "$ref": "#/components/schemas/AgentUsageResponse"
+            },
+            "type": "array",
+            "title": "Per Agent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "org_id",
+          "total_evaluations",
+          "eval_limit",
+          "eval_warning_threshold_pct",
+          "eval_soft_limit_enabled",
+          "usage_pct",
+          "quota_state"
+        ],
+        "title": "UsageResponse"
       },
       "ValidationError": {
         "properties": {
@@ -4932,7 +5980,7 @@
     },
     {
       "name": "org",
-      "description": "Organization profile and usage stats."
+      "description": "Organization profile, usage stats, and team member management."
     },
     {
       "name": "webhooks",

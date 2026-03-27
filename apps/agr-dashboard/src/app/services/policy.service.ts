@@ -9,6 +9,7 @@ import {
   PolicyImportRequest,
   PolicyImportResponse,
 } from '../core/models/policy.model';
+import { ComplianceFinding } from '../core/models/compliance.model';
 
 export interface PolicyListParams {
   active?: boolean;
@@ -36,8 +37,11 @@ export interface DecisionTrace {
 export interface SimulateResponse {
   decision: 'ALLOW' | 'DENY' | 'APPROVAL_REQUIRED';
   reason: string;
-  risk_score: number;
-  risk_level: string;
+  policy_id: string | null;
+  risk_score: number | null;
+  risk_level: string | null;
+  risk_factors: Record<string, number> | null;
+  compliance_findings: ComplianceFinding[] | null;
   decision_trace: DecisionTrace;
 }
 
@@ -48,6 +52,7 @@ export interface SimulateResult {
   risk_score: number | null;
   risk_level: string | null;
   risk_factors: Record<string, number> | null;
+  compliance_findings: ComplianceFinding[] | null;
   decision_trace: DecisionTrace | null;
 }
 
