@@ -1,5 +1,6 @@
 """AGR Python SDK — evaluate(), wait_for_approval(), register_agent()."""
 
+import asyncio
 import logging
 import os
 import time
@@ -409,8 +410,6 @@ class AsyncAGRClient:
         timeout: float = 3600.0,
     ) -> bool:
         """Wait for an approval decision (async). Returns True if approved, False if rejected."""
-        import asyncio
-
         start = time.monotonic()
         while True:
             if time.monotonic() - start >= timeout:
