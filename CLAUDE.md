@@ -1,3 +1,4 @@
+SPECIAL_MARKER_CLAUDE_MD_ACTIVE
 # CLAUDE.md — AGR Platform
 
 **GROUND TRUTH ONLY. Every section reflects actual code. Planned-but-not-built items marked `[NOT YET IMPLEMENTED]`.**
@@ -135,3 +136,116 @@ docker compose up -d postgres redis   # infra only (for local Python dev)
 ```
 
 DB credentials: `agr_svc_usr` / see `.env` / DB: `agr_platform`
+
+## Context Loading Strategy (CRITICAL)
+
+Always load minimal context:
+
+Default:
+- 1 target file
+- 1–2 dependency files
+- 1 schema/test/contract file
+
+Never:
+- scan full repo unless explicitly instructed
+- load unrelated modules
+- repeat architecture explanation
+- infer missing code without asking
+
+If context is insufficient:
+→ ask for specific file
+→ do not guess
+
+## Execution Mode (MANDATORY)
+
+When working on any task:
+
+1. First classify the task into:
+   - API (services/agr-api)
+   - Dashboard (apps/agr-dashboard)
+   - Core policy/risk (packages/agr-core)
+   - SDK (packages/agr-sdk-*)
+   - Migration (infra/migrations)
+
+2. Work ONLY inside that boundary unless explicitly required.
+
+3. Use minimal context:
+   - 1 target file
+   - 1–2 dependencies
+   - 1 schema/test/contract
+
+4. If missing context:
+   - ask for specific file
+   - do NOT scan repo
+
+5. Output format:
+   - summary
+   - exact files to change
+   - minimal patch plan
+   - risks
+   - tests
+
+6. Never:
+   - rewrite large parts unnecessarily
+   - explain architecture again
+   - load unrelated modules
+
+## Change Impact Rules
+
+Before making any change, evaluate impact:
+
+- API change?
+  → check schemas.py + SDKs
+
+- DB change?
+  → migration REQUIRED
+
+- Response shape change?
+  → dashboard + SDK impact
+
+- Policy/risk change?
+  → approval + audit impact
+
+If impact crosses modules:
+→ explicitly mention it
+→ do not auto-change everything
+
+## File-Level Strategy
+
+Prefer these entry points:
+
+API:
+- routes/*.py → entry
+- services/*.py → logic
+- models.py → DB
+- schemas.py → contracts
+
+Dashboard:
+- pages/* → UI entry
+- services/* → API calls
+- core/http/* → interceptors
+
+Core:
+- policy_engine.py → main logic
+
+Tests:
+- unit/ → fast checks
+- integration/ → flow validation
+
+Always start from entry point, not entire module.
+
+## Token Discipline Mode
+
+Default behavior:
+
+- Assume minimal context is sufficient
+- Do NOT expand scope automatically
+- Avoid listing large code blocks unless necessary
+- Avoid verbose explanations
+
+If unsure:
+→ ask for ONE file
+→ not multiple
+
+Goal:
+→ smallest input → correct output

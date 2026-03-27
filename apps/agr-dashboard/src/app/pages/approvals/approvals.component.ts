@@ -7,7 +7,7 @@ import {
   signal,
   computed,
 } from '@angular/core';
-import { JsonPipe, NgClass, DatePipe } from '@angular/common';
+import { JsonPipe, NgClass, DatePipe, NgIf } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApprovalService } from '../../services/approval.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
@@ -43,7 +43,7 @@ function slaCountdown(expiresAt: string): { label: string; urgent: boolean } | n
   selector: 'agr-approvals',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, JsonPipe, NgClass, DatePipe, BadgeComponent, RelativeTimePipe],
+  imports: [FormsModule, JsonPipe, NgClass, NgIf, DatePipe, BadgeComponent, RelativeTimePipe],
   template: `
     <div class="space-y-4">
       <div>
@@ -97,8 +97,7 @@ function slaCountdown(expiresAt: string): { label: string; urgent: boolean } | n
 
                     <!-- SLA countdown for pending items -->
                     @if (item.status === 'pending') {
-                      @let sla = slaFor(item.id);
-                      @if (sla) {
+                      <ng-container *ngIf="slaFor(item.id) as sla">
                         <span
                           [ngClass]="sla.urgent
                             ? 'bg-red-500/15 text-red-400 border border-red-500/30'
@@ -111,7 +110,7 @@ function slaCountdown(expiresAt: string): { label: string; urgent: boolean } | n
                           </svg>
                           {{ sla.label }}
                         </span>
-                      }
+                      </ng-container>
                     }
                   </div>
 
