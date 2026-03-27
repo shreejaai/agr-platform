@@ -1,7 +1,7 @@
 """LangGraph plugin — @agr_governed decorator for LangGraph tools."""
 
 from collections.abc import Callable
-from typing import ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar, cast
 
 from agr.client import AGRClient
 from agr.integrations.frameworks import AGRPolicyEnforcer
@@ -25,6 +25,9 @@ def agr_governed(
     enforcer = AGRPolicyEnforcer(client, agent_id)
 
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
-        return enforcer.wrap(func, action=func.__name__, resource=resource)
+        return cast(
+            Callable[P, R],
+            enforcer.wrap(func, action=func.__name__, resource=resource),
+        )
 
     return decorator

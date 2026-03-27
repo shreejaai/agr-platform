@@ -8,7 +8,7 @@ import hmac
 import json
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import httpx
 
@@ -137,7 +137,7 @@ def build_slack_resolution_message(
     }
 
 
-def parse_slack_action_value(value: str) -> tuple[str, str] | None:
+def parse_slack_action_value(value: str) -> tuple[str, Literal["approved", "rejected"]] | None:
     try:
         payload = json.loads(value)
     except json.JSONDecodeError:
@@ -150,9 +150,11 @@ def parse_slack_action_value(value: str) -> tuple[str, str] | None:
     decision = payload.get("decision")
     if not isinstance(approval_id, str) or not isinstance(decision, str):
         return None
-    if decision not in {"approved", "rejected"}:
-        return None
-    return approval_id, decision
+    if decision == "approved":
+        return approval_id, "approved"
+    if decision == "rejected":
+        return approval_id, "rejected"
+    return None
 
 
 def verify_slack_signature(headers: Mapping[str, str], raw_body: bytes) -> bool:

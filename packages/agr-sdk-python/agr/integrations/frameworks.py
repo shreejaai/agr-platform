@@ -251,7 +251,7 @@ class AsyncAGRPolicyEnforcer:
                 )
                 return await inner(*args, **kwargs)
 
-            return cast(Callable[P, Awaitable[R]], wrapped)
+            return cast("Callable[P, Awaitable[R]]", wrapped)
 
         if func is None:
             return decorator
