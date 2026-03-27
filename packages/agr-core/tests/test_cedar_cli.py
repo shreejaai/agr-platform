@@ -4,7 +4,10 @@ These tests are skipped automatically when the `cedar` binary is not on PATH.
 CI job `test-cedar-cli` installs Cedar before running this file.
 """
 
+import os
 import shutil
+import stat
+import tempfile
 
 import pytest
 from policy_engine import (
@@ -18,6 +21,49 @@ cedar_required = pytest.mark.skipif(
     shutil.which("cedar") is None,
     reason="cedar CLI not installed — skipped in dev/CI without cedar job",
 )
+
+
+def _make_fake_cedar_validator() -> str:
+    """Create a fake cedar executable that validates request-json file contents."""
+    tmpdir = tempfile.mkdtemp()
+    fake_cedar = os.path.join(tmpdir, "cedar")
+    script = """#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+request_path = Path(args[args.index("--request-json") + 1])
+payload = json.loads(request_path.read_text(encoding="utf-8"))
+
+assert isinstance(payload["principal"], str)
+assert isinstance(payload["action"], str)
+assert isinstance(payload["resource"], str)
+assert payload["principal"].startswith('Agent::"')
+assert payload["action"].startswith('Action::"')
+assert payload["resource"].startswith('Resource::"')
+assert isinstance(payload["context"], dict)
+
+print("Decision: ALLOW")
+"""
+    with open(fake_cedar, "w", encoding="utf-8") as fh:
+        fh.write(script)
+    os.chmod(fake_cedar, os.stat(fake_cedar).st_mode | stat.S_IXUSR)
+    return fake_cedar
+
+
+class TestCedarCliRequestFormat:
+    def test_request_json_uses_string_entity_uids(self):
+        fake_cedar = _make_fake_cedar_validator()
+        result = _cedar_cli_authorize(
+            fake_cedar,
+            [PERMIT_ALL_POLICY],
+            "agent1",
+            "read",
+            "db",
+            {"env": "staging"},
+        )
+        assert result == "ALLOW"
 
 
 PERMIT_ALL_POLICY = {

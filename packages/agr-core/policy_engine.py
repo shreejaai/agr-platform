@@ -147,9 +147,9 @@ def _cedar_cli_authorize(
     ]
 
     request = {
-        "principal": {"type": "Agent", "id": agent_id},
-        "action": {"type": "Action", "id": action},
-        "resource": {"type": "Resource", "id": resource_id},
+        "principal": f'Agent::"{agent_id}"',
+        "action": f'Action::"{action}"',
+        "resource": f'Resource::"{resource_id}"',
         "context": context,
     }
 
