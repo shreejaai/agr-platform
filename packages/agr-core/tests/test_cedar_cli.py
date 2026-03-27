@@ -11,9 +11,9 @@ import tempfile
 
 import pytest
 from policy_engine import (
-    _cedar_policy_text,
     _cedar_cli_authorize,
     _cedar_cli_evaluator,
+    _cedar_policy_text,
     _find_cedar_cli,
     evaluate_policies,
 )
