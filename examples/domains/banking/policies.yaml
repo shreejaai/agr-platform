@@ -1,0 +1,93 @@
+# AGR Domain Pack: Retail & Corporate Banking
+# 12 real production scenarios covering lending, fraud, KYC/AML, and account operations.
+#
+# Regulation coverage: Basel III, BSA/AML, KYC (FinCEN), ECOA, FDIC, PCI-DSS, GDPR
+
+policies:
+
+  - name: "BANK-01: Require credit committee approval for loan above $500k"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"loan.approve", resource)
+      when { context has principal_amount && context.principal_amount > 500000 }
+      unless { context has approval_status && context.approval_status == "approved" };
+    active: true
+
+  - name: "BANK-02: Block loan approval for customer with active fraud flag"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"loan.approve", resource)
+      when { context has fraud_flag && context.fraud_flag == true };
+    active: true
+
+  - name: "BANK-03: Block account opening without completed KYC"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"account.open", resource)
+      when { context has kyc_status && context.kyc_status != "completed" };
+    active: true
+
+  - name: "BANK-04: Block CTR filing for transaction below $10k threshold"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"compliance.file_ctr", resource)
+      when { context has transaction_amount && context.transaction_amount < 10000 };
+    active: true
+
+  - name: "BANK-05: Require approval before account freeze"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"account.freeze", resource)
+      unless { context has approval_status && context.approval_status == "approved" };
+    active: true
+
+  - name: "BANK-06: Block credit limit increase beyond 3x current limit"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"credit.increase_limit", resource)
+      when { context has increase_multiplier && context.increase_multiplier > 3.0 };
+    active: true
+
+  - name: "BANK-07: Block loan approval with debt-to-income above 43%"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"loan.approve", resource)
+      when { context has dti_ratio && context.dti_ratio > 0.43 &&
+             context has loan_type && context.loan_type == "mortgage" };
+    active: true
+
+  - name: "BANK-08: Block SWIFT message modification after cutoff time"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"swift.modify_message", resource)
+      when { context has past_cutoff && context.past_cutoff == true };
+    active: true
+
+  - name: "BANK-09: Require dual approval for nostro account adjustment"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"nostro.manual_adjustment", resource)
+      unless { context has approval_status && context.approval_status == "approved" };
+    active: true
+
+  - name: "BANK-10: Block customer data export without legal basis"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"customer.data_export", resource)
+      when { context has legal_basis && context.legal_basis == "none" };
+    active: true
+
+  - name: "BANK-11: Allow automated overdraft protection under $1000"
+    level: org
+    cedar_rule: >-
+      permit(principal, action == Action::"account.overdraft_protection", resource)
+      when { context has overdraft_amount && context.overdraft_amount <= 1000 &&
+             context has opt_in && context.opt_in == true };
+    active: true
+
+  - name: "BANK-12: Block PCI-scope data write without tokenization"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"payment.write_card_data", resource)
+      when { context has tokenized && context.tokenized == false };
+    active: true

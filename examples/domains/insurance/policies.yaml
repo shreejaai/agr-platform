@@ -1,0 +1,82 @@
+# AGR Domain Pack: Insurance (P&C, Life, Health)
+# 10 real production scenarios covering claims, underwriting, fraud, and data.
+#
+# Regulation coverage: NAIC model laws, HIPAA (health), state insurance codes,
+# GDPR (EU policyholders), FCA (UK), IFRS 17
+
+policies:
+
+  - name: "INS-01: Auto-approve claims below $2500 with no fraud flag"
+    level: org
+    cedar_rule: >-
+      permit(principal, action == Action::"claim.approve", resource)
+      when { context has claim_amount && context.claim_amount <= 2500 &&
+             context has fraud_score && context.fraud_score < 0.3 };
+    active: true
+
+  - name: "INS-02: Require SIU investigation for high fraud score claims"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"claim.approve", resource)
+      when { context has fraud_score && context.fraud_score >= 0.75 }
+      unless { context has approval_status && context.approval_status == "approved" };
+    active: true
+
+  - name: "INS-03: Block policy cancellation without regulatory notice period"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"policy.cancel", resource)
+      when { context has notice_days_given && context.notice_days_given < 30 };
+    active: true
+
+  - name: "INS-04: Block premium increase above state-mandated cap"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"policy.adjust_premium", resource)
+      when { context has increase_pct && context.increase_pct > 25.0 &&
+             context has state && context.state == "CA" };
+    active: true
+
+  - name: "INS-05: Require actuary approval for new product rate filing"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"product.file_rates", resource)
+      unless { context has actuary_approved && context.actuary_approved == true };
+    active: true
+
+  - name: "INS-06: Block health record access without policyholder consent"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"health.read_medical_record", resource)
+      when { context has consent_on_file && context.consent_on_file == false };
+    active: true
+
+  - name: "INS-07: Block catastrophic event settlement without reinsurance confirmation"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"claim.settle_cat_event", resource)
+      when { context has estimated_total_loss && context.estimated_total_loss > 5000000 }
+      unless { context has reinsurance_confirmed && context.reinsurance_confirmed == true };
+    active: true
+
+  - name: "INS-08: Block life policy lapse without lapse notice sent"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"policy.lapse", resource)
+      when { context has lapse_notice_sent && context.lapse_notice_sent == false };
+    active: true
+
+  - name: "INS-09: Require dual approval for settlement offer above $100k"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"claim.make_settlement_offer", resource)
+      when { context has settlement_amount && context.settlement_amount > 100000 }
+      unless { context has approval_status && context.approval_status == "approved" };
+    active: true
+
+  - name: "INS-10: Block underwriting decision using protected class attributes"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"underwriting.make_decision", resource)
+      when { context has used_protected_class && context.used_protected_class == true };
+    active: true

@@ -1,0 +1,126 @@
+# AGR Domain Pack: Pharmaceutical & Life Sciences
+# 15 real production scenarios covering clinical trials, drug safety, regulatory submissions,
+# patient data, and lab operations.
+#
+# Regulation coverage: FDA 21 CFR Part 11, ICH E6 GCP, HIPAA, EU Clinical Trials Regulation,
+# GxP (GMP/GCP/GLP), GDPR (health data Article 9)
+
+policies:
+
+  # --- CLINICAL TRIALS ---
+
+  - name: "PHARMA-01: Block protocol deviation without IRB notification"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"trial.record_deviation", resource)
+      when { context has deviation_type && context.deviation_type == "major" }
+      unless { context has irb_notified && context.irb_notified == true };
+    active: true
+
+  - name: "PHARMA-02: Require sponsor approval to amend trial protocol"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"trial.amend_protocol", resource)
+      unless { context has approval_status && context.approval_status == "approved" };
+    active: true
+
+  - name: "PHARMA-03: Block enrolment above maximum trial size"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"trial.enrol_patient", resource)
+      when { context has current_enrolment && context has max_enrolment &&
+             context.current_enrolment >= context.max_enrolment };
+    active: true
+
+  - name: "PHARMA-04: Block unblinding without data safety monitoring board approval"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"trial.unblind", resource)
+      unless { context has dsmb_approved && context.dsmb_approved == true };
+    active: true
+
+  # --- DRUG SAFETY & PHARMACOVIGILANCE ---
+
+  - name: "PHARMA-05: Require immediate escalation for serious adverse event"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"safety.close_adverse_event", resource)
+      when { context has severity && context.severity == "serious" }
+      unless { context has approval_status && context.approval_status == "approved" };
+    active: true
+
+  - name: "PHARMA-06: Block SUSAR submission older than 7-day reporting window"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"safety.submit_susar", resource)
+      when { context has days_since_awareness && context.days_since_awareness > 7 };
+    active: true
+
+  - name: "PHARMA-07: Block drug interaction data deletion within 15-year retention"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"safety.delete_record", resource)
+      when { context has record_age_years && context.record_age_years < 15 };
+    active: true
+
+  # --- REGULATORY SUBMISSIONS ---
+
+  - name: "PHARMA-08: Require CMO sign-off before NDA submission to FDA"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"regulatory.submit_nda", resource)
+      unless { context has cmo_approved && context.cmo_approved == true };
+    active: true
+
+  - name: "PHARMA-09: Block eCTD document modification after regulatory freeze"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"regulatory.modify_ectd", resource)
+      when { context has submission_frozen && context.submission_frozen == true };
+    active: true
+
+  # --- PATIENT DATA & HIPAA ---
+
+  - name: "PHARMA-10: Block patient record access outside treating team"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"patient.read_record", resource)
+      when { context has treating_team_member && context.treating_team_member == false };
+    active: true
+
+  - name: "PHARMA-11: Require patient consent before sharing data with third party"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"patient.share_data", resource)
+      when { context has consent_obtained && context.consent_obtained == false };
+    active: true
+
+  - name: "PHARMA-12: Block bulk de-identification without privacy officer approval"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"data.deidentify_bulk", resource)
+      when { context has record_count && context.record_count > 500 }
+      unless { context has approval_status && context.approval_status == "approved" };
+    active: true
+
+  # --- LAB & MANUFACTURING ---
+
+  - name: "PHARMA-13: Block batch release without QC sign-off"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"manufacturing.release_batch", resource)
+      when { context has qc_approved && context.qc_approved == false };
+    active: true
+
+  - name: "PHARMA-14: Require dual approval for controlled substance dispensing"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"lab.dispense_controlled_substance", resource)
+      unless { context has approval_status && context.approval_status == "approved" };
+    active: true
+
+  - name: "PHARMA-15: Block audit trail modification in GxP system (21 CFR Part 11)"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"system.modify_audit_trail", resource);
+    active: true

@@ -1,0 +1,134 @@
+# AGR Domain Pack: Finance & Capital Markets
+# 15 real production scenarios covering payments, trading, compliance, and data access.
+# Each policy maps to a named scenario in scenarios.json.
+#
+# Regulation coverage: SOX, FINRA, MiFID II, FATF AML guidelines, GDPR (financial data)
+
+policies:
+
+  # --- PAYMENTS & TRANSFERS ---
+
+  - name: "FIN-01: Block wire transfer above $50k without dual approval"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"wire.transfer", resource)
+      when { context has amount && context.amount > 50000 }
+      unless { context has approval_status && context.approval_status == "approved" };
+    active: true
+
+  - name: "FIN-02: Block international wire to OFAC-sanctioned countries"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"wire.transfer", resource)
+      when { context has destination_country &&
+             (context.destination_country == "IR" ||
+              context.destination_country == "KP" ||
+              context.destination_country == "SY" ||
+              context.destination_country == "CU") };
+    active: true
+
+  - name: "FIN-03: Require approval for after-hours large ACH batch"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"ach.batch_submit", resource)
+      when { context has is_after_hours && context.is_after_hours == true &&
+             context has total_amount && context.total_amount > 100000 }
+      unless { context has approval_status && context.approval_status == "approved" };
+    active: true
+
+  - name: "FIN-04: Allow routine payroll under $500k"
+    level: org
+    cedar_rule: >-
+      permit(principal, action == Action::"ach.batch_submit", resource)
+      when { context has batch_type && context.batch_type == "payroll" &&
+             context has total_amount && context.total_amount <= 500000 };
+    active: true
+
+  - name: "FIN-05: Block vendor payment to unverified vendor"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"vendor.payment", resource)
+      when { context has vendor_kyc_status && context.vendor_kyc_status != "verified" };
+    active: true
+
+  # --- TRADING & MARKETS ---
+
+  - name: "FIN-06: Block equity trade exceeding position limit"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"trade.equity_order", resource)
+      when { context has position_pct && context.position_pct > 5.0 };
+    active: true
+
+  - name: "FIN-07: Require approval for block trade above $1M notional"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"trade.equity_order", resource)
+      when { context has notional_value && context.notional_value > 1000000 }
+      unless { context has approval_status && context.approval_status == "approved" };
+    active: true
+
+  - name: "FIN-08: Block options trade without margin account confirmation"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"trade.options_order", resource)
+      when { context has account_type && context.account_type != "margin" };
+    active: true
+
+  - name: "FIN-09: Deny FX trade outside market hours"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"trade.fx_order", resource)
+      when { context has market_open && context.market_open == false &&
+             context has pair && context.pair != "USDJPY" };
+    active: true
+
+  - name: "FIN-10: Block short sell on circuit-breaker stock"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"trade.equity_order", resource)
+      when { context has circuit_breaker_active && context.circuit_breaker_active == true &&
+             context has order_side && context.order_side == "sell_short" };
+    active: true
+
+  # --- COMPLIANCE & REPORTING ---
+
+  - name: "FIN-11: Require approval before filing SAR (Suspicious Activity Report)"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"compliance.file_sar", resource)
+      unless { context has approval_status && context.approval_status == "approved" };
+    active: true
+
+  - name: "FIN-12: Block deletion of audit trail within 7-year retention window"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"audit.delete_record", resource)
+      when { context has record_age_years && context.record_age_years < 7 };
+    active: true
+
+  - name: "FIN-13: Allow read-only access to customer financial data for compliance role"
+    level: org
+    cedar_rule: >-
+      permit(principal, action == Action::"customer.read_financial_data", resource)
+      when { context has role && context.role == "compliance_officer" };
+    active: true
+
+  # --- DATA ACCESS & PII ---
+
+  - name: "FIN-14: Block bulk export of customer PII without DPO approval"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"data.bulk_export", resource)
+      when { context has contains_pii && context.contains_pii == true &&
+             context has record_count && context.record_count > 1000 }
+      unless { context has approval_status && context.approval_status == "approved" };
+    active: true
+
+  - name: "FIN-15: Block model training on live customer transaction data"
+    level: org
+    cedar_rule: >-
+      forbid(principal, action == Action::"ml.train_model", resource)
+      when { context has data_source && context.data_source == "live_transactions" &&
+             context has anonymized && context.anonymized == false };
+    active: true

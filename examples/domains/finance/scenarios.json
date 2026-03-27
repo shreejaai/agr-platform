@@ -1,0 +1,288 @@
+{
+  "domain": "Finance & Capital Markets",
+  "description": "15 real production scenarios. Each maps to a Cedar policy in policies.yaml.",
+  "agent_id": "finance-ops-agent-v1",
+  "scenarios": [
+    {
+      "id": "FIN-01",
+      "name": "Large wire transfer blocked — dual approval required",
+      "narrative": "AI agent processing overnight settlements attempts to wire $75,000 to a correspondent bank. Amount exceeds $50k threshold. AGR routes to compliance officer for approval before funds move.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "wire.transfer",
+        "resource": "account:correspondent-bank-001",
+        "context": {
+          "amount": 75000,
+          "currency": "USD",
+          "destination_bank": "JPMorgan Chase",
+          "destination_country": "US",
+          "initiated_by": "settlement-agent"
+        }
+      },
+      "expected_decision": "APPROVAL_REQUIRED",
+      "expected_risk_level": "HIGH",
+      "leadership_talking_point": "Without AGR, this $75,000 wire executes automatically at 2am. With AGR, your compliance team gets an email and must approve before a single dollar moves."
+    },
+    {
+      "id": "FIN-02",
+      "name": "OFAC-sanctioned country wire blocked immediately",
+      "narrative": "Agent processes a payment request. Destination country Iran (IR) is on the OFAC sanctions list. AGR denies immediately — no approval path exists.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "wire.transfer",
+        "resource": "account:intl-recipient-447",
+        "context": {
+          "amount": 5000,
+          "currency": "USD",
+          "destination_country": "IR",
+          "initiated_by": "payment-agent"
+        }
+      },
+      "expected_decision": "DENY",
+      "expected_risk_level": "HIGH",
+      "leadership_talking_point": "Automated payments to sanctioned countries are a federal crime. AGR blocks this in under 50ms with a full audit trail, before any bank API is called."
+    },
+    {
+      "id": "FIN-03",
+      "name": "After-hours large ACH batch requires approval",
+      "narrative": "Payroll agent submits a $250,000 ACH batch at 11pm. After-hours large batches require manual review to prevent fraud.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "ach.batch_submit",
+        "resource": "ach-batch:batch-20240315-001",
+        "context": {
+          "total_amount": 250000,
+          "batch_type": "vendor_payment",
+          "is_after_hours": true,
+          "transaction_count": 47
+        }
+      },
+      "expected_decision": "APPROVAL_REQUIRED",
+      "expected_risk_level": "HIGH",
+      "leadership_talking_point": "ACH fraud peaks after hours. AGR catches this automatically — the batch sits in queue until a human approves it on the dashboard."
+    },
+    {
+      "id": "FIN-04",
+      "name": "Routine payroll batch allowed automatically",
+      "narrative": "Weekly payroll agent submits $380,000 payroll batch. Classified as payroll, under $500k limit — allowed instantly.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "ach.batch_submit",
+        "resource": "ach-batch:payroll-week-12",
+        "context": {
+          "total_amount": 380000,
+          "batch_type": "payroll",
+          "is_after_hours": false,
+          "transaction_count": 312
+        }
+      },
+      "expected_decision": "ALLOW",
+      "expected_risk_level": "LOW",
+      "leadership_talking_point": "AGR does not slow down legitimate operations. Low-risk, pre-classified actions flow through in under 10ms."
+    },
+    {
+      "id": "FIN-05",
+      "name": "Payment to unverified vendor blocked",
+      "narrative": "Accounts payable agent tries to pay a new vendor whose KYC has not been completed. AGR blocks the payment until vendor verification is done.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "vendor.payment",
+        "resource": "vendor:acme-solutions-ltd",
+        "context": {
+          "amount": 12000,
+          "vendor_kyc_status": "pending",
+          "invoice_id": "INV-2024-0891"
+        }
+      },
+      "expected_decision": "DENY",
+      "expected_risk_level": "HIGH",
+      "leadership_talking_point": "Business email compromise (BEC) fraud often targets new vendor setups. AGR enforces KYC completion before any payment goes out."
+    },
+    {
+      "id": "FIN-06",
+      "name": "Equity trade blocked — exceeds 5% position limit",
+      "narrative": "Trading agent attempts to buy 6.2% of outstanding shares in a small-cap stock. FINRA position limit violated. Blocked before order hits the exchange.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "trade.equity_order",
+        "resource": "ticker:SMCP",
+        "context": {
+          "order_side": "buy",
+          "shares": 85000,
+          "position_pct": 6.2,
+          "notional_value": 425000
+        }
+      },
+      "expected_decision": "DENY",
+      "expected_risk_level": "HIGH",
+      "leadership_talking_point": "FINRA position limits exist to prevent market manipulation. AGR enforces them in real time — the agent never reaches the exchange API."
+    },
+    {
+      "id": "FIN-07",
+      "name": "Block trade above $1M requires compliance approval",
+      "narrative": "Agent executes algorithmic block trade worth $1.8M. MiFID II requires pre-trade transparency for orders of this size.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "trade.equity_order",
+        "resource": "ticker:MSFT",
+        "context": {
+          "order_side": "buy",
+          "shares": 10000,
+          "notional_value": 1800000,
+          "position_pct": 0.02
+        }
+      },
+      "expected_decision": "APPROVAL_REQUIRED",
+      "expected_risk_level": "HIGH",
+      "leadership_talking_point": "MiFID II block trade rules are complex. AGR enforces them as a simple policy — any agent hitting this threshold pauses for review."
+    },
+    {
+      "id": "FIN-08",
+      "name": "Options trade blocked — account not margin-enabled",
+      "narrative": "Agent attempts to write covered calls on a cash account. Options require margin account. Blocked to prevent regulatory breach.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "trade.options_order",
+        "resource": "ticker:AAPL",
+        "context": {
+          "strategy": "covered_call",
+          "contracts": 10,
+          "account_type": "cash",
+          "account_id": "ACC-887234"
+        }
+      },
+      "expected_decision": "DENY",
+      "expected_risk_level": "MEDIUM",
+      "leadership_talking_point": "Executing options on an ineligible account triggers FINRA violations. AGR prevents this at the policy layer — not after the trade settles."
+    },
+    {
+      "id": "FIN-09",
+      "name": "FX trade blocked outside market hours for non-24h pair",
+      "narrative": "Agent tries to execute EURUSD trade at 1am EST. Non-24h FX pairs have restricted trading windows.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "trade.fx_order",
+        "resource": "pair:EURUSD",
+        "context": {
+          "pair": "EURUSD",
+          "notional_usd": 500000,
+          "market_open": false,
+          "time_utc": "01:15"
+        }
+      },
+      "expected_decision": "DENY",
+      "expected_risk_level": "MEDIUM",
+      "leadership_talking_point": "Off-market FX execution has large spread costs and settlement risk. AGR enforces trading hours as policy — no spreadsheet needed."
+    },
+    {
+      "id": "FIN-10",
+      "name": "Short sell blocked on circuit-breaker stock",
+      "narrative": "Agent tries to short-sell a stock that has triggered the SEC circuit breaker (Alternative Uptick Rule). Blocked immediately.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "trade.equity_order",
+        "resource": "ticker:XYZ",
+        "context": {
+          "order_side": "sell_short",
+          "shares": 5000,
+          "circuit_breaker_active": true,
+          "trigger_pct": -12.4
+        }
+      },
+      "expected_decision": "DENY",
+      "expected_risk_level": "HIGH",
+      "leadership_talking_point": "The SEC Alternative Uptick Rule is triggered dynamically. AGR ingests the flag as context — the agent cannot short even if the code tells it to."
+    },
+    {
+      "id": "FIN-11",
+      "name": "SAR filing requires senior compliance approval",
+      "narrative": "AML monitoring agent identifies suspicious pattern and attempts to auto-file a Suspicious Activity Report. Filing requires human review.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "compliance.file_sar",
+        "resource": "customer:cust-77234",
+        "context": {
+          "suspicion_score": 0.94,
+          "transaction_pattern": "structuring",
+          "auto_generated": true
+        }
+      },
+      "expected_decision": "APPROVAL_REQUIRED",
+      "expected_risk_level": "HIGH",
+      "leadership_talking_point": "Wrongly filed SARs expose the bank to legal liability. Correct ones are legally required. AGR ensures a human signs off on every filing."
+    },
+    {
+      "id": "FIN-12",
+      "name": "Audit record deletion blocked within retention window",
+      "narrative": "Agent attempts to purge old transaction logs. Records are 4 years old — SOX requires 7-year retention. Blocked.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "audit.delete_record",
+        "resource": "audit-log:txn-batch-2020-q2",
+        "context": {
+          "record_age_years": 4,
+          "record_type": "transaction_log",
+          "initiated_by": "cleanup-agent"
+        }
+      },
+      "expected_decision": "DENY",
+      "expected_risk_level": "HIGH",
+      "leadership_talking_point": "SOX Section 802 makes destroying financial records a federal crime. AGR enforces 7-year retention as a policy — not as a developer's memory."
+    },
+    {
+      "id": "FIN-13",
+      "name": "Compliance officer read access allowed",
+      "narrative": "Compliance AI agent reads customer financial history for quarterly review. Role is compliance_officer — permitted.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "customer.read_financial_data",
+        "resource": "customer:cust-44521",
+        "context": {
+          "role": "compliance_officer",
+          "purpose": "quarterly_review",
+          "customer_count": 1
+        }
+      },
+      "expected_decision": "ALLOW",
+      "expected_risk_level": "LOW",
+      "leadership_talking_point": "AGR enables agents to do their job. Legitimate access flows through instantly — governance does not mean blanket blocking."
+    },
+    {
+      "id": "FIN-14",
+      "name": "Bulk PII export blocked — DPO approval required",
+      "narrative": "Data science agent attempts to export 15,000 customer records including PII for model training. GDPR Art.25 requires Data Protection Officer sign-off.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "data.bulk_export",
+        "resource": "dataset:customer-transactions-2024",
+        "context": {
+          "contains_pii": true,
+          "record_count": 15000,
+          "destination": "s3://ml-training-bucket",
+          "anonymized": false
+        }
+      },
+      "expected_decision": "APPROVAL_REQUIRED",
+      "expected_risk_level": "HIGH",
+      "leadership_talking_point": "GDPR fines are 4% of global revenue. This one policy prevents the most common GDPR violation — bulk PII export without DPO review."
+    },
+    {
+      "id": "FIN-15",
+      "name": "Model training on live transactions blocked",
+      "narrative": "ML agent tries to train a fraud model directly on live transaction data without anonymization. Blocked — violates data minimization principle.",
+      "request": {
+        "agent_id": "finance-ops-agent-v1",
+        "action": "ml.train_model",
+        "resource": "model:fraud-detector-v3",
+        "context": {
+          "data_source": "live_transactions",
+          "anonymized": false,
+          "record_count": 2000000
+        }
+      },
+      "expected_decision": "DENY",
+      "expected_risk_level": "HIGH",
+      "leadership_talking_point": "Training AI on live PII without anonymization violates GDPR Art.5. AGR blocks the training job before a single record is read."
+    }
+  ]
+}
