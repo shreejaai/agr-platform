@@ -4,6 +4,7 @@ import html as _html
 import logging
 import uuid
 from datetime import UTC, datetime
+from typing import Literal, cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, Response
 from sqlalchemy import select
@@ -28,6 +29,15 @@ from app.services.webhook_service import fire_approval_webhook
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["approvals"])
+_VALID_WORKFLOW_STATUSES = frozenset({"running", "completed", "failed", "escalated"})
+
+
+def _normalize_workflow_status(
+    status: str,
+) -> Literal["running", "completed", "failed", "escalated"]:
+    if status in _VALID_WORKFLOW_STATUSES:
+        return cast(Literal["running", "completed", "failed", "escalated"], status)
+    return "running"
 
 
 def _to_response(a: ApprovalRequest) -> ApprovalResponse:
@@ -49,7 +59,7 @@ def _to_response(a: ApprovalRequest) -> ApprovalResponse:
         created_at=a.created_at,
         workflow_mode="temporal" if temporal_run_id else "db_only",
         temporal_run_id=str(temporal_run_id) if temporal_run_id else None,
-        workflow_status=a.workflow_status,
+        workflow_status=_normalize_workflow_status(a.workflow_status),
         workflow_last_error=a.workflow_last_error,
         workflow_last_transition_at=a.workflow_last_transition_at,
         workflow_fallback_mode=a.workflow_fallback_mode,

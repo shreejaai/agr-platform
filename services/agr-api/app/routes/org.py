@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, cast
 
 from fastapi import APIRouter, Depends, Request
 
@@ -16,6 +16,13 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/v1", tags=["org"])
+_VALID_SSO_DEFAULT_ROLES = frozenset({"admin", "operator", "viewer"})
+
+
+def _normalize_sso_default_role(role: str) -> Literal["admin", "operator", "viewer"]:
+    if role in _VALID_SSO_DEFAULT_ROLES:
+        return cast(Literal["admin", "operator", "viewer"], role)
+    return "viewer"
 
 
 @router.get("/org/me", response_model=OrgMeResponse)
@@ -49,7 +56,7 @@ def _sso_response(org: Organization) -> SSOSettingsResponse:
         metadata_xml=org.sso_metadata_xml,
         entity_id=org.sso_entity_id,
         domains=parse_sso_domains(org.sso_domains),
-        default_role=org.sso_default_role,
+        default_role=_normalize_sso_default_role(org.sso_default_role),
         auto_join=org.sso_auto_join,
     )
 

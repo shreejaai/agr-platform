@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from sqlalchemy import update as sa_update
@@ -19,11 +19,17 @@ from sqlalchemy import or_
 
 from app.config import settings
 from app.database import get_session
-from app.schemas import DecisionTrace, ErrorResponse, EvaluateRequest, EvaluateResponse
+from app.schemas import (
+    ComplianceFindingResponse,
+    DecisionTrace,
+    ErrorResponse,
+    EvaluateRequest,
+    EvaluateResponse,
+)
 from app.services.approval_service import create_approval_request
 from app.services.audit_service import create_audit_event
 from app.services.cedar_service import evaluate_request
-from app.services.compliance_service import ComplianceContext, get_registry
+from app.services.compliance_service import ComplianceContext, ComplianceFinding, get_registry
 from app.services.notification_service import send_approval_email
 from app.services.redis_service import (
     get_cached_eval,
@@ -42,6 +48,27 @@ from app.services.usage_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["evaluate"])
+
+
+def _serialize_compliance_findings(
+    findings: list[ComplianceFinding],
+) -> list[ComplianceFindingResponse]:
+    return [
+        ComplianceFindingResponse(
+            plugin=finding.plugin,
+            standard=finding.standard,
+            rule_id=finding.rule_id,
+            severity=finding.severity,
+            message=finding.message,
+            passed=finding.passed,
+            remediation_steps=finding.remediation_steps,
+            severity_level=cast(
+                Literal["low", "medium", "high", "critical"], finding.severity_level
+            ),
+            compliance_score=finding.compliance_score,
+        )
+        for finding in findings
+    ]
 
 
 @router.post(
@@ -269,7 +296,7 @@ async def evaluate(
     # -------------------------------------------------------------------------
     # Compliance hooks — advisory only, never blocks; fail-open on errors
     # -------------------------------------------------------------------------
-    compliance_findings: list[dict[str, object]] | None = None
+    compliance_findings: list[ComplianceFindingResponse] | None = None
     try:
         comp_ctx = ComplianceContext(
             org_id=str(org_id),
@@ -283,7 +310,9 @@ async def evaluate(
             risk_factors=risk.factors if risk else None,
         )
         comp_result = await get_registry().run_all(comp_ctx)
-        compliance_findings = comp_result.to_dict() if comp_result.findings else None
+        compliance_findings = (
+            _serialize_compliance_findings(comp_result.findings) if comp_result.findings else None
+        )
     except Exception as exc:
         logger.warning("Compliance hooks failed (ignoring): %s", exc)
 
