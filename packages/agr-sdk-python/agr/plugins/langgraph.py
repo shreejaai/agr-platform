@@ -26,7 +26,7 @@ def agr_governed(
 
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
         return cast(
-            Callable[P, R],
+            "Callable[P, R]",
             enforcer.wrap(func, action=func.__name__, resource=resource),
         )
 
