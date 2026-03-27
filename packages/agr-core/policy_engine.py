@@ -33,6 +33,9 @@ class EvaluationResult:
     requires_approval: bool
     latency_ms: float
     policy_source: str = "python_fallback"  # "cedar_cli" | "python_fallback" | "no_policies"
+    # Explicit fallback tracking — always populated so callers can audit the engine path.
+    fallback_used: bool = False
+    fallback_reason: str | None = None  # reason Cedar CLI was not used (if fallback_used)
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +71,7 @@ def evaluate_policies(
             requires_approval=False,
             latency_ms=elapsed,
             policy_source="no_policies",
+            fallback_used=False,
         )
 
     cedar_binary = _find_cedar_cli()
@@ -77,12 +81,35 @@ def evaluate_policies(
                 cedar_binary, cedar_policies, agent_id, action, resource, context
             )
             result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
+            result.fallback_used = False
             return result
         except Exception as exc:
-            logger.warning("Cedar CLI evaluation failed, using Python fallback: %s", exc)
+            fallback_reason = f"cedar_cli_error: {exc}"
+            logger.warning(
+                "Cedar CLI evaluation failed — using Python fallback. "
+                "fallback_reason=%r agent_id=%r action=%r resource=%r",
+                fallback_reason,
+                agent_id,
+                action,
+                resource,
+            )
+            result = _python_evaluator(cedar_policies, agent_id, action, resource, context)
+            result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
+            result.fallback_used = True
+            result.fallback_reason = fallback_reason
+            return result
 
+    fallback_reason = "cedar_cli_not_found"
+    logger.debug(
+        "Cedar CLI not on PATH — using Python fallback. "
+        "Install cedar-policy-cli for authoritative enforcement. "
+        "fallback_reason=%r",
+        fallback_reason,
+    )
     result = _python_evaluator(cedar_policies, agent_id, action, resource, context)
     result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
+    result.fallback_used = True
+    result.fallback_reason = fallback_reason
     return result
 
 
@@ -105,7 +132,7 @@ def _cedar_cli_authorize(
     context: dict[str, object],
 ) -> str:
     """Run `cedar authorize` and return 'ALLOW' or 'DENY'. Raises on error."""
-    policy_text = "\n\n".join(p["cedar_rule"] for p in policies)
+    policy_text = _cedar_policy_text(policies)
 
     # Context dict doubles as resource attributes so `resource.X` conditions work.
     # This mirrors the Python evaluator which checks both `resource.X` and `context.X`
@@ -120,17 +147,19 @@ def _cedar_cli_authorize(
     ]
 
     request = {
-        "principal": {"type": "Agent", "id": agent_id},
-        "action": {"type": "Action", "id": action},
-        "resource": {"type": "Resource", "id": resource_id},
+        "principal": f'Agent::"{agent_id}"',
+        "action": f'Action::"{action}"',
+        "resource": f'Resource::"{resource_id}"',
         "context": context,
     }
 
     with tempfile.TemporaryDirectory() as tmpdir:
         policies_path = Path(tmpdir) / "policies.cedar"
         entities_path = Path(tmpdir) / "entities.json"
+        request_path = Path(tmpdir) / "request.cedarauth.json"
         policies_path.write_text(policy_text, encoding="utf-8")
         entities_path.write_text(json.dumps(entities), encoding="utf-8")
+        request_path.write_text(json.dumps(request), encoding="utf-8")
 
         proc = subprocess.run(
             [
@@ -141,7 +170,7 @@ def _cedar_cli_authorize(
                 "--entities",
                 str(entities_path),
                 "--request-json",
-                json.dumps(request),
+                str(request_path),
             ],
             capture_output=True,
             text=True,
@@ -149,12 +178,37 @@ def _cedar_cli_authorize(
         )
 
     output = proc.stdout.strip()
-    if output in ("ALLOW", "DENY"):
-        return output
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped == "ALLOW" or stripped.startswith("Decision: ALLOW"):
+            return "ALLOW"
+        if stripped == "DENY" or stripped.startswith("Decision: DENY"):
+            return "DENY"
     raise RuntimeError(
         f"Unexpected cedar output: stdout={proc.stdout!r} stderr={proc.stderr!r} "
         f"exit={proc.returncode}"
     )
+
+
+def _cedar_policy_text(policies: list[dict[str, str]]) -> str:
+    """Serialize Cedar policies, expanding approval-gated forbids for CLI parity."""
+    rules: list[str] = []
+    for policy in policies:
+        rule = policy["cedar_rule"].strip()
+        rules.append(rule)
+        companion_rule = _approval_companion_permit(rule)
+        if companion_rule:
+            rules.append(companion_rule)
+    return "\n\n".join(rules)
+
+
+def _approval_companion_permit(rule: str) -> str | None:
+    """Mirror `forbid ... unless approved` as `permit ... when approved` for Cedar CLI."""
+    if "forbid(" not in rule or "unless" not in rule or "approval_status" not in rule:
+        return None
+
+    permit_rule = re.sub(r"\bforbid\s*\(", "permit(", rule, count=1)
+    return re.sub(r"\bunless\b", "when", permit_rule, count=1)
 
 
 def _cedar_cli_evaluator(

@@ -35,7 +35,7 @@ from app.services.risk_service import RiskResult, compute_risk_score
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix="/v1", tags=["evaluate"])
 
 
 @router.post(
@@ -274,7 +274,12 @@ async def evaluate(
         else f"TOOL_{result.decision}"
     )
 
-    extra_payload: dict[str, object] = {}
+    extra_payload: dict[str, object] = {
+        "policy_source": result.policy_source,
+        "fallback_used": result.fallback_used,
+    }
+    if result.fallback_used and result.fallback_reason:
+        extra_payload["fallback_reason"] = result.fallback_reason
     if risk is not None:
         extra_payload.update(
             {
@@ -342,5 +347,7 @@ async def evaluate(
             risk_score=risk.score if risk else None,
             risk_level=risk.level if risk else None,
             risk_override=risk is not None and result.decision != cedar_decision,
+            fallback_used=result.fallback_used,
+            fallback_reason=result.fallback_reason,
         ),
     )

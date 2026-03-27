@@ -9,9 +9,7 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_create_defaults_to_draft(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_create_defaults_to_draft(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     """POST /v1/policies creates a draft policy by default."""
     resp = await client.post(
         "/v1/policies",
@@ -73,9 +71,7 @@ async def test_create_archived_state_rejected(
 
 
 @pytest.mark.asyncio
-async def test_activate_draft_policy(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_activate_draft_policy(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     """PATCH /activate transitions draft → active."""
     create = await client.post(
         "/v1/policies",
@@ -89,9 +85,7 @@ async def test_activate_draft_policy(
     assert create.json()["state"] == "draft"
     policy_id = create.json()["id"]
 
-    resp = await client.patch(
-        f"/v1/policies/{policy_id}/activate", headers=auth_headers
-    )
+    resp = await client.patch(f"/v1/policies/{policy_id}/activate", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["state"] == "active"
@@ -115,17 +109,13 @@ async def test_activate_already_active_is_idempotent(
     )
     policy_id = create.json()["id"]
 
-    resp = await client.patch(
-        f"/v1/policies/{policy_id}/activate", headers=auth_headers
-    )
+    resp = await client.patch(f"/v1/policies/{policy_id}/activate", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json()["state"] == "active"
 
 
 @pytest.mark.asyncio
-async def test_activate_archived_policy(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_activate_archived_policy(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     """PATCH /activate can re-activate an archived policy."""
     create = await client.post(
         "/v1/policies",
@@ -141,9 +131,7 @@ async def test_activate_archived_policy(
 
     await client.patch(f"/v1/policies/{policy_id}/archive", headers=auth_headers)
 
-    resp = await client.patch(
-        f"/v1/policies/{policy_id}/activate", headers=auth_headers
-    )
+    resp = await client.patch(f"/v1/policies/{policy_id}/activate", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json()["state"] == "active"
     assert resp.json()["active"] is True
@@ -155,9 +143,7 @@ async def test_activate_archived_policy(
 
 
 @pytest.mark.asyncio
-async def test_archive_active_policy(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_archive_active_policy(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     """PATCH /archive transitions active → archived."""
     create = await client.post(
         "/v1/policies",
@@ -171,9 +157,7 @@ async def test_archive_active_policy(
     )
     policy_id = create.json()["id"]
 
-    resp = await client.patch(
-        f"/v1/policies/{policy_id}/archive", headers=auth_headers
-    )
+    resp = await client.patch(f"/v1/policies/{policy_id}/archive", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["state"] == "archived"
@@ -181,9 +165,7 @@ async def test_archive_active_policy(
 
 
 @pytest.mark.asyncio
-async def test_archive_is_idempotent(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_archive_is_idempotent(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     """Archiving an already-archived policy is a no-op."""
     create = await client.post(
         "/v1/policies",
@@ -198,9 +180,7 @@ async def test_archive_is_idempotent(
     policy_id = create.json()["id"]
 
     await client.patch(f"/v1/policies/{policy_id}/archive", headers=auth_headers)
-    resp = await client.patch(
-        f"/v1/policies/{policy_id}/archive", headers=auth_headers
-    )
+    resp = await client.patch(f"/v1/policies/{policy_id}/archive", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json()["state"] == "archived"
 
@@ -266,9 +246,7 @@ async def test_archived_policy_excluded_from_get(
 
 
 @pytest.mark.asyncio
-async def test_list_filter_by_state(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_list_filter_by_state(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     """GET /v1/policies?state= filters correctly."""
     # Create one draft and one active
     await client.post(

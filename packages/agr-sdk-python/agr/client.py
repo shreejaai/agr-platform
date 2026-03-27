@@ -1,5 +1,6 @@
 """AGR Python SDK — evaluate(), wait_for_approval(), register_agent()."""
 
+import asyncio
 import logging
 import os
 import time
@@ -240,7 +241,7 @@ class AGRClient:
         offset: int = 0,
     ) -> list[dict[str, object]]:
         """Fetch audit events with optional filters."""
-        params: dict[str, object] = {"limit": limit, "offset": offset}
+        params: dict[str, str | int] = {"limit": limit, "offset": offset}
         for k, v in {
             "event_type": event_type,
             "agent_id": agent_id,
@@ -296,9 +297,7 @@ class AGRClient:
 
     def get_compliance_summary(self, period_days: int = 7) -> dict[str, object]:
         """Return aggregated compliance posture for the last N days."""
-        response = self._client.get(
-            "/v1/compliance/summary", params={"period_days": period_days}
-        )
+        response = self._client.get("/v1/compliance/summary", params={"period_days": period_days})
         if response.status_code >= 400:
             raise AGRError(
                 f"Failed to get compliance summary ({response.status_code}): {response.text}",
@@ -314,3 +313,139 @@ class AGRClient:
 
     def __exit__(self, *args: object) -> None:
         self.close()
+
+
+class AsyncAGRClient:
+    """Async version of AGRClient for use in async frameworks (LangGraph, CrewAI, etc.).
+
+    Usage:
+        async with AsyncAGRClient(api_key="agr_sk_...") as client:
+            result = await client.evaluate("agent", "deploy", "prod")
+    """
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        base_url: str = "https://api.agr.dev",
+        timeout: float = 10.0,
+        transport: object | None = None,
+    ) -> None:
+        self.api_key = api_key or os.environ.get("AGR_API_KEY", "")
+        if not self.api_key:
+            raise AGRError(
+                "API key is required. Pass api_key or set AGR_API_KEY environment variable."
+            )
+        self.base_url = base_url.rstrip("/")
+        kwargs: dict[str, object] = {
+            "base_url": self.base_url,
+            "headers": {"Authorization": f"Bearer {self.api_key}"},
+            "timeout": timeout,
+        }
+        if transport is not None:
+            kwargs["transport"] = transport
+        self._client = httpx.AsyncClient(**kwargs)  # type: ignore[arg-type]
+
+    async def evaluate(
+        self,
+        agent: str,
+        action: str,
+        resource: str,
+        context: dict[str, object] | None = None,
+    ) -> EvaluationResult:
+        """Evaluate an agent action against Cedar policies (async).
+
+        Raises AGRAuthError on 401, AGRRateLimitError on 429, AGRError on other failures.
+        """
+        payload = {
+            "agent_id": agent,
+            "action": action,
+            "resource": resource,
+            "context": context or {},
+        }
+        response = await self._client.post("/v1/evaluate", json=payload)
+
+        if response.status_code == 401:
+            data = response.json()
+            raise AGRAuthError(
+                data.get(
+                    "message",
+                    "Unauthorized. Check your API key at https://dashboard.agr.dev/settings",
+                ),
+                status_code=401,
+            )
+
+        if response.status_code == 429:
+            data = response.json()
+            raise AGRRateLimitError(
+                message=data.get("message", "Rate limit exceeded."),
+                upgrade_url=data.get("upgrade_url"),
+            )
+
+        if response.status_code >= 400:
+            raise AGRError(
+                f"AGR API error ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+
+        data = response.json()
+        return EvaluationResult(
+            decision=data["decision"],
+            reason=data["reason"],
+            policy_id=data.get("policy_id"),
+            approval_id=data.get("approval_id"),
+            latency_ms=data["latency_ms"],
+            eval_id=data["eval_id"],
+            risk_score=data.get("risk_score"),
+            risk_level=data.get("risk_level"),
+            risk_factors=data.get("risk_factors"),
+            compliance_findings=data.get("compliance_findings"),
+        )
+
+    async def wait_for_approval(
+        self,
+        approval_id: str,
+        poll_interval: float = 2.0,
+        timeout: float = 3600.0,
+    ) -> bool:
+        """Wait for an approval decision (async). Returns True if approved, False if rejected."""
+        start = time.monotonic()
+        while True:
+            if time.monotonic() - start >= timeout:
+                raise TimeoutError(f"Approval {approval_id} not resolved within {timeout}s.")
+
+            response = await self._client.get(f"/v1/approvals/{approval_id}")
+            if response.status_code == 200:
+                status = response.json().get("status")
+                if status == "approved":
+                    return True
+                if status == "rejected":
+                    return False
+            elif response.status_code >= 400:
+                raise AGRError(
+                    f"AGR API error ({response.status_code}): {response.text}",
+                    status_code=response.status_code,
+                )
+
+            await asyncio.sleep(poll_interval)
+
+    async def register_agent(
+        self, agent_id: str, metadata: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        """Register an agent with AGR (async)."""
+        payload = {"agent_id": agent_id, "metadata": metadata or {}}
+        response = await self._client.post("/v1/agents/register", json=payload)
+        if response.status_code >= 400:
+            raise AGRError(
+                f"Failed to register agent ({response.status_code}): {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()  # type: ignore[no-any-return]
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def __aenter__(self) -> "AsyncAGRClient":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.aclose()

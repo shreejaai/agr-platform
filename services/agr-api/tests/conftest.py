@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages" / "agr-c
 
 from app.config import settings as _app_settings
 from app.database import get_session
-from app.models import Agent, Base, Organization, Policy, Webhook  # noqa: F401
+from app.models import Agent, Base, Organization, OrgMember, Policy, Webhook  # noqa: F401
 
 # Ensure Svix verification is always skipped in tests regardless of local .env
 _app_settings.clerk_webhook_secret = ""

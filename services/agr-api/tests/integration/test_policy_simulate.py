@@ -8,9 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.mark.asyncio
-async def test_simulate_allow(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_simulate_allow(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     """Returns ALLOW for a permitted action with matching policy."""
     response = await client.post(
         "/v1/policies/simulate",
@@ -32,9 +30,7 @@ async def test_simulate_allow(
 
 
 @pytest.mark.asyncio
-async def test_simulate_deny(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_simulate_deny(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     """Returns DENY for a forbidden action."""
     response = await client.post(
         "/v1/policies/simulate",

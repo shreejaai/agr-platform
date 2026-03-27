@@ -95,9 +95,7 @@ class PolicyVersion(Base):
     level: Mapped[str] = mapped_column(Text, nullable=False)
     state: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     policy: Mapped["Policy"] = relationship(back_populates="versions")
 
@@ -253,6 +251,31 @@ class OrgRiskConfig(Base):
     weight_resource_sensitivity: Mapped[float] = mapped_column(Float, nullable=False, default=0.10)
     threshold_allow_max: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     threshold_approval_max: Mapped[int] = mapped_column(Integer, nullable=False, default=70)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class OrgMember(Base):
+    """Team member within an organization (migration 024).
+
+    Each member is identified by email. status transitions:
+      invited → active (when they join)
+      active  → revoked (when access is removed)
+    """
+
+    __tablename__ = "org_members"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False, default="viewer")
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="invited")
+    invited_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

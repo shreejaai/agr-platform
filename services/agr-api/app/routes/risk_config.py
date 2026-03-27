@@ -11,7 +11,7 @@ from app.dependencies import require_role
 from app.models import OrgRiskConfig
 from app.schemas import OrgRiskConfigResponse, OrgRiskConfigUpdate
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix="/v1", tags=["risk"])
 
 _WEIGHT_FIELDS = [
     "weight_action_severity",
@@ -39,9 +39,7 @@ def _to_response(cfg: OrgRiskConfig) -> OrgRiskConfigResponse:
 
 
 async def _get_or_create(session: AsyncSession, org_id: uuid.UUID) -> OrgRiskConfig:
-    result = await session.execute(
-        select(OrgRiskConfig).where(OrgRiskConfig.org_id == org_id)
-    )
+    result = await session.execute(select(OrgRiskConfig).where(OrgRiskConfig.org_id == org_id))
     cfg = result.scalar_one_or_none()
     if cfg is None:
         cfg = OrgRiskConfig(id=uuid.uuid4(), org_id=org_id)

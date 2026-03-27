@@ -1,0 +1,26 @@
+# Example: validate Cedar policies in a repository using the AGR GitHub Action.
+# Copy this to .github/workflows/agr-policy-check.yml in your agent repository.
+
+name: AGR Policy Check
+
+on:
+  pull_request:
+    paths:
+      - '**/*.cedar'
+      - 'policies/**'
+
+jobs:
+  validate-policies:
+    name: Validate Cedar policies
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Cedar policies with AGR
+        uses: shreejaai/agr-platform/tools/github-action@main
+        with:
+          api-key: ${{ secrets.AGR_API_KEY }}
+          # api-base-url: https://api.agr.dev   # default
+          policy-dir: policies/                  # directory containing .cedar files
+          fail-on-conflict: 'true'

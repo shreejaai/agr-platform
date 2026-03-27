@@ -50,4 +50,6 @@ $PSQL -f /migrations/022_org_risk_config.sql
 echo "  022 done"
 $PSQL -f /migrations/023_approval_steps.sql
 echo "  023 done"
+$PSQL -f /migrations/024_org_members.sql
+echo "  024 done"
 echo "All migrations complete."
