@@ -156,8 +156,10 @@ def _cedar_cli_authorize(
     with tempfile.TemporaryDirectory() as tmpdir:
         policies_path = Path(tmpdir) / "policies.cedar"
         entities_path = Path(tmpdir) / "entities.json"
+        request_path = Path(tmpdir) / "request.cedarauth.json"
         policies_path.write_text(policy_text, encoding="utf-8")
         entities_path.write_text(json.dumps(entities), encoding="utf-8")
+        request_path.write_text(json.dumps(request), encoding="utf-8")
 
         proc = subprocess.run(
             [
@@ -168,7 +170,7 @@ def _cedar_cli_authorize(
                 "--entities",
                 str(entities_path),
                 "--request-json",
-                json.dumps(request),
+                str(request_path),
             ],
             capture_output=True,
             text=True,

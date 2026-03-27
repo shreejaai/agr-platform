@@ -12,7 +12,7 @@ export interface RiskBreakdownData {
 }
 
 @Component({
-  selector: 'app-risk-breakdown',
+  selector: 'agr-risk-breakdown',
   standalone: true,
   imports: [CommonModule],
   changeDetection: ChangeDetectionStrategy.OnPush,

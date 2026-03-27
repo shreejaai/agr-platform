@@ -241,7 +241,7 @@ class AGRClient:
         offset: int = 0,
     ) -> list[dict[str, object]]:
         """Fetch audit events with optional filters."""
-        params: dict[str, object] = {"limit": limit, "offset": offset}
+        params: dict[str, str | int] = {"limit": limit, "offset": offset}
         for k, v in {
             "event_type": event_type,
             "agent_id": agent_id,

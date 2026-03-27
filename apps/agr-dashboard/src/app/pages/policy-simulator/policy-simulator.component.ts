@@ -15,7 +15,7 @@ interface ContextEntry {
 }
 
 @Component({
-  selector: 'app-policy-simulator',
+  selector: 'agr-policy-simulator',
   standalone: true,
   imports: [CommonModule, FormsModule, RiskBreakdownComponent],
   templateUrl: './policy-simulator.component.html',

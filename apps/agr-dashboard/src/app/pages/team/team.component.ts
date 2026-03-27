@@ -13,7 +13,7 @@ import {
 } from '../../services/member.service';
 
 @Component({
-  selector: 'app-team',
+  selector: 'agr-team',
   standalone: true,
   imports: [CommonModule, FormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,

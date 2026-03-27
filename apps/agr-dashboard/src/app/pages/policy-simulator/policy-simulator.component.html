@@ -10,8 +10,11 @@
   <div class="card space-y-4">
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
       <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">Agent ID</label>
+        <label for="policy-simulator-agent-id" class="block text-sm font-medium text-slate-300 mb-1">
+          Agent ID
+        </label>
         <input
+          id="policy-simulator-agent-id"
           class="input w-full"
           placeholder="my-langgraph-agent"
           [ngModel]="agentId()"
@@ -19,8 +22,11 @@
         />
       </div>
       <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">Action</label>
+        <label for="policy-simulator-action" class="block text-sm font-medium text-slate-300 mb-1">
+          Action
+        </label>
         <input
+          id="policy-simulator-action"
           class="input w-full"
           placeholder="deploy"
           [ngModel]="action()"
@@ -28,8 +34,14 @@
         />
       </div>
       <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">Resource</label>
+        <label
+          for="policy-simulator-resource"
+          class="block text-sm font-medium text-slate-300 mb-1"
+        >
+          Resource
+        </label>
         <input
+          id="policy-simulator-resource"
           class="input w-full"
           placeholder="prod-database"
           [ngModel]="resource()"
@@ -40,7 +52,7 @@
 
     <!-- Context key/value builder -->
     <div>
-      <label class="block text-sm font-medium text-slate-300 mb-2">Context</label>
+      <p class="block text-sm font-medium text-slate-300 mb-2">Context</p>
       <div class="space-y-2">
         @for (entry of contextEntries(); track $index) {
           <div class="flex gap-2 items-center">
@@ -110,7 +122,9 @@
       @if (r.risk_score !== null) {
         <div>
           <p class="text-sm font-medium text-slate-300 mb-2">Risk Breakdown</p>
-          <app-risk-breakdown [data]="{ score: r.risk_score, level: r.risk_level, factors: r.risk_factors }" />
+          <agr-risk-breakdown
+            [data]="{ score: r.risk_score, level: r.risk_level, factors: r.risk_factors }"
+          />
         </div>
       }
 
