@@ -26,6 +26,7 @@ def _require_admin(request: Request) -> None:
     if role != "admin":
         raise HTTPException(status_code=403, detail="Admin role required for this operation.")
 
+
 _SAMPLE_LIMIT = 1000  # max recent events to sample for compliance analysis
 
 
@@ -177,8 +178,9 @@ async def export_compliance(
 
     # Audit trail summary — first/last event timestamps
     audit_bounds = await session.execute(
-        select(func.min(AuditEvent.recorded_at), func.max(AuditEvent.recorded_at))
-        .where(AuditEvent.org_id == org_id, AuditEvent.recorded_at >= since)
+        select(func.min(AuditEvent.recorded_at), func.max(AuditEvent.recorded_at)).where(
+            AuditEvent.org_id == org_id, AuditEvent.recorded_at >= since
+        )
     )
     bounds_row = audit_bounds.one()
     audit_first = bounds_row[0].isoformat() if bounds_row[0] else None

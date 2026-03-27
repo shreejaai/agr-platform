@@ -568,7 +568,9 @@ async def escalate_approval(
     approval.workflow_last_transition_at = approval.workflow_escalated_at
     await session.flush()
     if approval.temporal_run_id:
-        signal_result = await signal_approval_escalation(approval.temporal_run_id, body.approver_email)
+        signal_result = await signal_approval_escalation(
+            approval.temporal_run_id, body.approver_email
+        )
         if not signal_result.delivered:
             approval.workflow_fallback_mode = "signal_retry_exhausted"
             approval.workflow_last_error = signal_result.error

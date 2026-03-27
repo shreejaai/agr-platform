@@ -34,8 +34,7 @@ _HINT_MISSING = {
 _HINT_FORMAT = {
     "saas": "Tokens start with agr_sk_ or agr_usr_. Check https://dashboard.agr.dev/settings",
     "onprem": (
-        "Tokens start with agr_sk_ or agr_usr_. "
-        "Copy the key from Docker logs on first start."
+        "Tokens start with agr_sk_ or agr_usr_. " "Copy the key from Docker logs on first start."
     ),
 }
 _HINT_NOT_FOUND = {
