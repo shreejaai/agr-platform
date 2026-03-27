@@ -99,6 +99,29 @@ class DecisionTrace(BaseModel):
     )
 
 
+class ComplianceFindingResponse(BaseModel):
+    plugin: str
+    standard: str
+    rule_id: str
+    severity: str
+    message: str
+    passed: bool
+    remediation_steps: list[str] = Field(
+        default_factory=list,
+        description="Deterministic remediation guidance derived from the violated control and risk signals.",
+    )
+    severity_level: Literal["low", "medium", "high", "critical"] = Field(
+        ...,
+        description="Normalized severity level derived from the finding and request risk factors.",
+    )
+    compliance_score: int = Field(
+        ...,
+        ge=0,
+        le=100,
+        description="Deterministic compliance score for this finding. Higher is better.",
+    )
+
+
 class EvaluateResponse(BaseModel):
     decision: str = Field(..., description="ALLOW | DENY | APPROVAL_REQUIRED", examples=["ALLOW"])
     reason: str = Field(..., description="Human-readable explanation of the decision.")
@@ -116,7 +139,7 @@ class EvaluateResponse(BaseModel):
         default=None,
         description="Per-factor risk contributions. Keys: action_severity, data_sensitivity, agent_trust, context_risk, time_risk.",
     )
-    compliance_findings: list[dict[str, object]] | None = Field(
+    compliance_findings: list[ComplianceFindingResponse] | None = Field(
         default=None, description="Advisory compliance findings (EU AI Act, SOC2, ISO42001)."
     )
     decision_trace: DecisionTrace | None = Field(
@@ -242,6 +265,29 @@ class ApprovalResponse(BaseModel):
         default=None,
         description="Temporal workflow ID (present when workflow_mode='temporal').",
     )
+    workflow_status: Literal["running", "completed", "failed", "escalated"] = Field(
+        default="running",
+        description="Current durable workflow state for the approval lifecycle.",
+    )
+    workflow_last_error: str | None = Field(
+        default=None,
+        description="Most recent workflow execution or signaling error, when present.",
+    )
+    workflow_last_transition_at: datetime | None = Field(
+        default=None,
+        description="Timestamp of the last workflow status transition.",
+    )
+    workflow_fallback_mode: str = Field(
+        default="none",
+        description=(
+            "Explicit fallback state. 'none' means normal Temporal tracking or no fallback "
+            "was needed; other values explain why the approval is operating in a degraded mode."
+        ),
+    )
+    workflow_escalated_at: datetime | None = Field(
+        default=None,
+        description="Timestamp of the latest escalation event, if the workflow was escalated.",
+    )
 
 
 class ApprovalDecisionRequest(BaseModel):
@@ -359,15 +405,6 @@ class AuditSearchRequest(BaseModel):
     offset: int = Field(default=0, ge=0)
 
 
-class ComplianceFindingResponse(BaseModel):
-    plugin: str
-    standard: str
-    rule_id: str
-    severity: str
-    message: str
-    passed: bool
-
-
 class ComplianceSummaryResponse(BaseModel):
     period_days: int
     total_evaluations: int
@@ -375,6 +412,9 @@ class ComplianceSummaryResponse(BaseModel):
     high_risk_count: int
     findings_by_standard: dict[str, dict[str, int]]  # standard → {pass, fail}
     overall_pass: bool
+    compliance_score: int = Field(
+        ..., ge=0, le=100, description="Aggregate compliance score across sampled findings."
+    )
 
 
 class OrgMeResponse(BaseModel):
@@ -384,8 +424,14 @@ class OrgMeResponse(BaseModel):
     plan: str
     eval_count: int
     eval_limit: int
+    eval_warning_threshold_pct: int = 80
+    eval_soft_limit_enabled: bool = True
     eval_week_start: datetime | None = None
     role: str = "admin"
+    auth_mode: Literal["api_key", "sso_session"] = "api_key"
+    auth_expires_at: datetime | None = None
+    sso_enabled: bool = False
+    sso_provider: str | None = None
     created_at: datetime
 
 
@@ -393,6 +439,65 @@ class ClerkApiKeyResponse(BaseModel):
     api_key: str
     org_id: str
     org_name: str
+    role: str = "admin"
+    auth_mode: Literal["api_key", "sso_session"] = "api_key"
+    expires_at: datetime | None = None
+
+
+class SSOSettingsResponse(BaseModel):
+    enabled: bool = False
+    provider: str | None = None
+    metadata_url: str | None = None
+    metadata_xml: str | None = None
+    entity_id: str | None = None
+    domains: list[str] = Field(default_factory=list)
+    default_role: Literal["admin", "operator", "viewer"] = "viewer"
+    auto_join: bool = False
+
+
+class SSOSettingsUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    provider: str | None = Field(default=None, max_length=128)
+    metadata_url: str | None = Field(default=None, max_length=1024)
+    metadata_xml: str | None = Field(default=None, max_length=20_000)
+    entity_id: str | None = Field(default=None, max_length=512)
+    domains: list[str] | None = None
+    default_role: Literal["admin", "operator", "viewer"] | None = None
+    auto_join: bool | None = None
+
+    @field_validator("domains")
+    @classmethod
+    def validate_domains(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        normalized: list[str] = []
+        for domain in v:
+            candidate = domain.strip().lower()
+            if not candidate:
+                continue
+            if "." not in candidate or "@" in candidate or " " in candidate:
+                raise ValueError("domains must contain valid email domains only.")
+            normalized.append(candidate)
+        return normalized
+
+
+class AgentUsageResponse(BaseModel):
+    agent_id: str
+    total_evaluations: int
+    share_pct: int = Field(..., ge=0, le=100)
+    last_evaluated_at: datetime | None = None
+
+
+class UsageResponse(BaseModel):
+    org_id: str
+    total_evaluations: int
+    eval_limit: int
+    eval_warning_threshold_pct: int = Field(..., ge=1, le=100)
+    eval_soft_limit_enabled: bool
+    usage_pct: int = Field(..., ge=0)
+    quota_state: Literal["ok", "warning", "exceeded"]
+    warning_message: str | None = None
+    per_agent: list[AgentUsageResponse] = Field(default_factory=list)
 
 
 class WebhookDeliveryResponse(BaseModel):
@@ -634,6 +739,7 @@ class SimulateResponse(BaseModel):
     risk_score: int | None = None
     risk_level: str | None = None
     risk_factors: dict[str, int] | None = None
+    compliance_findings: list[ComplianceFindingResponse] | None = None
     decision_trace: DecisionTrace
 
 

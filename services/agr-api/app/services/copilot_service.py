@@ -883,7 +883,7 @@ class CopilotService:
     ) -> str:
         """Call Anthropic Claude and return the text response."""
         try:
-            import anthropic  # type: ignore[import-not-found]
+            import anthropic
 
             client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 

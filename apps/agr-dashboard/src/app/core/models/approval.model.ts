@@ -15,6 +15,11 @@ export interface Approval {
   created_at: string;
   workflow_mode: 'temporal' | 'db_only';
   temporal_run_id: string | null;
+  workflow_status: 'running' | 'completed' | 'failed' | 'escalated';
+  workflow_last_error: string | null;
+  workflow_last_transition_at: string | null;
+  workflow_fallback_mode: string;
+  workflow_escalated_at: string | null;
 }
 
 export interface ApprovalStep {

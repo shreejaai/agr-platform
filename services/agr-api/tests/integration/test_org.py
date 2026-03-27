@@ -15,6 +15,8 @@ async def test_get_org_me(client: AsyncClient, auth_headers: dict, test_org: Org
     assert data["plan"] == test_org.plan
     assert data["eval_count"] == test_org.eval_count
     assert data["eval_limit"] == test_org.eval_limit
+    assert data["auth_mode"] == "api_key"
+    assert data["sso_enabled"] is False
 
 
 @pytest.mark.asyncio

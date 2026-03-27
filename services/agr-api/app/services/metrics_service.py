@@ -10,7 +10,7 @@ Counter naming follows Prometheus conventions:
   agr_policy_changes_total{operation="create|update|delete"}
 """
 
-from prometheus_client import (  # type: ignore[import-not-found]
+from prometheus_client import (
     CONTENT_TYPE_LATEST,
     CollectorRegistry,
     Counter,

@@ -210,6 +210,40 @@ async def rate_limit_incr(
         return False, db_count
 
 
+async def increment_eval_count(org_id: UUID, db_count: int) -> int:
+    """Atomically increment the org eval counter and return the new count.
+
+    Unlike rate_limit_incr(), this never blocks. It is used for soft quota
+    enforcement where evaluations continue past the configured limit.
+    """
+    r = _get_redis()
+    if r is None:
+        return db_count + 1
+
+    try:
+        key = _rate_key(org_id)
+        await r.set(key, db_count, nx=True, ex=_RATE_KEY_TTL)
+        return int(await r.incr(key))
+    except Exception as exc:
+        logger.warning("Redis eval increment failed (falling back to DB count): %s", exc)
+        return db_count + 1
+
+
+async def get_current_eval_count(org_id: UUID, db_count: int) -> int:
+    """Return the live eval count from Redis when available, else DB count."""
+    r = _get_redis()
+    if r is None:
+        return db_count
+    try:
+        raw = await r.get(_rate_key(org_id))
+        if raw is None:
+            return db_count
+        return int(raw)
+    except Exception as exc:
+        logger.debug("Redis eval count read failed (using DB count): %s", exc)
+        return db_count
+
+
 _DECIDE_RATE_WINDOW = 300  # 5-minute window
 _DECIDE_RATE_MAX = 10  # max attempts per approval within the window
 

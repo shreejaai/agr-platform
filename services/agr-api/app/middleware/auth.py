@@ -1,6 +1,7 @@
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import Request, Response
@@ -9,7 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.database import async_session_factory
-from app.models import Organization
+from app.models import AuthSession, Organization
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +32,10 @@ _HINT_MISSING = {
     "or contact your AGR administrator.",
 }
 _HINT_FORMAT = {
-    "saas": "Keys start with agr_sk_. Check https://dashboard.agr.dev/settings",
-    "onprem": "Keys start with agr_sk_. Copy the key from Docker logs on first start.",
+    "saas": "Tokens start with agr_sk_ or agr_usr_. Check https://dashboard.agr.dev/settings",
+    "onprem": (
+        "Tokens start with agr_sk_ or agr_usr_. " "Copy the key from Docker logs on first start."
+    ),
 }
 _HINT_NOT_FOUND = {
     "saas": "API key not found. Verify your key at https://dashboard.agr.dev/settings",
@@ -68,7 +71,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
 
         api_key = auth_header.removeprefix("Bearer ").strip()
-        if not api_key.startswith("agr_sk_"):
+        if not (api_key.startswith("agr_sk_") or api_key.startswith("agr_usr_")):
             hint = _HINT_FORMAT.get(mode, _HINT_FORMAT["saas"])
             return Response(
                 content=json.dumps(
@@ -81,8 +84,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 media_type="application/json",
             )
 
-        org = await self._lookup_org(api_key)
-        if org is None:
+        auth_lookup = await self._lookup_org(api_key)
+        if auth_lookup is None:
             hint = _HINT_NOT_FOUND.get(mode, _HINT_NOT_FOUND["saas"])
             return Response(
                 content=json.dumps({"error": "unauthorized", "message": hint}),
@@ -90,18 +93,43 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 media_type="application/json",
             )
 
+        org, role, auth_mode, auth_expires_at = auth_lookup
         request.state.org_id = org.id
         request.state.org = org
-        request.state.role = org.role
+        request.state.role = role
+        request.state.auth_mode = auth_mode
+        request.state.auth_expires_at = auth_expires_at
         return await call_next(request)
 
     @staticmethod
-    async def _lookup_org(api_key: str) -> Organization | None:
+    async def _lookup_org(
+        api_key: str,
+    ) -> tuple[Organization, str, str, datetime | None] | None:
         async with async_session_factory() as session:
+            if api_key.startswith("agr_sk_"):
+                result = await session.execute(
+                    select(Organization).where(Organization.api_key == api_key)
+                )
+                org = result.scalar_one_or_none()
+                if org is None:
+                    return None
+                return org, org.role, "api_key", None
+
             result = await session.execute(
-                select(Organization).where(Organization.api_key == api_key)
+                select(AuthSession, Organization)
+                .join(Organization, Organization.id == AuthSession.org_id)
+                .where(
+                    AuthSession.token == api_key,
+                    AuthSession.expires_at > datetime.now(UTC),
+                )
             )
-            return result.scalar_one_or_none()
+            row = result.one_or_none()
+            if row is None:
+                return None
+            auth_session, org = row
+            if org is None:
+                return None
+            return org, auth_session.role, "sso_session", auth_session.expires_at
 
 
 async def set_rls_org(session: object, org_id: UUID) -> None:

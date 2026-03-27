@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     risk_thresholds_allow_max: int = 30
     risk_thresholds_approval_max: int = 70
     risk_scoring_enabled: bool = True
+    auth_session_ttl_hours: int = 12
 
     # Webhook delivery — configurable timeout per attempt (seconds)
     webhook_timeout: float = 10.0

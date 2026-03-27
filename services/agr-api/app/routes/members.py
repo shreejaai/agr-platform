@@ -111,12 +111,13 @@ async def invite_member(
     _require_admin(request)
     org_id: uuid.UUID = request.state.org_id
     inviter_email: str = getattr(request.state.org, "slug", str(org_id))
+    normalized_email = body.email.strip().lower()
 
     # Check for existing active/invited member with this email
     existing = await session.execute(
         select(OrgMember).where(
             OrgMember.org_id == org_id,
-            OrgMember.email == body.email,
+            OrgMember.email == normalized_email,
             OrgMember.status.in_(["invited", "active"]),
         )
     )
@@ -125,14 +126,14 @@ async def invite_member(
             status_code=409,
             detail={
                 "error": "already_invited",
-                "message": f"{body.email} is already an active or invited member.",
+                "message": f"{normalized_email} is already an active or invited member.",
             },
         )
 
     member = OrgMember(
         id=uuid.uuid4(),
         org_id=org_id,
-        email=body.email,
+        email=normalized_email,
         role=body.role,
         status="invited",
         invited_by=inviter_email,
@@ -146,12 +147,12 @@ async def invite_member(
         event_type="MEMBER_INVITED",
         agent_id="__admin__",
         action="invite_member",
-        resource=body.email,
+        resource=normalized_email,
         decision="ALLOW",
         payload={"role": body.role, "invited_by": inviter_email},
     )
 
-    logger.info("Invited member %s with role=%s to org %s", body.email, body.role, org_id)
+    logger.info("Invited member %s with role=%s to org %s", normalized_email, body.role, org_id)
     return _to_response(member)
 
 

@@ -13,7 +13,16 @@ export interface ClerkUser {
 
 export type FetchKeyResult =
   | { ok: true }
-  | { ok: false; reason: 'not_signed_in' | 'clerk_not_configured' | 'org_not_found' | 'error' };
+  | {
+      ok: false;
+      reason:
+        | 'not_signed_in'
+        | 'clerk_not_configured'
+        | 'org_not_found'
+        | 'access_denied'
+        | 'ambiguous_org_mapping'
+        | 'error';
+    };
 
 @Injectable({ providedIn: 'root' })
 export class ClerkService {
@@ -88,6 +97,14 @@ export class ClerkService {
 
         if (status === 404) {
           return { ok: false, reason: 'org_not_found' };
+        }
+
+        if (status === 403) {
+          return { ok: false, reason: 'access_denied' };
+        }
+
+        if (status === 409) {
+          return { ok: false, reason: 'ambiguous_org_mapping' };
         }
 
         console.warn('ClerkService: fetchApiKey failed', err);

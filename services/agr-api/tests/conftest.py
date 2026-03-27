@@ -126,10 +126,14 @@ async def client(
     import app.database as db_mod
     import app.middleware.auth as auth_mod
     from app.main import app
+    from app.services.compliance_plugins.audit_trail_check import AuditTrailCompliancePlugin
+    from app.services.compliance_service import get_registry, reset_registry
 
     original_factory = auth_mod.async_session_factory
     auth_mod.async_session_factory = test_session_factory
     db_mod.async_session_factory = test_session_factory
+    reset_registry()
+    get_registry().register(AuditTrailCompliancePlugin())
 
     app.dependency_overrides[get_session] = _override_get_session
 
@@ -139,6 +143,7 @@ async def client(
 
     app.dependency_overrides.clear()
     auth_mod.async_session_factory = original_factory
+    reset_registry()
 
 
 @pytest_asyncio.fixture

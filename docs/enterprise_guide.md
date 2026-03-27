@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-26
 
-This guide covers enterprise-specific features: RBAC, per-org risk tuning, multi-step approvals, compliance, audit export, and webhook management.
+This guide covers enterprise-specific features: RBAC, per-org risk tuning, multi-step approvals, enterprise SSO/SAML, compliance exports, workflow durability, usage quotas, and webhook management.
 
 ---
 
@@ -115,6 +115,51 @@ GET /v1/approvals/{id}/steps
 
 **SLA and escalation**: Set `sla_hours` and `escalation_email` on the approval request for time-based escalation notifications (storage is wired; Temporal workflow handles auto-escalation when configured).
 
+### Workflow Durability and Fallback Visibility
+
+Every approval response now includes:
+
+- `workflow_status` — `running`, `completed`, `failed`, or `escalated`
+- `workflow_fallback_mode` — explicit degraded-mode reason such as `db_only_temporal_unavailable`
+- `workflow_last_error` — last Temporal start/signal failure, when present
+- `workflow_last_transition_at` and `workflow_escalated_at`
+
+When Temporal is unavailable, approvals continue in `db_only` mode and the fallback reason is surfaced in the API and dashboard instead of failing silently.
+
+---
+
+## Enterprise SSO / SAML
+
+AGR does not replace the current Clerk-based auth flow. Instead, it extends it:
+
+1. Configure the SAML connection in Clerk (or your equivalent provider).
+2. Store the IdP metadata and org mapping in AGR via `PUT /v1/org/sso`.
+3. AGR verifies the Clerk session server-side, resolves the organisation, and issues a short-lived `agr_usr_...` session token for dashboard/API use.
+
+```bash
+GET /v1/org/sso
+
+PUT /v1/org/sso
+{
+  "enabled": true,
+  "provider": "clerk_saml",
+  "metadata_url": "https://idp.example.com/metadata",
+  "entity_id": "urn:example:idp",
+  "domains": ["example.com"],
+  "default_role": "viewer",
+  "auto_join": false
+}
+```
+
+### Identity Mapping Rules
+
+- Existing `org_members` entries win and determine the final AGR role.
+- If `auto_join=true`, matching SSO identities can be provisioned automatically using the configured default role plus deterministic role hints from the provider claims.
+- If `auto_join=false`, the identity must already be an active or invited member.
+- Revoked members are denied even if the external identity is otherwise valid.
+
+Supported org hints are taken from Clerk session claims such as `organization_slug`, `organization_id`, `org_slug`, or matching configured email domains.
+
 ---
 
 ## Audit Log
@@ -174,6 +219,41 @@ Returns:
   "overall_pass": true
 }
 ```
+
+### Compliance Report Export
+
+```bash
+GET /v1/compliance/export?period_days=30&format=json
+GET /v1/compliance/export?period_days=30&format=pdf
+```
+
+- `json` is the primary export format.
+- `pdf` currently falls back to JSON unless your deployment already includes a PDF renderer.
+- Export is admin-only and tenant-isolated.
+- Report contents include org info, policy violations, risk summary, remediation steps, and audit trail summary.
+
+---
+
+## Usage Tracking and Soft Quotas
+
+```bash
+GET /v1/usage
+```
+
+Returns:
+
+- total evaluations for the org
+- per-agent usage breakdown
+- quota state: `ok`, `warning`, or `exceeded`
+- warning message when the configured threshold is crossed
+
+By default, quotas are soft-enforced:
+
+- evaluations continue past the limit
+- responses emit usage warning headers
+- the dashboard shows warning/exceeded state instead of abruptly blocking users
+
+If an organisation disables soft enforcement, the legacy `429 eval_limit_exceeded` behavior still applies.
 
 ---
 

@@ -12,6 +12,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { agentName, Agent } from '../../core/models/agent.model';
 import { AgentService } from '../../services/agent.service';
 import { PolicyService, SimulateResult } from '../../services/policy.service';
+import { ComplianceFindingsComponent } from '../../shared/components/compliance-findings/compliance-findings.component';
 import { RiskBreakdownComponent } from '../../shared/components/risk-breakdown/risk-breakdown.component';
 
 interface ContextEntry {
@@ -24,7 +25,7 @@ type DecisionTone = 'allow' | 'deny' | 'approval';
 @Component({
   selector: 'agr-policy-simulator',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, RiskBreakdownComponent],
+  imports: [CommonModule, FormsModule, RouterLink, RiskBreakdownComponent, ComplianceFindingsComponent],
   templateUrl: './policy-simulator.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })

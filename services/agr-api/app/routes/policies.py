@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -12,6 +13,7 @@ from app.config import settings
 from app.database import get_session
 from app.models import Policy, PolicyVersion
 from app.schemas import (
+    ComplianceFindingResponse,
     DecisionTrace,
     PolicyCreate,
     PolicyImportRequest,
@@ -23,6 +25,7 @@ from app.schemas import (
     SimulateResponse,
 )
 from app.services.cedar_service import evaluate_request
+from app.services.compliance_service import ComplianceContext, get_registry
 from app.services.policy_conflict_service import detect_conflicts
 from app.services.policy_import_service import export_policies, import_policies
 from app.services.redis_service import invalidate_org_eval_cache
@@ -241,6 +244,25 @@ async def simulate_policy(
                     f"Threshold is {settings.risk_thresholds_allow_max}."
                 )
 
+    compliance_findings: list[dict[str, object]] | None = None
+    try:
+        comp_result = await get_registry().run_all(
+            ComplianceContext(
+                org_id=str(org_id),
+                agent_id=body.agent_id,
+                action=body.action,
+                resource=body.resource,
+                context=body.context,
+                decision=result.decision,
+                risk_score=risk.score if risk else None,
+                risk_level=risk.level if risk else None,
+                risk_factors=risk.factors if risk else None,
+            )
+        )
+        compliance_findings = comp_result.to_dict() if comp_result.findings else None
+    except Exception as exc:
+        logger.warning("Compliance hooks failed during simulate (ignoring): %s", exc)
+
     return SimulateResponse(
         decision=result.decision,
         reason=result.reason,
@@ -248,6 +270,7 @@ async def simulate_policy(
         risk_score=risk.score if risk else None,
         risk_level=risk.level if risk else None,
         risk_factors=risk.factors if risk else None,
+        compliance_findings=cast(list[ComplianceFindingResponse] | None, compliance_findings),
         decision_trace=DecisionTrace(
             policy_source=result.policy_source,
             matched_policy_id=result.policy_id,

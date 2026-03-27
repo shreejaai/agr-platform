@@ -65,6 +65,19 @@ describe('PolicySimulatorComponent', () => {
       risk_score: 62,
       risk_level: 'medium',
       risk_factors: { sensitive_data: 30, action_severity: 32 },
+      compliance_findings: [
+        {
+          plugin: 'audit_trail_check',
+          standard: 'SOC2',
+          rule_id: 'CC6.1',
+          severity: 'warning',
+          message: 'Action is specific and auditable.',
+          passed: true,
+          remediation_steps: [],
+          severity_level: 'low',
+          compliance_score: 100,
+        },
+      ],
       decision_trace: {
         policy_source: 'cedar_cli',
         matched_policy_id: 'policy-123',
@@ -111,6 +124,22 @@ describe('PolicySimulatorComponent', () => {
       risk_score: 88,
       risk_level: 'high',
       risk_factors: { sensitive_data: 50, action_severity: 38 },
+      compliance_findings: [
+        {
+          plugin: 'audit_trail_check',
+          standard: 'EU_AI_ACT',
+          rule_id: 'ART-13',
+          severity: 'warning',
+          message: 'Agent ID is missing or too generic.',
+          passed: false,
+          remediation_steps: [
+            'Use a stable, descriptive `agent_id` instead of a generic identifier.',
+            'Register or update the agent metadata so audit records can identify the actor.',
+          ],
+          severity_level: 'high',
+          compliance_score: 38,
+        },
+      ],
       decision_trace: {
         policy_source: 'python_fallback',
         matched_policy_id: 'policy-deny-1',
@@ -136,5 +165,7 @@ describe('PolicySimulatorComponent', () => {
     expect(text).toContain('Denied by policy.');
     expect(text).toContain('policy-deny-1');
     expect(text).toContain('Fallback evaluator was used');
+    expect(text).toContain('Remediation steps');
+    expect(text).toContain('Use a stable, descriptive `agent_id` instead of a generic identifier.');
   });
 });

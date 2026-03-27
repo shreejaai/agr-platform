@@ -32,6 +32,25 @@ APPROVAL_RESPONSE = {
     "reason": "Requires human approval.",
 }
 
+COMPLIANCE_RESPONSE = {
+    **ALLOW_RESPONSE,
+    "compliance_findings": [
+        {
+            "plugin": "audit_trail_check",
+            "standard": "SOC2",
+            "rule_id": "CC6.1",
+            "severity": "warning",
+            "message": "Action is wildcard.",
+            "passed": False,
+            "remediation_steps": [
+                "Replace wildcard or empty actions with the exact operation name being requested."
+            ],
+            "severity_level": "medium",
+            "compliance_score": 61,
+        }
+    ],
+}
+
 
 def _make_transport(responses: list[tuple[int, dict]]):
     """Build a MockTransport that returns responses in order."""
@@ -77,6 +96,17 @@ class TestAsyncAGRClientEvaluate:
             result = await client.evaluate("agent1", "deploy", "prod")
         assert result.requires_approval is True
         assert result.approval_id == "appr-xyz"
+
+    @pytest.mark.asyncio
+    async def test_evaluate_preserves_enriched_compliance_findings(self):
+        transport = _make_transport([(200, COMPLIANCE_RESPONSE)])
+        async with AsyncAGRClient(
+            api_key="agr_sk_test", base_url="http://test", transport=transport
+        ) as client:
+            result = await client.evaluate("agent1", "deploy", "prod")
+        assert result.compliance_findings is not None
+        assert result.compliance_findings[0]["severity_level"] == "medium"
+        assert result.compliance_findings[0]["compliance_score"] == 61
 
     @pytest.mark.asyncio
     async def test_evaluate_raises_auth_error_on_401(self):

@@ -28,6 +28,8 @@ class ApprovalWorkflow:
     def __init__(self) -> None:
         self._decision: str | None = None
         self._reminder_sent: bool = False
+        self._status: str = "running"
+        self._escalation_target: str | None = None
 
     @workflow.run
     async def run(self, approval_id: str) -> str:
@@ -56,6 +58,7 @@ class ApprovalWorkflow:
                 self._reminder_sent = True
 
         if self._decision is not None:
+            self._status = "completed"
             return self._decision
 
         # Phase 2 — wait for remaining window
@@ -66,21 +69,38 @@ class ApprovalWorkflow:
                 timeout=remaining,
             )
         except TimeoutError:
+            self._status = "failed"
             workflow.logger.warning(
                 "Approval %s expired after %dh with no decision.",
                 approval_id,
                 _APPROVAL_TIMEOUT_HOURS,
             )
-            return "expired"
+            return "failed"
 
-        return self._decision or "expired"
+        self._status = "completed"
+        return self._decision or "failed"
 
     @workflow.signal
     def human_decision(self, decision: str) -> None:
         """Receive the human decision and unblock the workflow."""
         self._decision = decision
+        self._status = "completed"
+
+    @workflow.signal
+    def escalate(self, approver_email: str) -> None:
+        """Record that the workflow was escalated to a new approver."""
+        self._escalation_target = approver_email
+        if self._decision is None:
+            self._status = "escalated"
 
     @workflow.query
     def is_pending(self) -> bool:
         """Query whether the workflow is still waiting for a decision."""
         return self._decision is None
+
+    @workflow.query
+    def workflow_status(self) -> dict[str, str | None]:
+        return {
+            "status": self._status,
+            "escalation_target": self._escalation_target,
+        }

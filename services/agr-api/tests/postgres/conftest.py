@@ -59,6 +59,16 @@ _MIGRATION_FILES = [
     "013_status_check.sql",
     "014_audit_sequence_per_org.sql",
     "015_audit_agent_index.sql",
+    "016_copilot_history.sql",
+    "017_policy_state.sql",
+    "018_policy_versions.sql",
+    "019_org_roles.sql",
+    "020_agent_profile.sql",
+    "021_agent_capabilities.sql",
+    "022_org_risk_config.sql",
+    "023_approval_steps.sql",
+    "024_org_members.sql",
+    "025_enterprise_auth_usage_workflows.sql",
 ]
 
 

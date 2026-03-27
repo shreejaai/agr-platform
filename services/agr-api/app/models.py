@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
 )
@@ -35,8 +36,22 @@ class Organization(Base):
     eval_count: Mapped[int] = mapped_column(BigInteger, default=0)
     eval_limit: Mapped[int] = mapped_column(BigInteger, default=100)
     eval_week_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    eval_warning_threshold_pct: Mapped[int] = mapped_column(Integer, nullable=False, default=80)
+    eval_soft_limit_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    usage_soft_limit_warning_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    usage_last_warned_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # RBAC role for the org's API key: admin | operator | viewer
     role: Mapped[str] = mapped_column(Text, nullable=False, default="admin")
+    sso_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sso_provider: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sso_metadata_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sso_metadata_xml: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sso_entity_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sso_domains: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sso_default_role: Mapped[str] = mapped_column(Text, nullable=False, default="viewer")
+    sso_auto_join: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -122,6 +137,15 @@ class ApprovalRequest(Base):
     quorum_type: Mapped[str] = mapped_column(Text, nullable=False, default="any")
     sla_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     escalation_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    workflow_status: Mapped[str] = mapped_column(Text, nullable=False, default="running")
+    workflow_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    workflow_last_transition_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    workflow_fallback_mode: Mapped[str] = mapped_column(Text, nullable=False, default="none")
+    workflow_escalated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     organization: Mapped["Organization"] = relationship(back_populates="approval_requests")
     steps: Mapped[list["ApprovalStep"]] = relationship(
@@ -276,6 +300,41 @@ class OrgMember(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, default="invited")
     invited_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    token: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    identity_sub: Mapped[str] = mapped_column(Text, nullable=False)
+    identity_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    role: Mapped[str] = mapped_column(Text, nullable=False, default="viewer")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class EvaluationUsage(Base):
+    __tablename__ = "evaluation_usage"
+    __table_args__ = (UniqueConstraint("org_id", "agent_id", name="uq_evaluation_usage_org_agent"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    agent_id: Mapped[str] = mapped_column(Text, nullable=False)
+    total_evaluations: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    last_evaluated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

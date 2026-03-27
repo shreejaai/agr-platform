@@ -9,6 +9,7 @@ from app.services.compliance_service import (
     ComplianceRegistry,
     ComplianceResult,
     get_registry,
+    normalize_compliance_finding_payload,
     reset_registry,
 )
 
@@ -133,6 +134,71 @@ async def test_compliance_result_to_dict() -> None:
     assert len(dicts) == 1
     assert dicts[0]["plugin"] == "audit_trail"
     assert dicts[0]["passed"] is True
+    assert dicts[0]["remediation_steps"] == []
+    assert dicts[0]["severity_level"] == "low"
+    assert dicts[0]["compliance_score"] == 100
+
+
+@pytest.mark.asyncio
+async def test_registry_enriches_violations_with_guidance_and_scores() -> None:
+    registry = ComplianceRegistry()
+
+    class ActionViolationPlugin(CompliancePlugin):
+        @property
+        def name(self) -> str:
+            return "action_violation"
+
+        async def check(self, ctx: ComplianceContext) -> list[ComplianceFinding]:
+            return [
+                ComplianceFinding(
+                    plugin=self.name,
+                    standard="SOC2",
+                    rule_id="CC6.1",
+                    severity="warning",
+                    message="Action is wildcard.",
+                    passed=False,
+                )
+            ]
+
+    registry.register(ActionViolationPlugin())
+    result = await registry.run_all(
+        _ctx(
+            action="*",
+            risk_score=86,
+            risk_level="high",
+            risk_factors={"action_severity": 27, "rate_pattern": 0},
+        )
+    )
+
+    assert len(result.findings) == 1
+    finding = result.findings[0]
+    assert finding.severity_level == "high"
+    assert finding.compliance_score < 100
+    assert finding.remediation_steps[0] == (
+        "Replace wildcard or empty actions with the exact operation name being requested."
+    )
+
+
+def test_normalize_compliance_finding_payload_backfills_new_fields() -> None:
+    normalized = normalize_compliance_finding_payload(
+        {
+            "plugin": "audit_trail_check",
+            "standard": "EU_AI_ACT",
+            "rule_id": "ART-13",
+            "severity": "warning",
+            "message": "Agent ID is missing or too generic.",
+            "passed": False,
+        },
+        risk_score=78,
+        risk_level="high",
+        risk_factors={"agent_trust": 15, "context_signals": 8},
+    )
+
+    assert normalized["severity_level"] == "high"
+    assert normalized["compliance_score"] == 31
+    assert normalized["remediation_steps"][0] == (
+        "Use a stable, descriptive `agent_id` instead of a generic identifier."
+    )
 
 
 # ---------------------------------------------------------------------------

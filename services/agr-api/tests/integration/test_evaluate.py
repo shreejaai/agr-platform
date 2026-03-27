@@ -103,19 +103,20 @@ async def test_evaluate_returns_401_with_invalid_key(client: AsyncClient) -> Non
 
 
 @pytest.mark.asyncio
-async def test_evaluate_returns_429_when_limit_exceeded(
+async def test_evaluate_returns_429_when_limit_exceeded_in_hard_limit_mode(
     client: AsyncClient,
     auth_headers: dict[str, str],
     test_org: Organization,
     db_session: AsyncSession,
 ) -> None:
-    """POST /v1/evaluate returns 429 when eval_limit is exceeded."""
+    """POST /v1/evaluate returns 429 when soft enforcement is disabled."""
     await db_session.execute(
         update(Organization)
         .where(Organization.id == test_org.id)
         .values(
             eval_count=10000,
             eval_limit=10000,
+            eval_soft_limit_enabled=False,
             eval_week_start=datetime.now(UTC) - timedelta(hours=1),
         )
     )
@@ -137,6 +138,42 @@ async def test_evaluate_returns_429_when_limit_exceeded(
     detail = data["detail"]
     assert detail["error"] == "eval_limit_exceeded"
     assert "upgrade_url" in detail
+
+
+@pytest.mark.asyncio
+async def test_evaluate_soft_limit_warns_without_blocking(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    test_org: Organization,
+    db_session: AsyncSession,
+) -> None:
+    await db_session.execute(
+        update(Organization)
+        .where(Organization.id == test_org.id)
+        .values(
+            eval_count=2,
+            eval_limit=2,
+            eval_soft_limit_enabled=True,
+            eval_warning_threshold_pct=50,
+            eval_week_start=datetime.now(UTC) - timedelta(hours=1),
+        )
+    )
+    await db_session.commit()
+
+    response = await client.post(
+        "/v1/evaluate",
+        json={
+            "agent_id": "soft-limit-agent",
+            "action": "deploy",
+            "resource": "staging-server",
+            "context": {"environment": "staging"},
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["X-AGR-Usage-State"] == "exceeded"
+    assert response.headers["X-AGR-Usage-Warning"]
 
 
 @pytest.mark.asyncio
@@ -256,6 +293,34 @@ async def test_evaluate_trace_allow(client: AsyncClient, auth_headers: dict[str,
     assert trace["policy_source"] == "python_fallback"
     assert trace["cedar_decision"] == "ALLOW"
     assert trace["risk_override"] is False
+
+
+@pytest.mark.asyncio
+async def test_evaluate_returns_enriched_compliance_findings(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    response = await client.post(
+        "/v1/evaluate",
+        json={
+            "agent_id": "bot",
+            "action": "*",
+            "resource": "*",
+            "context": {},
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    findings = response.json()["compliance_findings"]
+    assert findings is not None
+
+    cc61 = next(finding for finding in findings if finding["rule_id"] == "CC6.1")
+    assert cc61["passed"] is False
+    assert cc61["severity_level"] == "medium"
+    assert 0 <= cc61["compliance_score"] < 100
+    assert cc61["remediation_steps"][0] == (
+        "Replace wildcard or empty actions with the exact operation name being requested."
+    )
 
 
 @pytest.mark.asyncio

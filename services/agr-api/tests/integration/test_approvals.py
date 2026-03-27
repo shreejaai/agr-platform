@@ -1,8 +1,14 @@
 """Integration tests for approval flow."""
 
+import uuid
+from datetime import UTC, datetime, timedelta
+
 import pytest
+from app.models import ApprovalRequest
 from app.services.notification_service import make_decision_token, verify_decision_token
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -97,6 +103,12 @@ async def test_get_approval_by_id(client: AsyncClient, auth_headers: dict[str, s
     assert data["status"] == "pending"
     assert data["action"] == "deploy"
     assert data["resource"] == "production-server"
+    assert data["workflow_status"] == "running"
+    assert data["workflow_fallback_mode"] in {
+        "none",
+        "db_only_temporal_unavailable",
+        "db_only_start_failed",
+    }
 
 
 @pytest.mark.asyncio
@@ -125,6 +137,7 @@ async def test_decide_approve(client: AsyncClient, auth_headers: dict[str, str])
     data = resp.json()
     assert data["status"] == "approved"
     assert data["decision_at"] is not None
+    assert data["workflow_status"] == "completed"
 
 
 @pytest.mark.asyncio
@@ -138,6 +151,7 @@ async def test_decide_reject(client: AsyncClient, auth_headers: dict[str, str]) 
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "rejected"
+    assert resp.json()["workflow_status"] == "completed"
 
 
 @pytest.mark.asyncio
@@ -207,6 +221,7 @@ async def test_email_decide_post_approves(
     get_resp = await client.get(f"/v1/approvals/{approval_id}", headers=auth_headers)
     assert get_resp.json()["status"] == "approved"
     assert get_resp.json()["decision_at"] is not None
+    assert get_resp.json()["workflow_status"] == "completed"
 
 
 @pytest.mark.asyncio
@@ -219,6 +234,7 @@ async def test_email_decide_post_rejects(client: AsyncClient, auth_headers: dict
 
     get_resp = await client.get(f"/v1/approvals/{approval_id}", headers=auth_headers)
     assert get_resp.json()["status"] == "rejected"
+    assert get_resp.json()["workflow_status"] == "completed"
 
 
 @pytest.mark.asyncio
@@ -240,6 +256,53 @@ async def test_email_decide_idempotent_on_already_resolved(
     # Already resolved → graceful 200, not 500
     assert second.status_code == 200
     assert "already" in second.text
+
+
+@pytest.mark.asyncio
+async def test_approval_escalation_updates_workflow_status(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    approval_id = await _trigger_approval(client, auth_headers)
+
+    response = await client.post(
+        f"/v1/approvals/{approval_id}/escalate",
+        json={"approver_email": "escalated@example.com"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "pending"
+    assert data["workflow_status"] == "escalated"
+    assert data["workflow_escalated_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_expired_approval_surfaces_failed_workflow_status(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    approval_id = await _trigger_approval(client, auth_headers)
+    approval = (
+        await db_session.execute(
+            select(ApprovalRequest).where(ApprovalRequest.id == uuid.UUID(approval_id))
+        )
+    ).scalar_one()
+    approval.expires_at = datetime.now(UTC) - timedelta(hours=1)
+    await db_session.commit()
+
+    response = await client.get(f"/v1/approvals/{approval_id}", headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["workflow_status"] == "failed"
+    assert data["workflow_fallback_mode"] in {
+        "timeout_enforced",
+        "db_only_temporal_unavailable",
+        "db_only_start_failed",
+    }
+    assert "expired" in (data["workflow_last_error"] or "").lower()
 
 
 # ---------------------------------------------------------------------------

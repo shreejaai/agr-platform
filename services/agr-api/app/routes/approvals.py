@@ -4,6 +4,7 @@ import html as _html
 import logging
 import uuid
 from datetime import UTC, datetime
+from typing import Literal, cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, Response
 from sqlalchemy import select
@@ -22,12 +23,21 @@ from app.schemas import (
 from app.services.audit_service import create_audit_event
 from app.services.notification_service import send_approval_email, verify_decision_token
 from app.services.redis_service import check_decide_rate_limit
-from app.services.temporal_service import signal_approval_workflow
+from app.services.temporal_service import signal_approval_escalation, signal_approval_workflow
 from app.services.webhook_service import fire_approval_webhook
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["approvals"])
+_VALID_WORKFLOW_STATUSES = frozenset({"running", "completed", "failed", "escalated"})
+
+
+def _normalize_workflow_status(
+    status: str,
+) -> Literal["running", "completed", "failed", "escalated"]:
+    if status in _VALID_WORKFLOW_STATUSES:
+        return cast(Literal["running", "completed", "failed", "escalated"], status)
+    return "running"
 
 
 def _to_response(a: ApprovalRequest) -> ApprovalResponse:
@@ -49,7 +59,45 @@ def _to_response(a: ApprovalRequest) -> ApprovalResponse:
         created_at=a.created_at,
         workflow_mode="temporal" if temporal_run_id else "db_only",
         temporal_run_id=str(temporal_run_id) if temporal_run_id else None,
+        workflow_status=_normalize_workflow_status(a.workflow_status),
+        workflow_last_error=a.workflow_last_error,
+        workflow_last_transition_at=a.workflow_last_transition_at,
+        workflow_fallback_mode=a.workflow_fallback_mode,
+        workflow_escalated_at=a.workflow_escalated_at,
     )
+
+
+async def _refresh_workflow_state(approval: ApprovalRequest, session: AsyncSession) -> None:
+    now = datetime.now(UTC)
+    changed = False
+
+    if approval.status in {"approved", "rejected"} and approval.workflow_status != "completed":
+        approval.workflow_status = "completed"
+        approval.workflow_last_transition_at = now
+        changed = True
+
+    expires = approval.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=UTC)
+    if (
+        approval.status == "pending"
+        and now > expires
+        and approval.workflow_status in {"running", "escalated"}
+    ):
+        approval.workflow_status = "failed"
+        timeout_message = "Approval expired without a recorded decision."
+        if approval.workflow_last_error:
+            if "expired" not in approval.workflow_last_error.lower():
+                approval.workflow_last_error = f"{approval.workflow_last_error}; {timeout_message}"
+        else:
+            approval.workflow_last_error = timeout_message
+        approval.workflow_last_transition_at = now
+        if approval.workflow_fallback_mode == "none":
+            approval.workflow_fallback_mode = "timeout_enforced"
+        changed = True
+
+    if changed:
+        await session.flush()
 
 
 async def _load_pending(
@@ -71,6 +119,7 @@ async def _load_pending(
     approval = result.scalar_one_or_none()
     if not approval:
         raise HTTPException(status_code=404, detail="Approval request not found.")
+    await _refresh_workflow_state(approval, session)
     if approval.status != "pending":
         raise HTTPException(
             status_code=409,
@@ -96,7 +145,13 @@ async def list_approvals(
         stmt = stmt.where(ApprovalRequest.status == status)
     stmt = stmt.order_by(ApprovalRequest.created_at.desc())
     result = await session.execute(stmt)
-    return [_to_response(a) for a in result.scalars().all()]
+    approvals = result.scalars().all()
+    for approval in approvals:
+        await _refresh_workflow_state(approval, session)
+    visible = approvals
+    if status == "pending":
+        visible = [approval for approval in approvals if approval.workflow_status != "failed"]
+    return [_to_response(a) for a in visible]
 
 
 # NOTE: must be registered before /{approval_id} so "decide" is not matched as a UUID
@@ -267,10 +322,16 @@ async def decide_via_email_post(
 
     approval.status = decision
     approval.decision_at = datetime.now(UTC)
+    approval.workflow_status = "completed"
+    approval.workflow_last_transition_at = approval.decision_at
     await session.flush()
 
     if approval.temporal_run_id:
-        await signal_approval_workflow(approval.temporal_run_id, decision)
+        signal_result = await signal_approval_workflow(approval.temporal_run_id, decision)
+        if not signal_result.delivered:
+            approval.workflow_fallback_mode = "signal_retry_exhausted"
+            approval.workflow_last_error = signal_result.error
+            await session.flush()
 
     await create_audit_event(
         session=session,
@@ -323,6 +384,7 @@ async def get_approval(
     approval = result.scalar_one_or_none()
     if not approval:
         raise HTTPException(status_code=404, detail="Approval request not found.")
+    await _refresh_workflow_state(approval, session)
     return _to_response(approval)
 
 
@@ -340,10 +402,16 @@ async def decide_approval(
 
     approval.status = body.decision
     approval.decision_at = datetime.now(UTC)
+    approval.workflow_status = "completed"
+    approval.workflow_last_transition_at = approval.decision_at
     await session.flush()
 
     if approval.temporal_run_id:
-        await signal_approval_workflow(approval.temporal_run_id, body.decision)
+        signal_result = await signal_approval_workflow(approval.temporal_run_id, body.decision)
+        if not signal_result.delivered:
+            approval.workflow_fallback_mode = "signal_retry_exhausted"
+            approval.workflow_last_error = signal_result.error
+            await session.flush()
 
     await create_audit_event(
         session=session,
@@ -384,10 +452,16 @@ async def approve_request(
 
     approval.status = "approved"
     approval.decision_at = datetime.now(UTC)
+    approval.workflow_status = "completed"
+    approval.workflow_last_transition_at = approval.decision_at
     await session.flush()
 
     if approval.temporal_run_id:
-        await signal_approval_workflow(approval.temporal_run_id, "approved")
+        signal_result = await signal_approval_workflow(approval.temporal_run_id, "approved")
+        if not signal_result.delivered:
+            approval.workflow_fallback_mode = "signal_retry_exhausted"
+            approval.workflow_last_error = signal_result.error
+            await session.flush()
 
     await create_audit_event(
         session=session,
@@ -428,10 +502,16 @@ async def reject_request(
 
     approval.status = "rejected"
     approval.decision_at = datetime.now(UTC)
+    approval.workflow_status = "completed"
+    approval.workflow_last_transition_at = approval.decision_at
     await session.flush()
 
     if approval.temporal_run_id:
-        await signal_approval_workflow(approval.temporal_run_id, "rejected")
+        signal_result = await signal_approval_workflow(approval.temporal_run_id, "rejected")
+        if not signal_result.delivered:
+            approval.workflow_fallback_mode = "signal_retry_exhausted"
+            approval.workflow_last_error = signal_result.error
+            await session.flush()
 
     await create_audit_event(
         session=session,
@@ -493,7 +573,30 @@ async def escalate_approval(
     approval.approver_email = body.approver_email
     # Invalidate old email tokens by bumping the version (H3)
     approval.token_version = (approval.token_version or 0) + 1
+    approval.workflow_status = "escalated"
+    approval.workflow_escalated_at = datetime.now(UTC)
+    approval.workflow_last_transition_at = approval.workflow_escalated_at
     await session.flush()
+    if approval.temporal_run_id:
+        signal_result = await signal_approval_escalation(
+            approval.temporal_run_id, body.approver_email
+        )
+        if not signal_result.delivered:
+            approval.workflow_fallback_mode = "signal_retry_exhausted"
+            approval.workflow_last_error = signal_result.error
+            await session.flush()
+
+    await create_audit_event(
+        session=session,
+        org_id=org_id,
+        event_type="APPROVAL_ESCALATED",
+        agent_id=approval.agent_id,
+        action=approval.action,
+        resource=approval.resource,
+        decision="APPROVAL_REQUIRED",
+        approval_id=approval.id,
+        payload={"approver_email": body.approver_email},
+    )
     # H1: send email as background task — don't block the response
     background_tasks.add_task(send_approval_email, approval)
     logger.info("Escalated approval %s to %s", approval_id, body.approver_email)

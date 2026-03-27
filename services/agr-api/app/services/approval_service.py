@@ -46,15 +46,21 @@ async def create_approval_request(
         status="pending",
         approver_email=approver_email,
         expires_at=datetime.now(UTC) + timedelta(hours=48),
+        workflow_status="running",
+        workflow_fallback_mode="none",
+        workflow_last_transition_at=datetime.now(UTC),
     )
     session.add(approval)
     await session.flush()
 
     # Start durable Temporal workflow (no-op if Temporal not configured)
-    workflow_id = await start_approval_workflow(approval.id)
-    if workflow_id:
-        approval.temporal_run_id = workflow_id
-        await session.flush()
+    workflow_start = await start_approval_workflow(approval.id)
+    approval.workflow_fallback_mode = workflow_start.fallback_mode
+    if workflow_start.error:
+        approval.workflow_last_error = workflow_start.error
+    if workflow_start.workflow_id:
+        approval.temporal_run_id = workflow_start.workflow_id
+    await session.flush()
 
     # S3: Slack fires as a background task so it runs after the transaction
     # commits. Calling it inline (before commit) caused phantom notifications
