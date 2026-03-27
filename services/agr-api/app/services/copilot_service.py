@@ -146,9 +146,7 @@ class CopilotService:
                 response = await self._register_agent_confirmed(
                     agent_id=str(data.get("agent_id", "")),
                     metadata=(
-                        data.get("metadata", {})
-                        if isinstance(data.get("metadata"), dict)
-                        else {}
+                        data.get("metadata", {}) if isinstance(data.get("metadata"), dict) else {}
                     ),
                 )
             elif resource_type == "webhook":
