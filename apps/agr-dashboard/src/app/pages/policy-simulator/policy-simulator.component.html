@@ -1,0 +1,149 @@
+<div class="p-6 max-w-3xl mx-auto space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold text-white">Policy Simulator</h1>
+    <p class="text-slate-400 mt-1">
+      Test a Cedar policy decision without side effects. No audit events are written.
+    </p>
+  </div>
+
+  <!-- Input form -->
+  <div class="card space-y-4">
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Agent ID</label>
+        <input
+          class="input w-full"
+          placeholder="my-langgraph-agent"
+          [ngModel]="agentId()"
+          (ngModelChange)="agentId.set($event)"
+        />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Action</label>
+        <input
+          class="input w-full"
+          placeholder="deploy"
+          [ngModel]="action()"
+          (ngModelChange)="action.set($event)"
+        />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Resource</label>
+        <input
+          class="input w-full"
+          placeholder="prod-database"
+          [ngModel]="resource()"
+          (ngModelChange)="resource.set($event)"
+        />
+      </div>
+    </div>
+
+    <!-- Context key/value builder -->
+    <div>
+      <label class="block text-sm font-medium text-slate-300 mb-2">Context</label>
+      <div class="space-y-2">
+        @for (entry of contextEntries(); track $index) {
+          <div class="flex gap-2 items-center">
+            <input
+              class="input flex-1"
+              placeholder="key"
+              [(ngModel)]="entry.key"
+            />
+            <input
+              class="input flex-1"
+              placeholder="value"
+              [(ngModel)]="entry.value"
+            />
+            @if (contextEntries().length > 1) {
+              <button
+                type="button"
+                class="text-slate-400 hover:text-red-400 transition-colors"
+                (click)="removeContextRow($index)"
+              >
+                ✕
+              </button>
+            }
+          </div>
+        }
+      </div>
+      <button
+        type="button"
+        class="mt-2 text-sm text-indigo-400 hover:text-indigo-300 transition-colors"
+        (click)="addContextRow()"
+      >
+        + Add context key
+      </button>
+    </div>
+
+    <button
+      class="btn-primary w-full sm:w-auto"
+      [disabled]="loading() || !agentId() || !action() || !resource()"
+      (click)="simulate()"
+    >
+      @if (loading()) { Simulating… } @else { Run Simulation }
+    </button>
+  </div>
+
+  <!-- Error -->
+  @if (error()) {
+    <div class="rounded-lg bg-red-900/30 border border-red-700 p-4 text-red-300">
+      {{ error() }}
+    </div>
+  }
+
+  <!-- Result -->
+  @if (result(); as r) {
+    <div class="card space-y-4">
+      <div class="flex items-center justify-between">
+        <span class="text-lg font-semibold text-white">Decision</span>
+        <span class="text-2xl font-bold" [ngClass]="decisionClass()">
+          {{ r.decision }}
+        </span>
+      </div>
+
+      <p class="text-slate-300">{{ r.reason }}</p>
+
+      @if (r.policy_id) {
+        <p class="text-xs text-slate-500">Matched policy: <code>{{ r.policy_id }}</code></p>
+      }
+
+      @if (r.risk_score !== null) {
+        <div class="flex items-center gap-4">
+          <div>
+            <span class="text-sm text-slate-400">Risk Score</span>
+            <div class="text-2xl font-bold text-white">
+              {{ r.risk_score }}<span class="text-base text-slate-400">/100</span>
+            </div>
+          </div>
+          @if (r.risk_level) {
+            <div>
+              <span class="text-sm text-slate-400">Level</span>
+              <div class="text-sm font-medium text-white uppercase">{{ r.risk_level }}</div>
+            </div>
+          }
+        </div>
+      }
+
+      @if (riskFactorEntries().length > 0) {
+        <div>
+          <p class="text-sm font-medium text-slate-300 mb-2">Risk Factors</p>
+          <div class="space-y-1">
+            @for (entry of riskFactorEntries(); track entry[0]) {
+              <div class="flex justify-between text-sm">
+                <span class="text-slate-400">{{ entry[0] }}</span>
+                <span class="text-white font-medium">{{ entry[1] }} pts</span>
+              </div>
+            }
+          </div>
+        </div>
+      }
+
+      @if (r.decision_trace) {
+        <details class="text-xs text-slate-500">
+          <summary class="cursor-pointer hover:text-slate-400">Decision trace</summary>
+          <pre class="mt-2 bg-slate-900 rounded p-3 overflow-auto">{{ r.decision_trace | json }}</pre>
+        </details>
+      }
+    </div>
+  }
+</div>

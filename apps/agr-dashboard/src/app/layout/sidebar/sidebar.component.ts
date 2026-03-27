@@ -10,8 +10,9 @@ const NAV_ITEMS = [
   { path: '/audit',     label: 'Audit Log', icon: '📋' },
   { path: '/agents',    label: 'Agents',    icon: '🤖' },
   { path: '/webhooks',  label: 'Webhooks',  icon: '⚡' },
-  { path: '/copilot',   label: 'Copilot',   icon: '✦' },
-  { path: '/settings',  label: 'Settings',  icon: '⚙' },
+  { path: '/copilot',    label: 'Copilot',    icon: '✦' },
+  { path: '/simulator', label: 'Simulator',  icon: '▶' },
+  { path: '/settings',  label: 'Settings',   icon: '⚙' },
 ];
 
 @Component({

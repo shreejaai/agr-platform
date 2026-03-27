@@ -36,6 +36,20 @@ export interface SimulateResponse {
   decision_trace: DecisionTrace;
 }
 
+export interface SimulateResult {
+  decision: 'ALLOW' | 'DENY' | 'APPROVAL_REQUIRED';
+  reason: string;
+  policy_id: string | null;
+  risk_score: number | null;
+  risk_level: string | null;
+  risk_factors: Record<string, number> | null;
+  decision_trace: {
+    policy_source: string;
+    cedar_decision: string;
+    risk_override: boolean;
+  } | null;
+}
+
 export interface PolicyVersion {
   version: number;
   cedar_rule: string;
@@ -91,5 +105,14 @@ export class PolicyService {
 
   rollback(policyId: string, version: number): Observable<Policy> {
     return this.http.post<Policy>(`/v1/policies/${policyId}/rollback`, { version });
+  }
+
+  simulatePolicy(payload: {
+    agent_id: string;
+    action: string;
+    resource: string;
+    context: Record<string, unknown>;
+  }): Observable<SimulateResult> {
+    return this.http.post<SimulateResult>('/v1/policies/simulate', payload);
   }
 }

@@ -59,6 +59,14 @@ export const routes: Routes = [
           import('./pages/copilot/copilot.component').then((m) => m.CopilotComponent),
       },
       {
+        path: 'simulator',
+        canActivate: [apiKeyGuard],
+        loadComponent: () =>
+          import('./pages/policy-simulator/policy-simulator.component').then(
+            (m) => m.PolicySimulatorComponent
+          ),
+      },
+      {
         path: 'settings',
         loadComponent: () =>
           import('./pages/settings/settings.component').then((m) => m.SettingsComponent),
