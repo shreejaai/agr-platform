@@ -1,4 +1,4 @@
-"""AGR Python SDK — evaluate(), wait_for_approval(), register_agent()."""
+"""AGR Python SDK — evaluate(), simulate(), wait_for_approval(), register_agent()."""
 
 import asyncio
 import logging
@@ -60,6 +60,42 @@ class EvaluationResult:
         return self.decision == "APPROVAL_REQUIRED"
 
 
+@dataclass
+class DecisionTrace:
+    policy_source: str | None
+    matched_policy_id: str | None
+    cedar_decision: str | None
+    risk_score: int | None = None
+    risk_level: str | None = None
+    risk_override: bool = False
+    fallback_used: bool = False
+    fallback_reason: str | None = None
+
+
+@dataclass
+class SimulationResult:
+    decision: str
+    reason: str
+    policy_id: str | None
+    risk_score: int | None = None
+    risk_level: str | None = None
+    risk_factors: dict[str, int] | None = None
+    compliance_findings: list[dict[str, object]] | None = None
+    decision_trace: DecisionTrace | None = None
+
+    @property
+    def allowed(self) -> bool:
+        return self.decision == "ALLOW"
+
+    @property
+    def denied(self) -> bool:
+        return self.decision == "DENY"
+
+    @property
+    def requires_approval(self) -> bool:
+        return self.decision == "APPROVAL_REQUIRED"
+
+
 def _get_required_str(data: dict[str, object], key: str) -> str:
     value = data.get(key)
     if isinstance(value, str):
@@ -86,6 +122,11 @@ def _get_optional_int(data: dict[str, object], key: str) -> int | None:
     if isinstance(value, bool):
         return None
     return value if isinstance(value, int) else None
+
+
+def _get_optional_bool(data: dict[str, object], key: str) -> bool | None:
+    value = data.get(key)
+    return value if isinstance(value, bool) else None
 
 
 def _get_optional_risk_factors(data: dict[str, object]) -> dict[str, int] | None:
@@ -133,6 +174,35 @@ def _parse_evaluation_result(data: dict[str, object]) -> EvaluationResult:
     )
 
 
+def _parse_decision_trace(data: object) -> DecisionTrace | None:
+    if not isinstance(data, dict):
+        return None
+
+    return DecisionTrace(
+        policy_source=_get_optional_str(data, "policy_source"),
+        matched_policy_id=_get_optional_str(data, "matched_policy_id"),
+        cedar_decision=_get_optional_str(data, "cedar_decision"),
+        risk_score=_get_optional_int(data, "risk_score"),
+        risk_level=_get_optional_str(data, "risk_level"),
+        risk_override=_get_optional_bool(data, "risk_override") or False,
+        fallback_used=_get_optional_bool(data, "fallback_used") or False,
+        fallback_reason=_get_optional_str(data, "fallback_reason"),
+    )
+
+
+def _parse_simulation_result(data: dict[str, object]) -> SimulationResult:
+    return SimulationResult(
+        decision=_get_required_str(data, "decision"),
+        reason=_get_required_str(data, "reason"),
+        policy_id=_get_optional_str(data, "policy_id"),
+        risk_score=_get_optional_int(data, "risk_score"),
+        risk_level=_get_optional_str(data, "risk_level"),
+        risk_factors=_get_optional_risk_factors(data),
+        compliance_findings=_get_optional_compliance_findings(data),
+        decision_trace=_parse_decision_trace(data.get("decision_trace")),
+    )
+
+
 def _raise_evaluate_error(response: httpx.Response) -> None:
     if response.status_code == 401:
         data = response.json()
@@ -169,6 +239,7 @@ class AGRClient:
         api_key: str | None = None,
         base_url: str = "https://api.agr.dev",
         timeout: float = 10.0,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.api_key = api_key or os.environ.get("AGR_API_KEY", "")
         if not self.api_key:
@@ -176,11 +247,14 @@ class AGRClient:
                 "API key is required. Pass api_key or set AGR_API_KEY environment variable."
             )
         self.base_url = base_url.rstrip("/")
-        self._client = httpx.Client(
-            base_url=self.base_url,
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            timeout=timeout,
-        )
+        kwargs: dict[str, object] = {
+            "base_url": self.base_url,
+            "headers": {"Authorization": f"Bearer {self.api_key}"},
+            "timeout": timeout,
+        }
+        if transport is not None:
+            kwargs["transport"] = transport
+        self._client = httpx.Client(**kwargs)  # type: ignore[arg-type]
 
     def evaluate(
         self,
@@ -207,6 +281,29 @@ class AGRClient:
         if not isinstance(data, dict):
             raise AGRError("AGR API error: invalid evaluation response.", status_code=500)
         return _parse_evaluation_result(data)
+
+    def simulate(
+        self,
+        agent: str,
+        action: str,
+        resource: str,
+        context: dict[str, object] | None = None,
+    ) -> SimulationResult:
+        """Simulate a policy decision without creating approvals or audit events."""
+        payload = {
+            "agent_id": agent,
+            "action": action,
+            "resource": resource,
+            "context": context or {},
+        }
+        response = self._client.post("/v1/policies/simulate", json=payload)
+        if response.status_code >= 400:
+            _raise_evaluate_error(response)
+
+        data = response.json()
+        if not isinstance(data, dict):
+            raise AGRError("AGR API error: invalid simulation response.", status_code=500)
+        return _parse_simulation_result(data)
 
     def wait_for_approval(
         self,
@@ -443,6 +540,29 @@ class AsyncAGRClient:
         if not isinstance(data, dict):
             raise AGRError("AGR API error: invalid evaluation response.", status_code=500)
         return _parse_evaluation_result(data)
+
+    async def simulate(
+        self,
+        agent: str,
+        action: str,
+        resource: str,
+        context: dict[str, object] | None = None,
+    ) -> SimulationResult:
+        """Simulate a policy decision without creating approvals or audit events."""
+        payload = {
+            "agent_id": agent,
+            "action": action,
+            "resource": resource,
+            "context": context or {},
+        }
+        response = await self._client.post("/v1/policies/simulate", json=payload)
+        if response.status_code >= 400:
+            _raise_evaluate_error(response)
+
+        data = response.json()
+        if not isinstance(data, dict):
+            raise AGRError("AGR API error: invalid simulation response.", status_code=500)
+        return _parse_simulation_result(data)
 
     async def wait_for_approval(
         self,

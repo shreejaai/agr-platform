@@ -8,6 +8,7 @@ import {
   PolicyImportItem,
   PolicyImportRequest,
   PolicyImportResponse,
+  PolicyTemplate,
 } from '../core/models/policy.model';
 import { ComplianceFinding } from '../core/models/compliance.model';
 
@@ -93,6 +94,10 @@ export class PolicyService {
 
   importPolicies(body: PolicyImportRequest): Observable<PolicyImportResponse> {
     return this.http.post<PolicyImportResponse>('/v1/policies/import', body);
+  }
+
+  listTemplates(): Observable<PolicyTemplate[]> {
+    return this.http.get<PolicyTemplate[]>('/v1/policies/templates');
   }
 
   exportPolicies(activeOnly = false): Observable<PolicyImportItem[]> {

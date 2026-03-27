@@ -32,6 +32,7 @@ python 06_risk_score_demo.py
 python 07_full_scenario_test.py
 python 08_async_evaluate.py
 python 09_async_concurrent_usage.py
+python 10_framework_policy_enforcer.py
 ```
 
 ## Script Reference
@@ -47,6 +48,7 @@ python 09_async_concurrent_usage.py
 | `07_full_scenario_test.py` | Automated pass/fail test suite (exit 0 = all pass) |
 | `08_async_evaluate.py` | Single async evaluation using `AsyncAGRClient` |
 | `09_async_concurrent_usage.py` | Concurrent evaluations over one shared async client |
+| `10_framework_policy_enforcer.py` | Generic `AGRPolicyEnforcer` wrapper for custom agent frameworks |
 
 ## Notes
 

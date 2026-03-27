@@ -1,8 +1,8 @@
 name: 'AGR Policy Validator'
 description: >
-  Validates Cedar policy files in your repository against the AGR API.
-  Reports syntax errors, policy conflicts, and dry-run evaluation results
-  as PR comments or step annotations.
+  Validates AGR policy files in your repository against the AGR API and local
+  policy engine. Reports syntax errors, policy conflicts, and evaluation-test
+  regressions as step annotations.
 
 author: 'Shreeja AI'
 
@@ -29,15 +29,35 @@ inputs:
 
   dry-run-agent:
     description: >
-      Optional agent_id used for dry-run evaluation of each policy.
-      If set, the action evaluates a sample request through the API
-      to confirm the policy has no unintended side effects.
+      Optional fallback agent_id for YAML-configured evaluation tests.
+      Used when an evaluation test omits the agent field.
     required: false
     default: ''
+
+  config-file:
+    description: >
+      Optional YAML config file for changed-only validation and evaluation tests.
+      Defaults to .agr-policy-check.yml when present.
+    required: false
+    default: '.agr-policy-check.yml'
+
+  changed-only:
+    description: >
+      Validate only policy files changed in the current pull request.
+      Requires checkout history deep enough for git diff.
+    required: false
+    default: 'false'
 
   fail-on-conflict:
     description: >
       Fail the action if policy conflict detection returns any conflicts.
+    required: false
+    default: 'true'
+
+  fail-on-violation:
+    description: >
+      Fail the action when YAML-configured evaluation tests do not match
+      their expected decisions.
     required: false
     default: 'true'
 
@@ -64,5 +84,8 @@ runs:
         AGR_BASE_URL: ${{ inputs.api-base-url }}
         POLICY_DIR: ${{ inputs.policy-dir }}
         DRY_RUN_AGENT: ${{ inputs.dry-run-agent }}
+        CONFIG_FILE: ${{ inputs.config-file }}
+        CHANGED_ONLY: ${{ inputs.changed-only }}
         FAIL_ON_CONFLICT: ${{ inputs.fail-on-conflict }}
+        FAIL_ON_VIOLATION: ${{ inputs.fail-on-violation }}
       run: python ${{ github.action_path }}/validate_policies.py

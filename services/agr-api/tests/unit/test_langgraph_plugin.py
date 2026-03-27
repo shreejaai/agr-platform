@@ -57,7 +57,7 @@ def test_approval_required_blocks_then_executes() -> None:
 
     result = my_tool(5)
     assert result == 10
-    client.wait_for_approval.assert_called_once_with("a1")
+    client.wait_for_approval.assert_called_once_with("a1", poll_interval=2.0, timeout=3600.0)
 
 
 def test_approval_rejected_raises_error() -> None:

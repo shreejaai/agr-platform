@@ -133,6 +133,58 @@ async def _load_pending(
     return approval
 
 
+async def _apply_decision(
+    approval: ApprovalRequest,
+    *,
+    decision: Literal["approved", "rejected"],
+    decided_by: str,
+    reason: str,
+    session: AsyncSession,
+    background_tasks: BackgroundTasks | None = None,
+) -> ApprovalRequest:
+    approval.status = decision
+    approval.decision_at = datetime.now(UTC)
+    approval.workflow_status = "completed"
+    approval.workflow_last_transition_at = approval.decision_at
+    await session.flush()
+
+    if approval.temporal_run_id:
+        signal_result = await signal_approval_workflow(approval.temporal_run_id, decision)
+        if not signal_result.delivered:
+            approval.workflow_fallback_mode = "signal_retry_exhausted"
+            approval.workflow_last_error = signal_result.error
+            await session.flush()
+
+    await create_audit_event(
+        session=session,
+        org_id=approval.org_id,
+        event_type=f"APPROVAL_{decision.upper()}",
+        agent_id=approval.agent_id,
+        action=approval.action,
+        resource=approval.resource,
+        decision=decision,
+        approval_id=approval.id,
+        payload={"decided_by": decided_by, "reason": reason},
+    )
+
+    webhook_args = (
+        approval.org_id,
+        f"approval.{decision}",
+        approval.id,
+        approval.agent_id,
+        approval.action,
+        approval.resource,
+        decided_by,
+        reason,
+    )
+    if background_tasks is not None:
+        background_tasks.add_task(fire_approval_webhook, *webhook_args)
+    else:
+        await fire_approval_webhook(*webhook_args)
+
+    return approval
+
+
 @router.get("/approvals", response_model=list[ApprovalResponse])
 async def list_approvals(
     request: Request,
@@ -399,42 +451,13 @@ async def decide_approval(
     """Unified approve/reject endpoint."""
     org_id: uuid.UUID = request.state.org_id
     approval = await _load_pending(approval_id, org_id, session)
-
-    approval.status = body.decision
-    approval.decision_at = datetime.now(UTC)
-    approval.workflow_status = "completed"
-    approval.workflow_last_transition_at = approval.decision_at
-    await session.flush()
-
-    if approval.temporal_run_id:
-        signal_result = await signal_approval_workflow(approval.temporal_run_id, body.decision)
-        if not signal_result.delivered:
-            approval.workflow_fallback_mode = "signal_retry_exhausted"
-            approval.workflow_last_error = signal_result.error
-            await session.flush()
-
-    await create_audit_event(
+    await _apply_decision(
+        approval,
+        decision=cast(Literal["approved", "rejected"], body.decision),
+        decided_by=body.decided_by,
+        reason=body.reason,
         session=session,
-        org_id=org_id,
-        event_type=f"APPROVAL_{body.decision.upper()}",
-        agent_id=approval.agent_id,
-        action=approval.action,
-        resource=approval.resource,
-        decision=body.decision,
-        approval_id=approval.id,
-        payload={"decided_by": body.decided_by, "reason": body.reason},
-    )
-
-    background_tasks.add_task(
-        fire_approval_webhook,
-        org_id,
-        f"approval.{body.decision}",
-        approval.id,
-        approval.agent_id,
-        approval.action,
-        approval.resource,
-        body.decided_by,
-        body.reason,
+        background_tasks=background_tasks,
     )
     return _to_response(approval)
 
@@ -449,42 +472,13 @@ async def approve_request(
 ) -> ApprovalResponse:
     org_id: uuid.UUID = request.state.org_id
     approval = await _load_pending(approval_id, org_id, session)
-
-    approval.status = "approved"
-    approval.decision_at = datetime.now(UTC)
-    approval.workflow_status = "completed"
-    approval.workflow_last_transition_at = approval.decision_at
-    await session.flush()
-
-    if approval.temporal_run_id:
-        signal_result = await signal_approval_workflow(approval.temporal_run_id, "approved")
-        if not signal_result.delivered:
-            approval.workflow_fallback_mode = "signal_retry_exhausted"
-            approval.workflow_last_error = signal_result.error
-            await session.flush()
-
-    await create_audit_event(
-        session=session,
-        org_id=org_id,
-        event_type="APPROVAL_APPROVED",
-        agent_id=approval.agent_id,
-        action=approval.action,
-        resource=approval.resource,
+    await _apply_decision(
+        approval,
         decision="approved",
-        approval_id=approval.id,
-        payload={"decided_by": body.decided_by, "reason": body.reason},
-    )
-
-    background_tasks.add_task(
-        fire_approval_webhook,
-        org_id,
-        "approval.approved",
-        approval.id,
-        approval.agent_id,
-        approval.action,
-        approval.resource,
-        body.decided_by,
-        body.reason,
+        decided_by=body.decided_by,
+        reason=body.reason,
+        session=session,
+        background_tasks=background_tasks,
     )
     return _to_response(approval)
 
@@ -499,42 +493,13 @@ async def reject_request(
 ) -> ApprovalResponse:
     org_id: uuid.UUID = request.state.org_id
     approval = await _load_pending(approval_id, org_id, session)
-
-    approval.status = "rejected"
-    approval.decision_at = datetime.now(UTC)
-    approval.workflow_status = "completed"
-    approval.workflow_last_transition_at = approval.decision_at
-    await session.flush()
-
-    if approval.temporal_run_id:
-        signal_result = await signal_approval_workflow(approval.temporal_run_id, "rejected")
-        if not signal_result.delivered:
-            approval.workflow_fallback_mode = "signal_retry_exhausted"
-            approval.workflow_last_error = signal_result.error
-            await session.flush()
-
-    await create_audit_event(
-        session=session,
-        org_id=org_id,
-        event_type="APPROVAL_REJECTED",
-        agent_id=approval.agent_id,
-        action=approval.action,
-        resource=approval.resource,
+    await _apply_decision(
+        approval,
         decision="rejected",
-        approval_id=approval.id,
-        payload={"decided_by": body.decided_by, "reason": body.reason},
-    )
-
-    background_tasks.add_task(
-        fire_approval_webhook,
-        org_id,
-        "approval.rejected",
-        approval.id,
-        approval.agent_id,
-        approval.action,
-        approval.resource,
-        body.decided_by,
-        body.reason,
+        decided_by=body.decided_by,
+        reason=body.reason,
+        session=session,
+        background_tasks=background_tasks,
     )
     return _to_response(approval)
 

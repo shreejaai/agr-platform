@@ -27,10 +27,12 @@ Compliance hooks (advisory — EU AI Act, SOC2, ISO 42001)
 - **Policy engine** — Cedar rules evaluated on every tool call. Python regex fallback if Cedar CLI not installed.
 - **Risk scoring** — Deterministic 0–100 score from 5 weighted factors. Upgrades ALLOW → APPROVAL_REQUIRED or DENY.
 - **Compliance hooks** — Advisory-only plugin framework. Built-in: EU AI Act Art.13, SOC2 CC6.1, ISO 42001 §8.4.
-- **Human-in-the-loop** — Approval requests → Temporal durable workflow → email + Slack one-click approve/reject.
+- **Human-in-the-loop** — Approval requests → Temporal durable workflow → email + verified Slack interactive approve/reject.
 - **Audit log** — SHA-256 hash-chained, append-only, monthly partitioned. Verifiable via `GET /v1/audit/verify`.
 - **Webhooks** — HMAC-SHA256 signed push on every approval decision (3× retry with backoff).
 - **Dashboard** — Angular 17 UI for policies, approvals, agents, audit log, webhooks.
+- **CLI** — Lightweight `agr` CLI for `eval`, `simulate`, and `policy apply` workflows.
+- **CI validation** — GitHub Action validates changed policies and runs evaluation scenarios from YAML.
 - **Policy packs** — Pre-built YAML policy sets for FinTech, DevOps, Healthcare/HIPAA, EU AI Act, and more.
 
 ---
@@ -201,6 +203,50 @@ def web_search(query: str) -> str:
     ...
 ```
 
+Generic framework hook:
+
+```python
+from agr import AGRPolicyEnforcer
+
+enforcer = AGRPolicyEnforcer(agr, agent_id="my-agent")
+
+@enforcer.wrap(
+    action="deploy",
+    resource="production-cluster",
+    context=lambda version: {"environment": "production", "release_version": version},
+)
+def deploy_release(version: str) -> str:
+    ...
+```
+
+---
+
+## CLI
+
+```bash
+pip install -e packages/agr-sdk-python
+pip install -e packages/agr-cli
+
+export AGR_API_KEY=agr_sk_your_key_here
+export AGR_BASE_URL=http://localhost:8000
+
+agr eval \
+  --agent deploy-bot \
+  --action deploy \
+  --resource production-cluster \
+  --context '{"environment":"production"}'
+
+agr simulate \
+  --agent finance-bot \
+  --action transfer_funds \
+  --resource treasury-system \
+  --context '{"amount":50000,"currency":"USD"}'
+
+agr policy apply \
+  --file examples/policy_packs/devops_controls.yaml \
+  --dry-run
+```
+
 ---
 
 ## TypeScript SDK
@@ -270,6 +316,44 @@ curl -X POST http://localhost:8000/v1/policies/import \
   --data-binary @examples/policy_packs/fintech.yaml
 ```
 
+List curated templates for dashboard import:
+
+```bash
+curl -H "Authorization: Bearer $AGR_KEY" \
+  http://localhost:8000/v1/policies/templates
+```
+
+---
+
+## GitHub Action
+
+Use the bundled action to validate changed policies and run evaluation scenarios in CI.
+
+```yaml
+name: AGR Policy Check
+
+on:
+  pull_request:
+    paths:
+      - 'policies/**'
+      - '**/*.cedar'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: shreejaai/agr-platform/tools/github-action@main
+        with:
+          api-key: ${{ secrets.AGR_API_KEY }}
+          policy-dir: policies/
+          config-file: .github/agr-policy-check.yml
+          changed-only: 'true'
+```
+
 ---
 
 ## Running tests
@@ -300,6 +384,7 @@ agr-platform/
 │   └── tests/postgres/     PostgreSQL integration tests (RLS, partitioning, JSONB)
 ├── packages/
 │   ├── agr-core/           Cedar policy engine + Python regex fallback
+│   ├── agr-cli/            Lightweight CLI package
 │   ├── agr-sdk-python/     Python SDK
 │   └── agr-sdk-ts/         TypeScript SDK (ESM + CJS)
 ├── infra/migrations/       Forward migrations 001–013
@@ -319,10 +404,13 @@ See [`.env.example`](.env.example) for the full reference.
 | `DATABASE_URL` | ✓ | PostgreSQL async connection string |
 | `SECRET_KEY` | ✓ | HMAC key for email tokens — `openssl rand -hex 32` |
 | `REDIS_URL` | — | Redis for eval cache + rate limiting |
+| `DASHBOARD_BASE_URL` | — | Dashboard URL used in Slack approval deep links |
 | `TEMPORAL_HOST` | — | Temporal server — empty = DB-only approvals |
 | `RESEND_API_KEY` | — | Resend — empty = approval emails disabled |
 | `SLACK_BOT_TOKEN` | — | Slack Bot Token — empty = Slack disabled |
 | `SLACK_CHANNEL_ID` | — | Slack channel ID — empty = Slack disabled |
+| `SLACK_SIGNING_SECRET` | — | Slack signing secret for interactive approve/reject |
+| `SLACK_TEAM_ID` | — | Optional Slack workspace/team ID allowlist |
 | `CLERK_WEBHOOK_SECRET` | — | Svix signature — empty = skip verify (dev-safe) |
 | `RISK_SCORING_ENABLED` | — | Enable risk scoring engine (default: `true`) |
 | `RISK_THRESHOLDS_ALLOW_MAX` | — | Max score for ALLOW (default: `30`) |

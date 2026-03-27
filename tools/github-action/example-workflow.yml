@@ -16,6 +16,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Validate Cedar policies with AGR
         uses: shreejaai/agr-platform/tools/github-action@main
@@ -23,4 +25,7 @@ jobs:
           api-key: ${{ secrets.AGR_API_KEY }}
           # api-base-url: https://api.agr.dev   # default
           policy-dir: policies/                  # directory containing .cedar files
+          config-file: .github/agr-policy-check.yml
+          changed-only: 'true'
           fail-on-conflict: 'true'
+          fail-on-violation: 'true'

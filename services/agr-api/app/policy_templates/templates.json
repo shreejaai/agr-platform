@@ -1,0 +1,92 @@
+[
+  {
+    "id": "safe-api-access",
+    "name": "Safe API access",
+    "description": "Govern outbound API traffic with explicit allowlists and approval gates for production write paths.",
+    "category": "api-governance",
+    "tags": ["api", "egress", "production", "allowlist"],
+    "policies": [
+      {
+        "name": "deny-unapproved-outbound-api-domains",
+        "level": "org",
+        "cedar_rule": "forbid(principal, action == Action::\"http_request\", resource) when { context has domain_trust && context.domain_trust == \"unapproved\" };",
+        "active": true,
+        "state": "active"
+      },
+      {
+        "name": "require-approval-for-production-api-writes",
+        "level": "org",
+        "cedar_rule": "forbid(principal, action == Action::\"http_request\", resource) when { context has environment && context.environment == \"production\" && context has request_mode && context.request_mode == \"write\" } unless { context has approval_status && context.approval_status == \"approved\" };",
+        "active": true,
+        "state": "active"
+      },
+      {
+        "name": "allow-approved-readonly-api-calls",
+        "level": "org",
+        "cedar_rule": "permit(principal, action == Action::\"http_request\", resource) when { context has domain_trust && context.domain_trust == \"approved\" && context has request_mode && context.request_mode == \"read\" };",
+        "active": true,
+        "state": "active"
+      }
+    ]
+  },
+  {
+    "id": "restricted-data-access",
+    "name": "Restricted data access",
+    "description": "Reduce data exfiltration risk with approval for sensitive reads and hard blocks on external export paths.",
+    "category": "data-governance",
+    "tags": ["data", "privacy", "exfiltration", "sensitive-access"],
+    "policies": [
+      {
+        "name": "require-approval-for-high-sensitivity-reads",
+        "level": "org",
+        "cedar_rule": "forbid(principal, action == Action::\"read_data\", resource) when { context has sensitivity && context.sensitivity == \"high\" } unless { context has approval_status && context.approval_status == \"approved\" };",
+        "active": true,
+        "state": "active"
+      },
+      {
+        "name": "deny-external-data-exports",
+        "level": "org",
+        "cedar_rule": "forbid(principal, action == Action::\"export_data\", resource) when { context has destination_zone && context.destination_zone == \"external\" };",
+        "active": true,
+        "state": "active"
+      },
+      {
+        "name": "deny-cross-team-sensitive-reads",
+        "level": "org",
+        "cedar_rule": "forbid(principal, action == Action::\"read_data\", resource) when { context has access_scope && context.access_scope == \"cross_team\" };",
+        "active": true,
+        "state": "active"
+      }
+    ]
+  },
+  {
+    "id": "approval-required-actions",
+    "name": "Approval-required actions",
+    "description": "Gate high-impact operational changes behind human sign-off without deeply coupling policy logic to one framework.",
+    "category": "operational-governance",
+    "tags": ["approval", "ops", "deploy", "change-management"],
+    "policies": [
+      {
+        "name": "require-approval-for-production-deploys",
+        "level": "org",
+        "cedar_rule": "forbid(principal, action == Action::\"deploy\", resource) when { context has environment && context.environment == \"production\" } unless { context has approval_status && context.approval_status == \"approved\" };",
+        "active": true,
+        "state": "active"
+      },
+      {
+        "name": "require-approval-for-shared-secret-rotation",
+        "level": "org",
+        "cedar_rule": "forbid(principal, action == Action::\"rotate_secret\", resource) when { context has system_tier && context.system_tier == \"shared\" } unless { context has approval_status && context.approval_status == \"approved\" };",
+        "active": true,
+        "state": "active"
+      },
+      {
+        "name": "require-approval-for-bulk-record-deletion",
+        "level": "org",
+        "cedar_rule": "forbid(principal, action == Action::\"delete_records\", resource) when { context has bulk_operation && context.bulk_operation == \"true\" } unless { context has approval_status && context.approval_status == \"approved\" };",
+        "active": true,
+        "state": "active"
+      }
+    ]
+  }
+]

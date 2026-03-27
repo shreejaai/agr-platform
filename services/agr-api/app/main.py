@@ -16,7 +16,18 @@ from app.database import async_session_factory
 from app.middleware.auth import AuthMiddleware
 from app.middleware.logging_mw import RequestIDFormatter, RequestLoggingMiddleware
 from app.models import Organization
-from app.routes import agents, approvals, audit, clerk, evaluate, health, org, policies, webhooks
+from app.routes import (
+    agents,
+    approvals,
+    audit,
+    clerk,
+    evaluate,
+    health,
+    org,
+    policies,
+    slack,
+    webhooks,
+)
 from app.routes.compliance import router as compliance_router
 from app.routes.copilot import router as copilot_router
 from app.routes.members import router as members_router
@@ -154,6 +165,7 @@ app.include_router(health.router)
 app.include_router(evaluate.router)
 app.include_router(policies.router)
 app.include_router(approvals.router)
+app.include_router(slack.router)
 app.include_router(audit.router)
 app.include_router(agents.router)
 app.include_router(clerk.router)
