@@ -19,6 +19,7 @@ import contextlib
 import hashlib
 import json
 import logging
+from typing import Literal, TypedDict
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -270,7 +271,12 @@ async def sync_eval_count_to_db(org_id: UUID) -> None:
 _COPILOT_CACHE_TTL = 3600  # 1 hour
 
 
-async def get_conversation_cache(conversation_id: str) -> list[dict[str, object]] | None:
+class ConversationCacheMessage(TypedDict):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+async def get_conversation_cache(conversation_id: str) -> list[ConversationCacheMessage] | None:
     """Return cached message list for a conversation, or None on miss/error."""
     r = _get_redis()
     if r is None:
@@ -284,16 +290,27 @@ async def get_conversation_cache(conversation_id: str) -> list[dict[str, object]
         loaded = _json.loads(raw)
         if not isinstance(loaded, list):
             return None
-        if not all(isinstance(item, dict) for item in loaded):
-            return None
-        return loaded
+
+        messages: list[ConversationCacheMessage] = []
+        for item in loaded:
+            if not isinstance(item, dict):
+                return None
+
+            role = item.get("role")
+            content = item.get("content")
+            if role not in {"user", "assistant"} or not isinstance(content, str):
+                return None
+
+            messages.append({"role": role, "content": content})
+
+        return messages
     except Exception:
         return None
 
 
 async def set_conversation_cache(
     conversation_id: str,
-    messages: list[dict[str, object]],
+    messages: list[ConversationCacheMessage],
 ) -> None:
     """Cache the full message list for a conversation (1 h TTL)."""
     r = _get_redis()
