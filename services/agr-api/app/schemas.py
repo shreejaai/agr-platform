@@ -651,6 +651,15 @@ class PolicyImportResponse(BaseModel):
     results: list[PolicyImportResult]
 
 
+class PolicyTemplateResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    category: str
+    tags: list[str] = Field(default_factory=list)
+    policies: list[PolicyImportItem] = Field(default_factory=list)
+
+
 class HealthResponse(BaseModel):
     status: str
 

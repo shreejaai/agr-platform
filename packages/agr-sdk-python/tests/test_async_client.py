@@ -51,6 +51,26 @@ COMPLIANCE_RESPONSE = {
     ],
 }
 
+SIMULATE_RESPONSE = {
+    "decision": "APPROVAL_REQUIRED",
+    "reason": "Simulation requires review.",
+    "policy_id": "policy-123",
+    "risk_score": 82,
+    "risk_level": "high",
+    "risk_factors": {"action_severity": 60, "context_signals": 22},
+    "compliance_findings": [],
+    "decision_trace": {
+        "policy_source": "python_fallback",
+        "matched_policy_id": "policy-123",
+        "cedar_decision": "ALLOW",
+        "risk_score": 82,
+        "risk_level": "high",
+        "risk_override": True,
+        "fallback_used": True,
+        "fallback_reason": "cedar_cli_not_found",
+    },
+}
+
 
 def _make_transport(responses: list[tuple[int, dict]]):
     """Build a MockTransport that returns responses in order."""
@@ -171,6 +191,27 @@ class TestAsyncAGRClientWaitForApproval:
         ) as client:
             with pytest.raises(TimeoutError):
                 await client.wait_for_approval("appr-1", poll_interval=0.01, timeout=0.05)
+
+
+class TestAsyncAGRClientSimulate:
+    @pytest.mark.asyncio
+    async def test_simulate_returns_typed_result(self):
+        transport = _make_transport([(200, SIMULATE_RESPONSE)])
+        async with AsyncAGRClient(
+            api_key="agr_sk_test", base_url="http://test", transport=transport
+        ) as client:
+            result = await client.simulate(
+                "agent1",
+                "deploy",
+                "prod-cluster",
+                {"environment": "production"},
+            )
+
+        assert result.requires_approval is True
+        assert result.risk_score == 82
+        assert result.decision_trace is not None
+        assert result.decision_trace.risk_override is True
+        assert result.decision_trace.fallback_reason == "cedar_cli_not_found"
 
 
 class TestAsyncAGRClientMisconfiguration:

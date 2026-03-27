@@ -21,6 +21,7 @@ UNPROTECTED_PATHS = {
     "/openapi.json",
     "/redoc",
     "/v1/approvals/decide",
+    "/v1/slack/interactivity",
     "/v1/clerk/webhook",
     "/v1/clerk/api-key",  # uses Clerk session JWT, not agr_sk_ key
 }

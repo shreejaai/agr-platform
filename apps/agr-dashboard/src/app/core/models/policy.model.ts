@@ -8,6 +8,7 @@ export interface Policy {
   cedar_rule: string;
   version: number;
   active: boolean;
+  state?: 'draft' | 'active' | 'archived';
   created_at: string;
   updated_at: string;
 }
@@ -31,6 +32,7 @@ export interface PolicyImportItem {
   level: 'org' | 'project' | 'agent';
   cedar_rule: string;
   active?: boolean;
+  state?: 'draft' | 'active' | 'archived';
   agent_id?: string | null;
   project_id?: string | null;
 }
@@ -56,4 +58,13 @@ export interface PolicyImportResponse {
   skipped: number;
   errors: number;
   results: PolicyImportResult[];
+}
+
+export interface PolicyTemplate {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  tags: string[];
+  policies: PolicyImportItem[];
 }

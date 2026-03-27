@@ -1,0 +1,29 @@
+policy_dir: policies
+changed_only: true
+fail_on_conflict: true
+fail_on_violation: true
+
+evaluation_tests:
+  - name: staging deploy stays allowed
+    agent: deploy-bot
+    action: deploy
+    resource: staging-cluster
+    context:
+      environment: staging
+    expect: ALLOW
+
+  - name: production deploy requires approval
+    agent: deploy-bot
+    action: deploy
+    resource: production-cluster
+    context:
+      environment: production
+    expect: APPROVAL_REQUIRED
+
+  - name: destructive db drop is denied
+    agent: db-admin-bot
+    action: db.drop
+    resource: production-db
+    context:
+      environment: production
+    expect: DENY

@@ -5,7 +5,7 @@ import { PolicyService, SimulateRequest, SimulateResponse } from '../../services
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { ComplianceFindingsComponent } from '../../shared/components/compliance-findings/compliance-findings.component';
 import { RiskBreakdownComponent } from '../../shared/components/risk-breakdown/risk-breakdown.component';
-import { Policy, PolicyCreate, PolicyImportResponse, PolicyImportResult } from '../../core/models/policy.model';
+import { Policy, PolicyCreate, PolicyImportResponse, PolicyImportResult, PolicyTemplate } from '../../core/models/policy.model';
 
 /** Friendly form fields — converted to PolicyCreate (cedar_rule) on submit. */
 interface PolicyForm {
@@ -118,6 +118,59 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
           <button (click)="openImport()" class="btn-secondary text-sm">Import</button>
           <button (click)="openCreate()" class="btn-primary text-sm">+ New policy</button>
         </div>
+      </div>
+
+      @if (templateActionMessage()) {
+        <div class="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+          {{ templateActionMessage() }}
+        </div>
+      }
+
+      @if (templateError()) {
+        <div class="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          {{ templateError() }}
+        </div>
+      }
+
+      <div class="card border border-slate-800">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <h2 class="text-base font-semibold text-slate-100">Template Library</h2>
+            <p class="text-sm text-slate-400 mt-1">Production-oriented starter packs for API governance, data access, and approval gates.</p>
+          </div>
+          <button (click)="loadTemplates()" class="btn-secondary text-sm" [disabled]="templatesLoading()">
+            {{ templatesLoading() ? 'Refreshing…' : 'Refresh templates' }}
+          </button>
+        </div>
+
+        @if (templatesLoading() && !templates().length) {
+          <p class="mt-4 text-sm text-slate-400">Loading template library…</p>
+        } @else {
+          <div class="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+            @for (template of templates(); track template.id) {
+              <article class="rounded-xl border border-slate-800 bg-slate-950/40 p-4 flex flex-col gap-4">
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between gap-3">
+                    <h3 class="text-sm font-semibold text-slate-100">{{ template.name }}</h3>
+                    <span class="text-[11px] uppercase tracking-wider text-slate-500">{{ template.category }}</span>
+                  </div>
+                  <p class="text-sm text-slate-400 leading-6">{{ template.description }}</p>
+                  <div class="flex flex-wrap gap-2">
+                    @for (tag of template.tags; track tag) {
+                      <span class="rounded-full border border-slate-700 px-2 py-0.5 text-[11px] text-slate-400">{{ tag }}</span>
+                    }
+                  </div>
+                </div>
+                <div class="mt-auto flex items-center justify-between gap-3">
+                  <span class="text-xs text-slate-500">{{ template.policies.length }} policies</span>
+                  <button class="btn-primary text-sm" (click)="importTemplate(template)">
+                    Import template
+                  </button>
+                </div>
+              </article>
+            }
+          </div>
+        }
       </div>
 
       <!-- Import Modal (full-screen overlay) -->
@@ -589,6 +642,10 @@ export class PoliciesComponent implements OnInit {
   readonly showForm = signal(false);
   readonly formError = signal('');
   readonly items = signal<Policy[]>([]);
+  readonly templates = signal<PolicyTemplate[]>([]);
+  readonly templatesLoading = signal(false);
+  readonly templateError = signal('');
+  readonly templateActionMessage = signal('');
   readonly editingPolicy = signal<Policy | null>(null);
 
   // Import state
@@ -622,9 +679,25 @@ export class PoliciesComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadList();
+    this.loadTemplates();
     if (this.route.snapshot.queryParamMap.get('onboarding') === 'sample') {
       this.openOnboardingSample();
     }
+  }
+
+  loadTemplates(): void {
+    this.templatesLoading.set(true);
+    this.templateError.set('');
+    this.svc.listTemplates().subscribe({
+      next: (templates) => {
+        this.templates.set(templates);
+        this.templatesLoading.set(false);
+      },
+      error: () => {
+        this.templateError.set('Failed to load policy templates.');
+        this.templatesLoading.set(false);
+      },
+    });
   }
 
   loadList(): void {
@@ -875,6 +948,23 @@ export class PoliciesComponent implements OnInit {
       error: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-500/15 text-red-400',
     };
     return map[status] ?? map['skipped'];
+  }
+
+  importTemplate(template: PolicyTemplate): void {
+    this.templateActionMessage.set('');
+    this.templateError.set('');
+    this.svc.importPolicies({ policies: template.policies, dry_run: false, overwrite: false }).subscribe({
+      next: (res) => {
+        this.templateActionMessage.set(
+          `${template.name}: ${res.created} created, ${res.updated} updated, ${res.skipped} skipped.`,
+        );
+        this.loadList();
+      },
+      error: (err) => {
+        const msg = err?.error?.detail ?? err?.error?.message ?? `Failed to import ${template.name}.`;
+        this.templateError.set(msg);
+      },
+    });
   }
 
   // --- Simulation ---

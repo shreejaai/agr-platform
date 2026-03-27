@@ -19,6 +19,7 @@ from app.schemas import (
     PolicyImportRequest,
     PolicyImportResponse,
     PolicyResponse,
+    PolicyTemplateResponse,
     PolicyUpdate,
     PolicyVersionResponse,
     SimulateRequest,
@@ -28,6 +29,7 @@ from app.services.cedar_service import evaluate_request
 from app.services.compliance_service import ComplianceContext, get_registry
 from app.services.policy_conflict_service import detect_conflicts
 from app.services.policy_import_service import export_policies, import_policies
+from app.services.policy_template_service import load_policy_templates
 from app.services.redis_service import invalidate_org_eval_cache
 from app.services.risk_service import RiskResult, compute_risk_score
 
@@ -195,6 +197,11 @@ async def bulk_export_policies(
         content={"policies": policies, "total": len(policies)},
         headers={"Content-Disposition": "attachment; filename=policies_export.json"},
     )
+
+
+@router.get("/policies/templates", response_model=list[PolicyTemplateResponse])
+async def list_policy_templates() -> list[PolicyTemplateResponse]:
+    return [PolicyTemplateResponse.model_validate(item) for item in load_policy_templates()]
 
 
 @router.post("/policies/simulate", response_model=SimulateResponse)

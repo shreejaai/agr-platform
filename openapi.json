@@ -328,6 +328,31 @@
         }
       }
     },
+    "/v1/policies/templates": {
+      "get": {
+        "tags": [
+          "policies"
+        ],
+        "summary": "List Policy Templates",
+        "operationId": "list_policy_templates_v1_policies_templates_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PolicyTemplateResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Policy Templates V1 Policies Templates Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/policies/simulate": {
       "post": {
         "tags": [
@@ -1188,6 +1213,25 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/slack/interactivity": {
+      "post": {
+        "tags": [
+          "approvals"
+        ],
+        "summary": "Handle Slack Interactivity",
+        "operationId": "handle_slack_interactivity_v1_slack_interactivity_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           }
@@ -5219,6 +5263,48 @@
           "updated_at"
         ],
         "title": "PolicyResponse"
+      },
+      "PolicyTemplateResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "policies": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyImportItem"
+            },
+            "type": "array",
+            "title": "Policies"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "category"
+        ],
+        "title": "PolicyTemplateResponse"
       },
       "PolicyUpdate": {
         "properties": {

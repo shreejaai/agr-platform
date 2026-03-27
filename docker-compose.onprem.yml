@@ -72,10 +72,13 @@ services:
       SECRET_KEY: ${SECRET_KEY}
       ENV: production
       API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
+      DASHBOARD_BASE_URL: ${DASHBOARD_BASE_URL:-http://localhost:4200}
       ONPREM_ORG_NAME: ${ORG_NAME:-My Organization}
       # Optional: Slack approvals
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_CHANNEL_ID: ${SLACK_CHANNEL_ID:-}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      SLACK_TEAM_ID: ${SLACK_TEAM_ID:-}
       # Optional: Email approvals
       RESEND_API_KEY: ${RESEND_API_KEY:-}
     ports:
