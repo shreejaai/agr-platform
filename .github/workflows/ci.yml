@@ -152,6 +152,42 @@ jobs:
         run: npm run build
         working-directory: packages/agr-sdk-ts
 
+  test-cedar-cli:
+    name: Cedar CLI — policy engine tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo bin
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cedar
+          key: cedar-cli-${{ runner.os }}-v1
+
+      - name: Install cedar-policy-cli
+        run: |
+          if ! command -v cedar &> /dev/null; then
+            cargo install cedar-policy-cli --locked
+          fi
+          cedar --version
+
+      - name: Install Python test dependencies
+        run: pip install pytest
+
+      - name: Run Cedar CLI tests
+        run: |
+          cd packages/agr-core
+          python -m pytest tests/test_cedar_cli.py -v
+
   # ── PostgreSQL integration tests ──────────────────────────────────────────
   # Runs against a real PostgreSQL 16 instance with all 15 migrations applied.
   # continue-on-error: true — failures are reported but do not block publish.
@@ -205,7 +241,7 @@ jobs:
     runs-on: ubuntu-latest
     # Only publish on pushes to main, not on PRs
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [lint-and-test, build-dashboard, test-ts-sdk]
+    needs: [lint-and-test, build-dashboard, test-ts-sdk, test-cedar-cli]
     permissions:
       contents: read
       packages: write
