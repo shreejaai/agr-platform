@@ -176,7 +176,7 @@ jobs:
       - name: Install cedar-policy-cli
         run: |
           if ! command -v cedar &> /dev/null; then
-            cargo install cedar-policy-cli --locked
+            cargo install cedar-policy-cli
           fi
           cedar --version
 

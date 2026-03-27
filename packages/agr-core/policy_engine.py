@@ -149,10 +149,12 @@ def _cedar_cli_authorize(
         )
 
     output = proc.stdout.strip()
-    if "ALLOW" in output:
-        return "ALLOW"
-    if "DENY" in output:
-        return "DENY"
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped == "ALLOW" or stripped.startswith("Decision: ALLOW"):
+            return "ALLOW"
+        if stripped == "DENY" or stripped.startswith("Decision: DENY"):
+            return "DENY"
     raise RuntimeError(
         f"Unexpected cedar output: stdout={proc.stdout!r} stderr={proc.stderr!r} "
         f"exit={proc.returncode}"
