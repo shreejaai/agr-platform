@@ -1,5 +1,7 @@
 """Integration tests for POST /v1/copilot/chat."""
 
+import sys
+import types
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,6 +11,16 @@ from app.config import settings as app_settings
 from app.models import Organization, Policy
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# ---------------------------------------------------------------------------
+# Inject a stub `anthropic` module so tests run without the real package.
+# The copilot service does `import anthropic` lazily inside _call_llm; we
+# need the module available in sys.modules BEFORE patching starts.
+# ---------------------------------------------------------------------------
+if "anthropic" not in sys.modules:
+    _stub = types.ModuleType("anthropic")
+    _stub.AsyncAnthropic = MagicMock  # type: ignore[attr-defined]
+    sys.modules["anthropic"] = _stub
 
 # ── Plan-gating tests (no LLM needed) ────────────────────────────────────────
 

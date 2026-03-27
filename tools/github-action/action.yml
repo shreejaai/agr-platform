@@ -1,0 +1,68 @@
+name: 'AGR Policy Validator'
+description: >
+  Validates Cedar policy files in your repository against the AGR API.
+  Reports syntax errors, policy conflicts, and dry-run evaluation results
+  as PR comments or step annotations.
+
+author: 'Shreeja AI'
+
+branding:
+  icon: 'shield'
+  color: 'purple'
+
+inputs:
+  api-key:
+    description: 'AGR API key (agr_sk_...). Store as a GitHub secret.'
+    required: true
+
+  api-base-url:
+    description: 'AGR API base URL. Defaults to https://api.agr.dev'
+    required: false
+    default: 'https://api.agr.dev'
+
+  policy-dir:
+    description: >
+      Directory containing .cedar or .yaml policy files to validate.
+      Defaults to the repository root.
+    required: false
+    default: '.'
+
+  dry-run-agent:
+    description: >
+      Optional agent_id used for dry-run evaluation of each policy.
+      If set, the action evaluates a sample request through the API
+      to confirm the policy has no unintended side effects.
+    required: false
+    default: ''
+
+  fail-on-conflict:
+    description: >
+      Fail the action if policy conflict detection returns any conflicts.
+    required: false
+    default: 'true'
+
+outputs:
+  validation-result:
+    description: 'JSON summary of validation results (valid | invalid | conflicts).'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install validator dependencies
+      shell: bash
+      run: pip install httpx pyyaml
+
+    - name: Run AGR policy validator
+      shell: bash
+      env:
+        AGR_API_KEY: ${{ inputs.api-key }}
+        AGR_BASE_URL: ${{ inputs.api-base-url }}
+        POLICY_DIR: ${{ inputs.policy-dir }}
+        DRY_RUN_AGENT: ${{ inputs.dry-run-agent }}
+        FAIL_ON_CONFLICT: ${{ inputs.fail-on-conflict }}
+      run: python ${{ github.action_path }}/validate_policies.py

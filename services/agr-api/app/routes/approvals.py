@@ -31,6 +31,7 @@ router = APIRouter(prefix="/v1", tags=["approvals"])
 
 
 def _to_response(a: ApprovalRequest) -> ApprovalResponse:
+    temporal_run_id = getattr(a, "temporal_run_id", None)
     return ApprovalResponse(
         id=str(a.id),
         org_id=str(a.org_id),
@@ -46,6 +47,8 @@ def _to_response(a: ApprovalRequest) -> ApprovalResponse:
         sla_hours=a.sla_hours,
         escalation_email=a.escalation_email,
         created_at=a.created_at,
+        workflow_mode="temporal" if temporal_run_id else "db_only",
+        temporal_run_id=str(temporal_run_id) if temporal_run_id else None,
     )
 
 

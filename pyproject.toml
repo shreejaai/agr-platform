@@ -14,10 +14,14 @@ ignore = ["B008", "N999"]
 
 [tool.ruff.lint.per-file-ignores]
 "packages/agr-sdk-python/agr/plugins/crewai.py" = ["N802"]
-"services/agr-api/app/routes/*" = ["TCH003"]
+"packages/agr-sdk-python/agr/__init__.py" = ["E501"]
+"services/agr-api/app/routes/*" = ["TCH003", "E501"]
+"services/agr-api/app/main.py" = ["E501"]
+"services/agr-api/app/schemas.py" = ["E501"]
 "examples/**" = ["E501", "T201"]
 "services/agr-api/tests/postgres/*" = ["TC002", "TC003", "E402", "E501"]
 "services/agr-api/app/services/copilot_prompts.py" = ["E501"]
+"tools/github-action/validate_policies.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

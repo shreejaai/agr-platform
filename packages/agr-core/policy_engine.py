@@ -33,6 +33,9 @@ class EvaluationResult:
     requires_approval: bool
     latency_ms: float
     policy_source: str = "python_fallback"  # "cedar_cli" | "python_fallback" | "no_policies"
+    # Explicit fallback tracking — always populated so callers can audit the engine path.
+    fallback_used: bool = False
+    fallback_reason: str | None = None  # reason Cedar CLI was not used (if fallback_used)
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +71,7 @@ def evaluate_policies(
             requires_approval=False,
             latency_ms=elapsed,
             policy_source="no_policies",
+            fallback_used=False,
         )
 
     cedar_binary = _find_cedar_cli()
@@ -77,12 +81,35 @@ def evaluate_policies(
                 cedar_binary, cedar_policies, agent_id, action, resource, context
             )
             result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
+            result.fallback_used = False
             return result
         except Exception as exc:
-            logger.warning("Cedar CLI evaluation failed, using Python fallback: %s", exc)
+            fallback_reason = f"cedar_cli_error: {exc}"
+            logger.warning(
+                "Cedar CLI evaluation failed — using Python fallback. "
+                "fallback_reason=%r agent_id=%r action=%r resource=%r",
+                fallback_reason,
+                agent_id,
+                action,
+                resource,
+            )
+            result = _python_evaluator(cedar_policies, agent_id, action, resource, context)
+            result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
+            result.fallback_used = True
+            result.fallback_reason = fallback_reason
+            return result
 
+    fallback_reason = "cedar_cli_not_found"
+    logger.debug(
+        "Cedar CLI not on PATH — using Python fallback. "
+        "Install cedar-policy-cli for authoritative enforcement. "
+        "fallback_reason=%r",
+        fallback_reason,
+    )
     result = _python_evaluator(cedar_policies, agent_id, action, resource, context)
     result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
+    result.fallback_used = True
+    result.fallback_reason = fallback_reason
     return result
 
 

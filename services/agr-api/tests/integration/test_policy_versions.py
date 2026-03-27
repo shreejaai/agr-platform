@@ -40,9 +40,7 @@ async def test_patch_cedar_rule_creates_snapshot(
         headers=auth_headers,
     )
 
-    versions_resp = await client.get(
-        f"/v1/policies/{policy_id}/versions", headers=auth_headers
-    )
+    versions_resp = await client.get(f"/v1/policies/{policy_id}/versions", headers=auth_headers)
     assert versions_resp.status_code == 200
     versions = versions_resp.json()
     assert len(versions) == 1
@@ -66,9 +64,7 @@ async def test_patch_name_creates_snapshot(
         headers=auth_headers,
     )
 
-    versions_resp = await client.get(
-        f"/v1/policies/{policy_id}/versions", headers=auth_headers
-    )
+    versions_resp = await client.get(f"/v1/policies/{policy_id}/versions", headers=auth_headers)
     assert len(versions_resp.json()) == 1
     assert versions_resp.json()[0]["name"] == "Original name"
 
@@ -90,9 +86,7 @@ async def test_no_change_patch_creates_no_snapshot(
         headers=auth_headers,
     )
 
-    versions_resp = await client.get(
-        f"/v1/policies/{policy_id}/versions", headers=auth_headers
-    )
+    versions_resp = await client.get(f"/v1/policies/{policy_id}/versions", headers=auth_headers)
     assert versions_resp.json() == []
 
 
@@ -113,9 +107,7 @@ async def test_multiple_patches_accumulate_versions(
             headers=auth_headers,
         )
 
-    versions_resp = await client.get(
-        f"/v1/policies/{policy_id}/versions", headers=auth_headers
-    )
+    versions_resp = await client.get(f"/v1/policies/{policy_id}/versions", headers=auth_headers)
     versions = versions_resp.json()
     assert len(versions) == 3
     # Returned newest-first (highest version number first)
@@ -135,9 +127,7 @@ async def test_versions_empty_for_unmodified_policy(
     policy = await _create_active(
         client, auth_headers, "Fresh", 'permit(principal, action == Action::"x", resource);'
     )
-    resp = await client.get(
-        f"/v1/policies/{policy['id']}/versions", headers=auth_headers
-    )
+    resp = await client.get(f"/v1/policies/{policy['id']}/versions", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -149,16 +139,12 @@ async def test_versions_returns_404_for_unknown_policy(
     """GET /versions returns 404 for a policy that doesn't exist."""
     import uuid
 
-    resp = await client.get(
-        f"/v1/policies/{uuid.uuid4()}/versions", headers=auth_headers
-    )
+    resp = await client.get(f"/v1/policies/{uuid.uuid4()}/versions", headers=auth_headers)
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_version_response_fields(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_version_response_fields(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     """Each version entry contains all required fields."""
     policy = await _create_active(
         client, auth_headers, "Field test", 'permit(principal, action == Action::"a", resource);'
@@ -171,9 +157,7 @@ async def test_version_response_fields(
         headers=auth_headers,
     )
 
-    versions = (
-        await client.get(f"/v1/policies/{policy_id}/versions", headers=auth_headers)
-    ).json()
+    versions = (await client.get(f"/v1/policies/{policy_id}/versions", headers=auth_headers)).json()
 
     v = versions[0]
     assert "id" in v
@@ -210,9 +194,7 @@ async def test_rollback_restores_cedar_rule(
     )
 
     # Rollback to version 1
-    rollback_resp = await client.post(
-        f"/v1/policies/{policy_id}/rollback/1", headers=auth_headers
-    )
+    rollback_resp = await client.post(f"/v1/policies/{policy_id}/rollback/1", headers=auth_headers)
     assert rollback_resp.status_code == 200
     data = rollback_resp.json()
     assert data["cedar_rule"] == original_rule
@@ -233,13 +215,11 @@ async def test_rollback_increments_version(
         json={"cedar_rule": 'permit(principal, action == Action::"v2", resource);'},
         headers=auth_headers,
     )
-    current_version = (
-        await client.get(f"/v1/policies/{policy_id}", headers=auth_headers)
-    ).json()["version"]
+    current_version = (await client.get(f"/v1/policies/{policy_id}", headers=auth_headers)).json()[
+        "version"
+    ]
 
-    rollback_resp = await client.post(
-        f"/v1/policies/{policy_id}/rollback/1", headers=auth_headers
-    )
+    rollback_resp = await client.post(f"/v1/policies/{policy_id}/rollback/1", headers=auth_headers)
     assert rollback_resp.json()["version"] == current_version + 1
 
 
@@ -264,9 +244,7 @@ async def test_rollback_snapshots_current_before_restore(
 
     await client.post(f"/v1/policies/{policy_id}/rollback/1", headers=auth_headers)
 
-    versions = (
-        await client.get(f"/v1/policies/{policy_id}/versions", headers=auth_headers)
-    ).json()
+    versions = (await client.get(f"/v1/policies/{policy_id}/versions", headers=auth_headers)).json()
     # Should now have: original v1 snapshot + pre-rollback v2 snapshot = 2
     assert len(versions) == 2
     version_numbers = {v["version"] for v in versions}
@@ -281,9 +259,7 @@ async def test_rollback_unknown_version_returns_404(
     policy = await _create_active(
         client, auth_headers, "No ver", 'permit(principal, action == Action::"x", resource);'
     )
-    resp = await client.post(
-        f"/v1/policies/{policy['id']}/rollback/99", headers=auth_headers
-    )
+    resp = await client.post(f"/v1/policies/{policy['id']}/rollback/99", headers=auth_headers)
     assert resp.status_code == 404
 
 
@@ -294,16 +270,12 @@ async def test_rollback_unknown_policy_returns_404(
     """POST /rollback returns 404 for a policy that doesn't exist."""
     import uuid
 
-    resp = await client.post(
-        f"/v1/policies/{uuid.uuid4()}/rollback/1", headers=auth_headers
-    )
+    resp = await client.post(f"/v1/policies/{uuid.uuid4()}/rollback/1", headers=auth_headers)
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_rollback_restores_state(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_rollback_restores_state(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     """Rollback restores the policy state (e.g., draft) from the snapshot."""
     # Create as draft, then activate, then rollback to draft state
     create_resp = await client.post(
@@ -329,8 +301,6 @@ async def test_rollback_restores_state(
     )
 
     # Snapshot should show state=active
-    versions = (
-        await client.get(f"/v1/policies/{policy_id}/versions", headers=auth_headers)
-    ).json()
+    versions = (await client.get(f"/v1/policies/{policy_id}/versions", headers=auth_headers)).json()
     assert len(versions) == 1
     assert versions[0]["state"] == "active"

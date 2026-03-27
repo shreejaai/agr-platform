@@ -26,6 +26,8 @@ export interface DecisionTrace {
   policy_source: string | null;
   cedar_decision: string | null;
   risk_override: boolean;
+  fallback_used: boolean;
+  fallback_reason: string | null;
 }
 
 export interface SimulateResponse {
@@ -43,11 +45,7 @@ export interface SimulateResult {
   risk_score: number | null;
   risk_level: string | null;
   risk_factors: Record<string, number> | null;
-  decision_trace: {
-    policy_source: string;
-    cedar_decision: string;
-    risk_override: boolean;
-  } | null;
+  decision_trace: DecisionTrace | null;
 }
 
 export interface PolicyVersion {

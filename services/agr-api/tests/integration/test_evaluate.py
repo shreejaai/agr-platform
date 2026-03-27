@@ -236,9 +236,7 @@ async def test_evaluate_deny_default_no_policies(
 
 
 @pytest.mark.asyncio
-async def test_evaluate_trace_allow(
-    client: AsyncClient, auth_headers: dict[str, str]
-) -> None:
+async def test_evaluate_trace_allow(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     """decision_trace is present and correct on an ALLOW response."""
     response = await client.post(
         "/v1/evaluate",

@@ -135,8 +135,16 @@ async def search_audit_events(
 
 
 _CSV_FIELDS = [
-    "id", "sequence_num", "event_type", "agent_id", "action",
-    "resource", "decision", "policy_id", "approval_id", "recorded_at",
+    "id",
+    "sequence_num",
+    "event_type",
+    "agent_id",
+    "action",
+    "resource",
+    "decision",
+    "policy_id",
+    "approval_id",
+    "recorded_at",
 ]
 _EXPORT_PAGE_SIZE = 1000
 _EXPORT_MAX_ROWS = 50_000
@@ -185,18 +193,20 @@ async def export_audit_events(
             buf = io.StringIO()
             writer = csv.DictWriter(buf, fieldnames=_CSV_FIELDS, extrasaction="ignore")
             for e in events:
-                writer.writerow({
-                    "id": str(e.id),
-                    "sequence_num": e.sequence_num,
-                    "event_type": e.event_type,
-                    "agent_id": e.agent_id,
-                    "action": e.action,
-                    "resource": e.resource,
-                    "decision": e.decision,
-                    "policy_id": str(e.policy_id) if e.policy_id else "",
-                    "approval_id": str(e.approval_id) if e.approval_id else "",
-                    "recorded_at": e.recorded_at.isoformat(),
-                })
+                writer.writerow(
+                    {
+                        "id": str(e.id),
+                        "sequence_num": e.sequence_num,
+                        "event_type": e.event_type,
+                        "agent_id": e.agent_id,
+                        "action": e.action,
+                        "resource": e.resource,
+                        "decision": e.decision,
+                        "policy_id": str(e.policy_id) if e.policy_id else "",
+                        "approval_id": str(e.approval_id) if e.approval_id else "",
+                        "recorded_at": e.recorded_at.isoformat(),
+                    }
+                )
             yield buf.getvalue()
             exported += len(events)
             page_offset += len(events)

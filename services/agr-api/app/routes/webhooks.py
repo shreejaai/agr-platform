@@ -24,13 +24,15 @@ from app.services.webhook_service import _sign_payload, retry_webhook_delivery
 
 router = APIRouter(prefix="/v1", tags=["webhooks"])
 
-_VALID_EVENTS = frozenset([
-    "approval.approved",
-    "approval.rejected",
-    "evaluation.completed",
-    "policy.changed",
-    "agent.updated",
-])
+_VALID_EVENTS = frozenset(
+    [
+        "approval.approved",
+        "approval.rejected",
+        "evaluation.completed",
+        "policy.changed",
+        "agent.updated",
+    ]
+)
 
 
 _SECRET_PLACEHOLDER = "agr_wh_••••••••"

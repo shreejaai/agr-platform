@@ -1,0 +1,49 @@
+# Pre-commit hooks for AGR Platform
+# Install: pip install pre-commit && pre-commit install
+# Run all manually: pre-commit run --all-files
+
+repos:
+  # ── Secret scanning ──────────────────────────────────────────────────────────
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+        name: Detect secrets (gitleaks)
+
+  # ── Python formatting and linting ────────────────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        name: ruff lint
+        args: [--fix]
+      - id: ruff-format
+        name: ruff format
+
+  # ── General hygiene ──────────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$'
+      - id: end-of-file-fixer
+        exclude: '\.md$'
+      - id: check-yaml
+      - id: check-json
+        exclude: 'tsconfig.*\.json$'   # tsconfig allows comments via tsc
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: detect-private-key
+        name: Detect private keys
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+
+  # ── TypeScript / Node ────────────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: ts-sdk-typecheck
+        name: TypeScript SDK type-check
+        language: system
+        entry: bash -c 'cd packages/agr-sdk-ts && npm run typecheck --if-present'
+        pass_filenames: false
+        files: '^packages/agr-sdk-ts/'

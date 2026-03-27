@@ -19,6 +19,7 @@ from app.models import Organization
 from app.routes import agents, approvals, audit, clerk, evaluate, health, org, policies, webhooks
 from app.routes.compliance import router as compliance_router
 from app.routes.copilot import router as copilot_router
+from app.routes.members import router as members_router
 from app.routes.risk_config import router as risk_config_router
 
 # Structured logging with request_id injected by RequestIDFormatter
@@ -118,11 +119,17 @@ app = FastAPI(
     contact={"name": "Shreeja AI", "url": "https://shreejaai.com"},
     openapi_tags=[
         {"name": "evaluate", "description": "Evaluate agent actions against Cedar policies."},
-        {"name": "policies", "description": "Create, update, simulate, import/export Cedar policies."},
+        {
+            "name": "policies",
+            "description": "Create, update, simulate, import/export Cedar policies.",
+        },
         {"name": "approvals", "description": "Manage human approval workflows."},
         {"name": "agents", "description": "Register and manage AI agents."},
         {"name": "audit", "description": "Query the hash-chained audit log."},
-        {"name": "org", "description": "Organization profile and usage stats."},
+        {
+            "name": "org",
+            "description": "Organization profile, usage stats, and team member management.",
+        },
         {"name": "webhooks", "description": "Configure outbound webhooks."},
         {"name": "compliance", "description": "Compliance posture and findings."},
         {"name": "risk", "description": "Per-org risk scoring configuration."},
@@ -154,3 +161,4 @@ app.include_router(org.router)
 app.include_router(copilot_router)
 app.include_router(risk_config_router)
 app.include_router(compliance_router)
+app.include_router(members_router)

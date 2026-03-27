@@ -108,33 +108,15 @@
       }
 
       @if (r.risk_score !== null) {
-        <div class="flex items-center gap-4">
-          <div>
-            <span class="text-sm text-slate-400">Risk Score</span>
-            <div class="text-2xl font-bold text-white">
-              {{ r.risk_score }}<span class="text-base text-slate-400">/100</span>
-            </div>
-          </div>
-          @if (r.risk_level) {
-            <div>
-              <span class="text-sm text-slate-400">Level</span>
-              <div class="text-sm font-medium text-white uppercase">{{ r.risk_level }}</div>
-            </div>
-          }
+        <div>
+          <p class="text-sm font-medium text-slate-300 mb-2">Risk Breakdown</p>
+          <app-risk-breakdown [data]="{ score: r.risk_score, level: r.risk_level, factors: r.risk_factors }" />
         </div>
       }
 
-      @if (riskFactorEntries().length > 0) {
-        <div>
-          <p class="text-sm font-medium text-slate-300 mb-2">Risk Factors</p>
-          <div class="space-y-1">
-            @for (entry of riskFactorEntries(); track entry[0]) {
-              <div class="flex justify-between text-sm">
-                <span class="text-slate-400">{{ entry[0] }}</span>
-                <span class="text-white font-medium">{{ entry[1] }} pts</span>
-              </div>
-            }
-          </div>
+      @if (r.decision_trace?.fallback_used) {
+        <div class="rounded-lg bg-yellow-900/30 border border-yellow-700 p-3 text-yellow-300 text-xs">
+          ⚠ Python fallback evaluator used (Cedar CLI not available). Results may differ from production.
         </div>
       }
 

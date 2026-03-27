@@ -7,6 +7,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PolicyService, SimulateResult } from '../../services/policy.service';
+import { RiskBreakdownComponent } from '../../shared/components/risk-breakdown/risk-breakdown.component';
 
 interface ContextEntry {
   key: string;
@@ -16,7 +17,7 @@ interface ContextEntry {
 @Component({
   selector: 'app-policy-simulator',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, RiskBreakdownComponent],
   templateUrl: './policy-simulator.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })

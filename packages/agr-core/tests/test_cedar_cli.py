@@ -7,7 +7,6 @@ CI job `test-cedar-cli` installs Cedar before running this file.
 import shutil
 
 import pytest
-
 from policy_engine import (
     _cedar_cli_authorize,
     _cedar_cli_evaluator,
@@ -57,9 +56,7 @@ class TestCedarCliAuthorize:
 
     def test_deny_deploy_blocks(self):
         cedar = _find_cedar_cli()
-        result = _cedar_cli_authorize(
-            cedar, [DENY_DEPLOY_POLICY], "agent1", "deploy", "prod", {}
-        )
+        result = _cedar_cli_authorize(cedar, [DENY_DEPLOY_POLICY], "agent1", "deploy", "prod", {})
         assert result == "DENY"
 
     def test_no_matching_policy_denies(self):
@@ -101,18 +98,14 @@ class TestCedarCliEvaluator:
 
     def test_deny_decision(self):
         cedar = _find_cedar_cli()
-        result = _cedar_cli_evaluator(
-            cedar, [DENY_DEPLOY_POLICY], "a1", "deploy", "prod", {}
-        )
+        result = _cedar_cli_evaluator(cedar, [DENY_DEPLOY_POLICY], "a1", "deploy", "prod", {})
         assert result.decision == "DENY"
         assert result.policy_source == "cedar_cli"
         assert result.requires_approval is False
 
     def test_approval_required_detected(self):
         cedar = _find_cedar_cli()
-        result = _cedar_cli_evaluator(
-            cedar, [APPROVAL_REQUIRED_POLICY], "a1", "deploy", "prod", {}
-        )
+        result = _cedar_cli_evaluator(cedar, [APPROVAL_REQUIRED_POLICY], "a1", "deploy", "prod", {})
         assert result.decision == "APPROVAL_REQUIRED"
         assert result.policy_source == "cedar_cli"
         assert result.requires_approval is True

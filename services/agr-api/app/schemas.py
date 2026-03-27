@@ -17,21 +17,38 @@ def _strip_ctrl(v: str) -> str:
 
 
 class EvaluateRequest(BaseModel):
-    agent_id: str = Field(..., min_length=1, max_length=256,
+    agent_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=256,
         description="Unique identifier for the agent making the request.",
-        examples=["langgraph-prod-agent-1"])
-    action: str = Field(..., min_length=1, max_length=256,
+        examples=["langgraph-prod-agent-1"],
+    )
+    action: str = Field(
+        ...,
+        min_length=1,
+        max_length=256,
         description="Action the agent wants to perform (maps to Cedar Action entity).",
-        examples=["deploy", "read_secret", "send_email"])
-    resource: str = Field(..., min_length=1, max_length=512,
+        examples=["deploy", "read_secret", "send_email"],
+    )
+    resource: str = Field(
+        ...,
+        min_length=1,
+        max_length=512,
         description="Resource identifier the action targets.",
-        examples=["prod-database", "customer-pii-bucket"])
+        examples=["prod-database", "customer-pii-bucket"],
+    )
     # M6: limit context to 50 keys to prevent DoS via huge payloads
-    context: dict[str, object] = Field(default_factory=dict,
+    context: dict[str, object] = Field(
+        default_factory=dict,
         description="Arbitrary context key/values evaluated in Cedar when clauses. Max 50 keys.",
-        examples=[{"env": "production", "region": "us-east-1"}])
-    approver_email: str | None = Field(default=None, max_length=256,
-        description="Override approver email for this specific request.")
+        examples=[{"env": "production", "region": "us-east-1"}],
+    )
+    approver_email: str | None = Field(
+        default=None,
+        max_length=256,
+        description="Override approver email for this specific request.",
+    )
 
     @field_validator("agent_id", "action", "resource")
     @classmethod
@@ -47,28 +64,64 @@ class EvaluateRequest(BaseModel):
 
 
 class DecisionTrace(BaseModel):
-    policy_source: str  # "cedar_cli" | "python_fallback" | "no_policies" | "cache"
+    policy_source: str = Field(
+        ...,
+        description=(
+            "Policy engine that produced the decision. "
+            "'cedar_cli' = authoritative Cedar binary; "
+            "'python_fallback' = regex approximation (dev/degraded mode); "
+            "'no_policies' = no active policies found; "
+            "'cache' = served from Redis cache."
+        ),
+    )
     matched_policy_id: str | None = None
-    cedar_decision: str  # raw Cedar/Python decision before risk override
+    cedar_decision: str = Field(
+        ...,
+        description="Raw policy engine decision before risk scoring could override it.",
+    )
     risk_score: int | None = None
     risk_level: str | None = None
-    risk_override: bool = False
+    risk_override: bool = Field(
+        default=False,
+        description="True when risk scoring upgraded the Cedar ALLOW to APPROVAL_REQUIRED or DENY.",
+    )
+    fallback_used: bool = Field(
+        default=False,
+        description=(
+            "True when the Python regex fallback was used instead of Cedar CLI. "
+            "Fallback results may differ from Cedar in edge cases — "
+            "install cedar-policy-cli for authoritative enforcement."
+        ),
+    )
+    fallback_reason: str | None = Field(
+        default=None,
+        description="Machine-readable reason Cedar CLI was not used (populated when fallback_used=true).",
+    )
 
 
 class EvaluateResponse(BaseModel):
     decision: str = Field(..., description="ALLOW | DENY | APPROVAL_REQUIRED", examples=["ALLOW"])
     reason: str = Field(..., description="Human-readable explanation of the decision.")
     policy_id: str | None = Field(default=None, description="UUID of the matching Cedar policy.")
-    approval_id: str | None = Field(default=None, description="UUID of the created approval (APPROVAL_REQUIRED only).")
+    approval_id: str | None = Field(
+        default=None, description="UUID of the created approval (APPROVAL_REQUIRED only)."
+    )
     latency_ms: float = Field(..., description="End-to-end evaluation latency in milliseconds.")
     eval_id: str = Field(..., description="Unique evaluation identifier for audit lookup.")
-    risk_score: int | None = Field(default=None, description="0-100 risk score. Higher = more risk.", ge=0, le=100)
+    risk_score: int | None = Field(
+        default=None, description="0-100 risk score. Higher = more risk.", ge=0, le=100
+    )
     risk_level: str | None = Field(default=None, description="low | medium | high | critical")
-    risk_factors: dict[str, int] | None = Field(default=None,
-        description="Per-factor risk contributions. Keys: action_severity, data_sensitivity, agent_trust, context_risk, time_risk.")
-    compliance_findings: list[dict[str, object]] | None = Field(default=None,
-        description="Advisory compliance findings (EU AI Act, SOC2, ISO42001).")
-    decision_trace: DecisionTrace | None = Field(default=None, description="Internal decision trace for debugging.")
+    risk_factors: dict[str, int] | None = Field(
+        default=None,
+        description="Per-factor risk contributions. Keys: action_severity, data_sensitivity, agent_trust, context_risk, time_risk.",
+    )
+    compliance_findings: list[dict[str, object]] | None = Field(
+        default=None, description="Advisory compliance findings (EU AI Act, SOC2, ISO42001)."
+    )
+    decision_trace: DecisionTrace | None = Field(
+        default=None, description="Internal decision trace for debugging."
+    )
 
 
 def _validate_cedar_rule(rule: str) -> str:
@@ -175,6 +228,20 @@ class ApprovalResponse(BaseModel):
     sla_hours: int | None = None
     escalation_email: str | None = None
     created_at: datetime
+    # Temporal observability — indicates whether a durable workflow is tracking this approval.
+    # "temporal"  — Temporal workflow is active (durable, survives restarts)
+    # "db_only"   — Temporal not configured; approval tracked by DB row only
+    workflow_mode: str = Field(
+        default="db_only",
+        description=(
+            "Workflow tracking mode: 'temporal' when a durable Temporal workflow "
+            "was started; 'db_only' when Temporal is not configured."
+        ),
+    )
+    temporal_run_id: str | None = Field(
+        default=None,
+        description="Temporal workflow ID (present when workflow_mode='temporal').",
+    )
 
 
 class ApprovalDecisionRequest(BaseModel):
@@ -341,13 +408,15 @@ class WebhookDeliveryResponse(BaseModel):
     created_at: datetime
 
 
-_VALID_WEBHOOK_EVENTS = frozenset([
-    "approval.approved",
-    "approval.rejected",
-    "evaluation.completed",
-    "policy.changed",
-    "agent.updated",
-])
+_VALID_WEBHOOK_EVENTS = frozenset(
+    [
+        "approval.approved",
+        "approval.rejected",
+        "evaluation.completed",
+        "policy.changed",
+        "agent.updated",
+    ]
+)
 
 
 def _validate_webhook_url(url: str) -> str:
@@ -597,3 +666,41 @@ class ConversationDetail(BaseModel):
     created_at: datetime
     updated_at: datetime
     messages: list[ConversationMessageOut]
+
+
+# ── Org member (team invite) schemas ─────────────────────────────────────────
+
+_VALID_MEMBER_ROLES = frozenset({"admin", "operator", "viewer"})
+
+
+class OrgMemberResponse(BaseModel):
+    id: str
+    org_id: str
+    email: str
+    role: str = Field(..., description="admin | operator | viewer")
+    status: str = Field(..., description="invited | active | revoked")
+    invited_by: str | None = None
+    joined_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class OrgMemberInviteRequest(BaseModel):
+    email: str = Field(
+        ...,
+        min_length=3,
+        max_length=256,
+        description="Email address of the person to invite.",
+        examples=["ops@example.com"],
+    )
+    role: str = Field(
+        default="viewer",
+        pattern=r"^(admin|operator|viewer)$",
+        description="Role to assign: admin | operator | viewer",
+    )
+
+
+class OrgMemberUpdateRequest(BaseModel):
+    role: str = Field(
+        ..., pattern=r"^(admin|operator|viewer)$", description="New role: admin | operator | viewer"
+    )

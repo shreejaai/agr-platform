@@ -67,6 +67,12 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'team',
+        canActivate: [apiKeyGuard],
+        loadComponent: () =>
+          import('./pages/team/team.component').then((m) => m.TeamComponent),
+      },
+      {
         path: 'settings',
         loadComponent: () =>
           import('./pages/settings/settings.component').then((m) => m.SettingsComponent),

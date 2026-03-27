@@ -60,9 +60,21 @@ async def start_approval_workflow(approval_id: UUID) -> str | None:
 
     Returns:
         The Temporal workflow ID if started, or None if Temporal is unavailable.
+
+    When Temporal is unavailable, the approval is tracked by DB row only.
+    This is a graceful degradation — the approval flow still works via email
+    token links and API polling, but lacks durable retry/timeout/reminder
+    semantics. Ops should monitor for TEMPORAL_UNAVAILABLE log entries.
     """
     client = await _get_client()
     if client is None:
+        logger.warning(
+            "Temporal unavailable — approval %s will be tracked by DB row only. "
+            "mode=db_only approval_id=%s "
+            "Set TEMPORAL_HOST to enable durable approval workflows.",
+            approval_id,
+            approval_id,
+        )
         return None
 
     try:

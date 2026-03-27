@@ -3,11 +3,9 @@
 Uses httpx.MockTransport to avoid real HTTP calls.
 """
 
-import pytest
 import httpx
-
-from agr.client import AsyncAGRClient, AGRError, AGRAuthError, AGRRateLimitError
-
+import pytest
+from agr.client import AGRAuthError, AGRError, AGRRateLimitError, AsyncAGRClient
 
 ALLOW_RESPONSE = {
     "decision": "ALLOW",
@@ -133,6 +131,7 @@ class TestAsyncAGRClientWaitForApproval:
     async def test_timeout_raises(self):
         def handler(request):
             return httpx.Response(200, json={"status": "pending"})
+
         transport = httpx.MockTransport(handler)
         async with AsyncAGRClient(
             api_key="agr_sk_test", base_url="http://test", transport=transport

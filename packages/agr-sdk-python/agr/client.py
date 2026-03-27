@@ -297,9 +297,7 @@ class AGRClient:
 
     def get_compliance_summary(self, period_days: int = 7) -> dict[str, object]:
         """Return aggregated compliance posture for the last N days."""
-        response = self._client.get(
-            "/v1/compliance/summary", params={"period_days": period_days}
-        )
+        response = self._client.get("/v1/compliance/summary", params={"period_days": period_days})
         if response.status_code >= 400:
             raise AGRError(
                 f"Failed to get compliance summary ({response.status_code}): {response.text}",

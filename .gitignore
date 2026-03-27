@@ -241,12 +241,24 @@ out/
 .DS_Store
 Thumbs.db
 
-# Documentation files — kept local, not committed
-# (Already-tracked files like README.md and AGR_CLAUDE.md are unaffected)
-*.md
+# Local scratch / personal notes — intentionally NOT committed
+# IMPORTANT: do NOT add *.md here — README.md, CLAUDE.md, docs/*.md are tracked
+# Add only files that should never be in git (personal scratch, binaries, etc.)
 *.docx
 *.doc
-*.pdf
+# Local PDF reports (generated exports)
+reports/*.pdf
+
+# Secrets — belt-and-suspenders (in addition to .env being ignored above)
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+secrets/
+.secrets/
+.gitleaks.toml.local
 
 # Claude Code
 .claude/worktrees/

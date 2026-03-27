@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { path: '/webhooks',  label: 'Webhooks',  icon: '⚡' },
   { path: '/copilot',    label: 'Copilot',    icon: '✦' },
   { path: '/simulator', label: 'Simulator',  icon: '▶' },
+  { path: '/team',      label: 'Team',       icon: '👥' },
   { path: '/settings',  label: 'Settings',   icon: '⚙' },
 ];
 
