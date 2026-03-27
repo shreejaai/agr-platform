@@ -17,7 +17,7 @@ from app.models import AuditEvent
 from app.schemas import AuditEventResponse, AuditSearchRequest, AuditVerifyResponse
 from app.services.audit_service import compute_entry_hash
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix="/v1", tags=["audit"])
 
 
 def _event_to_response(e: AuditEvent) -> AuditEventResponse:

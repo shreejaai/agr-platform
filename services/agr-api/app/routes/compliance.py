@@ -12,7 +12,7 @@ from app.database import get_session
 from app.models import AuditEvent
 from app.schemas import ComplianceSummaryResponse
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix="/v1", tags=["compliance"])
 
 _SAMPLE_LIMIT = 1000  # max recent events to sample for compliance analysis
 

@@ -103,8 +103,32 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="AGR — Agentic Governance Runtime",
-    description="Drop-in governance layer for AI agent frameworks.",
+    description=(
+        "Drop-in governance layer for AI agent frameworks. "
+        "Every agent tool call is evaluated against Cedar policies before execution. "
+        "Sensitive actions require human approval.\n\n"
+        "## Authentication\n\n"
+        "All endpoints (except `/v1/health`) require `Authorization: Bearer agr_sk_<key>` header.\n\n"
+        "## Decision Values\n\n"
+        "- `ALLOW` — agent may proceed\n"
+        "- `DENY` — action is blocked\n"
+        "- `APPROVAL_REQUIRED` — action is queued for human approval"
+    ),
     version="0.1.0",
+    contact={"name": "Shreeja AI", "url": "https://shreejaai.com"},
+    openapi_tags=[
+        {"name": "evaluate", "description": "Evaluate agent actions against Cedar policies."},
+        {"name": "policies", "description": "Create, update, simulate, import/export Cedar policies."},
+        {"name": "approvals", "description": "Manage human approval workflows."},
+        {"name": "agents", "description": "Register and manage AI agents."},
+        {"name": "audit", "description": "Query the hash-chained audit log."},
+        {"name": "org", "description": "Organization profile and usage stats."},
+        {"name": "webhooks", "description": "Configure outbound webhooks."},
+        {"name": "compliance", "description": "Compliance posture and findings."},
+        {"name": "risk", "description": "Per-org risk scoring configuration."},
+        {"name": "copilot", "description": "AI-powered policy authoring assistant."},
+        {"name": "health", "description": "Health and readiness check."},
+    ],
     lifespan=lifespan,
 )
 

@@ -27,7 +27,7 @@ from app.services.webhook_service import fire_approval_webhook
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix="/v1", tags=["approvals"])
 
 
 def _to_response(a: ApprovalRequest) -> ApprovalResponse:

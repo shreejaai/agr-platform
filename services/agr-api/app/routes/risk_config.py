@@ -11,7 +11,7 @@ from app.dependencies import require_role
 from app.models import OrgRiskConfig
 from app.schemas import OrgRiskConfigResponse, OrgRiskConfigUpdate
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix="/v1", tags=["risk"])
 
 _WEIGHT_FIELDS = [
     "weight_action_severity",

@@ -17,12 +17,21 @@ def _strip_ctrl(v: str) -> str:
 
 
 class EvaluateRequest(BaseModel):
-    agent_id: str = Field(..., min_length=1, max_length=256)
-    action: str = Field(..., min_length=1, max_length=256)
-    resource: str = Field(..., min_length=1, max_length=512)
+    agent_id: str = Field(..., min_length=1, max_length=256,
+        description="Unique identifier for the agent making the request.",
+        examples=["langgraph-prod-agent-1"])
+    action: str = Field(..., min_length=1, max_length=256,
+        description="Action the agent wants to perform (maps to Cedar Action entity).",
+        examples=["deploy", "read_secret", "send_email"])
+    resource: str = Field(..., min_length=1, max_length=512,
+        description="Resource identifier the action targets.",
+        examples=["prod-database", "customer-pii-bucket"])
     # M6: limit context to 50 keys to prevent DoS via huge payloads
-    context: dict[str, object] = Field(default_factory=dict)
-    approver_email: str | None = Field(default=None, max_length=256)
+    context: dict[str, object] = Field(default_factory=dict,
+        description="Arbitrary context key/values evaluated in Cedar when clauses. Max 50 keys.",
+        examples=[{"env": "production", "region": "us-east-1"}])
+    approver_email: str | None = Field(default=None, max_length=256,
+        description="Override approver email for this specific request.")
 
     @field_validator("agent_id", "action", "resource")
     @classmethod
@@ -47,17 +56,19 @@ class DecisionTrace(BaseModel):
 
 
 class EvaluateResponse(BaseModel):
-    decision: str
-    reason: str
-    policy_id: str | None = None
-    approval_id: str | None = None
-    latency_ms: float
-    eval_id: str
-    risk_score: int | None = None
-    risk_level: str | None = None
-    risk_factors: dict[str, int] | None = None
-    compliance_findings: list[dict[str, object]] | None = None
-    decision_trace: DecisionTrace | None = None
+    decision: str = Field(..., description="ALLOW | DENY | APPROVAL_REQUIRED", examples=["ALLOW"])
+    reason: str = Field(..., description="Human-readable explanation of the decision.")
+    policy_id: str | None = Field(default=None, description="UUID of the matching Cedar policy.")
+    approval_id: str | None = Field(default=None, description="UUID of the created approval (APPROVAL_REQUIRED only).")
+    latency_ms: float = Field(..., description="End-to-end evaluation latency in milliseconds.")
+    eval_id: str = Field(..., description="Unique evaluation identifier for audit lookup.")
+    risk_score: int | None = Field(default=None, description="0-100 risk score. Higher = more risk.", ge=0, le=100)
+    risk_level: str | None = Field(default=None, description="low | medium | high | critical")
+    risk_factors: dict[str, int] | None = Field(default=None,
+        description="Per-factor risk contributions. Keys: action_severity, data_sensitivity, agent_trust, context_risk, time_risk.")
+    compliance_findings: list[dict[str, object]] | None = Field(default=None,
+        description="Advisory compliance findings (EU AI Act, SOC2, ISO42001).")
+    decision_trace: DecisionTrace | None = Field(default=None, description="Internal decision trace for debugging.")
 
 
 def _validate_cedar_rule(rule: str) -> str:

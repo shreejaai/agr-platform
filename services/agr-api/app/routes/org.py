@@ -11,7 +11,7 @@ from app.schemas import OrgMeResponse
 if TYPE_CHECKING:
     from app.models import Organization
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix="/v1", tags=["org"])
 
 
 @router.get("/org/me", response_model=OrgMeResponse)

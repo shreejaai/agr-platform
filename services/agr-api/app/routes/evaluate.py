@@ -35,7 +35,7 @@ from app.services.risk_service import RiskResult, compute_risk_score
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix="/v1", tags=["evaluate"])
 
 
 @router.post(

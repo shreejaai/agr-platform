@@ -10,7 +10,7 @@ from app.database import get_session
 from app.models import Agent
 from app.schemas import AgentRegisterRequest, AgentResponse, AgentUpdateRequest
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix="/v1", tags=["agents"])
 
 
 def _to_response(agent: Agent) -> AgentResponse:
