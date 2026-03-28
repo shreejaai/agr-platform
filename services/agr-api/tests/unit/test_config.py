@@ -6,7 +6,8 @@ def test_validate_production_settings_allows_wildcard_cors_with_real_secret() ->
         env="production",
         cors_origins=["*"],
     )
-    setattr(settings, "secret_key", "replace-me")
+    safe_secret = "replace-me"
+    settings.secret_key = safe_secret
 
     settings.validate_production_settings()
 

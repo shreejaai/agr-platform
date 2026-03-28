@@ -80,13 +80,12 @@ class Settings(BaseSettings):
         Called at app startup in main.py lifespan so the process refuses to
         start rather than silently running with insecure config.
         """
-        if self.env == "production":
+        if self.env == "production" and "dev-secret-key" in self.secret_key:
             # S2: a predictable secret_key lets attackers forge approval tokens
-            if "dev-secret-key" in self.secret_key:
-                raise RuntimeError(
-                    "SECRET_KEY must be changed for production. "
-                    'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
-                )
+            raise RuntimeError(
+                "SECRET_KEY must be changed for production. "
+                'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+            )
 
 
 settings = Settings()
