@@ -22,8 +22,8 @@ import os
 
 import httpx
 
-BASE_URL = os.environ.get("AGR_BASE_URL", "http://localhost:8000")
-API_KEY = os.environ.get("AGR_API_KEY", "agr_sk_YOUR_KEY_HERE")
+BASE_URL = os.environ.get("AGR_BASE_URL", "http://34.133.62.129:8000")
+API_KEY = os.environ.get("AGR_API_KEY", "agr_sk_cb715edc684f771e159257b449189a231aeeb8a69c419fd9")
 
 if not API_KEY:
     raise SystemExit("Set AGR_API_KEY first")
@@ -315,6 +315,11 @@ async def get_req(client: httpx.AsyncClient, path: str) -> dict:
     return r.json()
 
 
+async def delete_req(client: httpx.AsyncClient, path: str) -> int:
+    r = await client.delete(f"{BASE_URL}{path}", headers=HEADERS, timeout=30)
+    return r.status_code
+
+
 async def seed() -> None:
     async with httpx.AsyncClient() as client:
         # ── 1. Health ─────────────────────────────────────────────────────────
@@ -324,6 +329,24 @@ async def seed() -> None:
         print(f"  Status: {status}")
         if status not in ("ok", "healthy"):
             print("  ⚠  API may not be running — check docker compose up")
+
+        # ── 1b. Wipe existing policies (archive all) to avoid stale policies ──
+        # overwrite=True only updates by name — old policies with old names persist
+        # and can interfere (e.g., hard-deny rules from a previous seed version).
+        existing = await get_req(client, "/v1/policies?state=active")
+        old_policies = existing if isinstance(existing, list) else []
+        if old_policies:
+            print(f"  Archiving {len(old_policies)} existing policies...")
+            archived = 0
+            for p in old_policies:
+                pid = p.get("id")
+                if pid:
+                    code = await delete_req(client, f"/v1/policies/{pid}")
+                    if code in (200, 204):
+                        archived += 1
+            print(f"  ✓ Archived {archived} stale policies")
+        else:
+            print("  ✓ No existing policies to wipe")
 
         # ── 2. Bulk import policies via /v1/policies/import ───────────────────
         banner("2/5  Importing Cedar policies (bulk, state=active)")

@@ -160,6 +160,7 @@ async def import_policies(
                 existing.cedar_rule = item.cedar_rule
                 existing.level = item.level
                 existing.active = item.active
+                existing.state = item.state
                 if item.project_id is not None:
                     existing.project_id = item.project_id
                 if item.agent_id is not None:
