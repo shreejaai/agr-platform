@@ -1,0 +1,16 @@
+# Production image overrides for GCP deployment.
+# Used as: docker compose -f docker-compose.yml -f deploy/docker-compose.gcp.yml
+# Pulls pre-built images from ghcr.io instead of building locally.
+
+services:
+  agr-api:
+    image: ghcr.io/shreejaai/agr-api:latest
+    build: !reset null
+
+  agr-dashboard:
+    image: ghcr.io/shreejaai/agr-dashboard:latest
+    build: !reset null
+
+  temporal-worker:
+    image: ghcr.io/shreejaai/agr-api:latest
+    build: !reset null

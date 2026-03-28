@@ -104,16 +104,45 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  temporal:
+    profiles: ["temporal"]
+    image: temporalio/auto-setup:1.24
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgresql
+      DB_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-agr_svc_usr}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD}
+      POSTGRES_SEEDS: postgres
+      TEMPORAL_ADDRESS: 0.0.0.0:7233
+    ports:
+      - "7233:7233"
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "localhost:7233", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+    restart: unless-stopped
+
+  temporal-ui:
+    profiles: ["temporal"]
+    image: temporalio/ui:2.26.2
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8080
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
   # ── Temporal Approval Worker (optional) ────────────────────────────────────
-  # Processes durable 48h approval workflows. Only starts when the "temporal"
-  # profile is active AND TEMPORAL_HOST is set.
-  #
-  # Usage:
-  #   TEMPORAL_HOST=localhost:7233 docker compose --profile temporal up
-  #
-  # Run Temporal locally:
-  #   brew install temporal && temporal server start-dev
-  # Or use Temporal Cloud: https://temporal.io/cloud
+  # Processes durable 48h approval workflows. Starts alongside the in-stack
+  # Temporal server when the "temporal" profile is active.
 
   temporal-worker:
     profiles: ["temporal"]
@@ -127,14 +156,13 @@ services:
       REDIS_URL: redis://redis:6379
       SECRET_KEY: ${SECRET_KEY:-4e993a8cbcb458e9823be7cc7215d42a57e1e56a3f90e8cdaa9334e9930d8dbf}
       ENV: ${ENV:-development}
-      # Use host.docker.internal:7233 (not localhost) when Temporal runs on your Mac/host
-      TEMPORAL_HOST: ${TEMPORAL_HOST:-host.docker.internal:7233}
+      TEMPORAL_HOST: ${TEMPORAL_HOST:-temporal:7233}
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
       CEDAR_FALLBACK_MODE: ${CEDAR_FALLBACK_MODE:-deny}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"  # resolves to host IP on Linux; no-op on Mac
     depends_on:
       agr-api:
+        condition: service_healthy
+      temporal:
         condition: service_healthy
     restart: unless-stopped
 
