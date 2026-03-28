@@ -120,7 +120,7 @@ services:
     ports:
       - "7233:7233"
     healthcheck:
-      test: ["CMD", "tctl", "--address", "localhost:7233", "cluster", "health"]
+      test: ["CMD-SHELL", "nc -z localhost 7233 || exit 1"]
       interval: 10s
       timeout: 5s
       start_period: 30s
