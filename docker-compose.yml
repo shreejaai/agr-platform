@@ -117,7 +117,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-agr_svc_usr}
       POSTGRES_PWD: ${POSTGRES_PASSWORD}
       POSTGRES_SEEDS: postgres
-      TEMPORAL_ADDRESS: 0.0.0.0:7233
+      BIND_ON_IP: 0.0.0.0
     ports:
       - "7233:7233"
     healthcheck:
