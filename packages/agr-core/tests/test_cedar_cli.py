@@ -75,6 +75,27 @@ class TestCedarCliRequestFormat:
             'when { context.approval_status == "approved" };'
         ) in policy_text
 
+    def test_approval_rules_with_when_clause_merge_conditions_for_cli(self):
+        policy_text = _cedar_policy_text(
+            [
+                {
+                    "id": "p4",
+                    "cedar_rule": (
+                        'forbid(principal, action == Action::"wire.transfer", resource) '
+                        "when { context has amount && context.amount > 50000 } "
+                        'unless { context has approval_status && '
+                        'context.approval_status == "approved" };'
+                    ),
+                }
+            ]
+        )
+
+        assert (
+            'permit(principal, action == Action::"wire.transfer", resource) '
+            'when { (context has amount && context.amount > 50000) && '
+            '(context has approval_status && context.approval_status == "approved") };'
+        ) in policy_text
+
 
 PERMIT_ALL_POLICY = {
     "id": "p1",

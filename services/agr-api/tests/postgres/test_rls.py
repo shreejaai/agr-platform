@@ -12,6 +12,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import set_session_rls
+
 
 async def _set_rls_org(session: AsyncSession, org_id: str) -> None:
     """Set the RLS context variable for the current session."""
@@ -73,6 +75,27 @@ async def test_rls_policies_own_org_visible(
     )
     rows = result.fetchall()
     assert len(rows) == 1, "RLS failed: Org A cannot see its own policy"
+
+
+@pytest.mark.asyncio
+async def test_set_session_rls_sets_both_context_keys(
+    pg_session: AsyncSession,
+    pg_org: dict[str, str],
+) -> None:
+    """Application helper sets both modern and legacy org context keys."""
+    await set_session_rls(pg_session, uuid.UUID(pg_org["id"]))
+
+    result = await pg_session.execute(
+        text("""
+            SELECT
+                current_setting('app.current_org_id', true),
+                current_setting('app.current_org', true)
+        """)
+    )
+    current_org_id, current_org = result.one()
+
+    assert current_org_id == pg_org["id"]
+    assert current_org == pg_org["id"]
 
 
 @pytest.mark.asyncio

@@ -516,9 +516,29 @@ def _approval_companion_permit(rule: str) -> str | None:
     """Mirror `forbid ... unless approved` as `permit ... when approved` for Cedar CLI."""
     if "forbid(" not in rule or "unless" not in rule or "approval_status" not in rule:
         return None
+    match = re.match(
+        r"""
+        ^\s*forbid\s*\((?P<head>.*?)\)\s*
+        (?:when\s*\{(?P<when>.*?)\}\s*)?
+        unless\s*\{(?P<unless>.*?)\}\s*;
+        \s*$
+        """,
+        rule,
+        re.DOTALL | re.VERBOSE,
+    )
+    if match is None:
+        return None
 
-    permit_rule = re.sub(r"\bforbid\s*\(", "permit(", rule, count=1)
-    return re.sub(r"\bunless\b", "when", permit_rule, count=1)
+    head = match.group("head").strip()
+    when_clause = (match.group("when") or "").strip()
+    unless_clause = match.group("unless").strip()
+
+    if when_clause:
+        condition = f"({when_clause}) && ({unless_clause})"
+    else:
+        condition = unless_clause
+
+    return f"permit({head}) when {{ {condition} }};"
 
 
 def _cedar_cli_evaluator(

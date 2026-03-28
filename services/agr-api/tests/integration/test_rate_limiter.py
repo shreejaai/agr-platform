@@ -67,3 +67,32 @@ async def test_rate_limiter_sets_retry_after_header(
     assert response.status_code == 429
     assert response.headers["Retry-After"] == "1.25"
     assert response.headers["X-RateLimit-Remaining"] == "0"
+
+
+@pytest.mark.asyncio
+async def test_policy_writes_bypass_rate_limiter(
+    client: AsyncClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.middleware.rate_limiter as rate_limiter_module
+
+    called = {"count": 0}
+
+    async def fake_check_rate_limit(redis_client, org_id, limit, burst):  # noqa: ANN001
+        called["count"] += 1
+        raise AssertionError("Rate limiter should not run for policy writes")
+
+    monkeypatch.setattr(rate_limiter_module, "check_rate_limit", fake_check_rate_limit)
+
+    response = await client.post(
+        "/v1/policies",
+        json={
+            "name": "Test policy",
+            "level": "org",
+            "cedar_rule": 'permit(principal, action == Action::"deploy", resource);',
+            "state": "active",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 201
+    assert called["count"] == 0

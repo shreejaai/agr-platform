@@ -9,6 +9,8 @@ from app.config import settings
 from app.middleware.auth import UNPROTECTED_PATHS
 from app.services.redis_service import check_rate_limit, get_redis_client
 
+_RATE_LIMITED_PATHS = frozenset({"/v1/evaluate"})
+
 
 class RateLimiterMiddleware(BaseHTTPMiddleware):
     async def dispatch(
@@ -18,6 +20,7 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
             not settings.rate_limit_enabled
             or request.method == "OPTIONS"
             or request.url.path in UNPROTECTED_PATHS
+            or request.url.path not in _RATE_LIMITED_PATHS
         ):
             return await call_next(request)
 

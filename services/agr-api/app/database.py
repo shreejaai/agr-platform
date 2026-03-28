@@ -4,7 +4,7 @@ from contextvars import ContextVar, Token
 from uuid import UUID
 
 from fastapi import Request
-from sqlalchemy import bindparam, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import settings
@@ -28,8 +28,17 @@ async_session_factory = async_sessionmaker(
 
 
 async def set_session_rls(session: AsyncSession, org_id: UUID) -> None:
+    org_id_str = str(org_id)
+    # asyncpg does not support bind parameters in SET statements. Use
+    # set_config() so we can keep the query parameterized and set both
+    # the current and legacy RLS keys during the transaction.
     await session.execute(
-        text("SET LOCAL app.current_org_id = :org_id").bindparams(bindparam("org_id", str(org_id)))
+        text("SELECT set_config('app.current_org_id', :org_id, true)"),
+        {"org_id": org_id_str},
+    )
+    await session.execute(
+        text("SELECT set_config('app.current_org', :org_id, true)"),
+        {"org_id": org_id_str},
     )
 
 

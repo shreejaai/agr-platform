@@ -283,6 +283,7 @@ jobs:
       POSTGRES_DB: agr_dev
       SECRET_KEY: ci-domain-test-secret
       DEPLOYMENT_MODE: saas
+      CEDAR_FALLBACK_MODE: warn
 
     steps:
       - uses: actions/checkout@v4.2.2
