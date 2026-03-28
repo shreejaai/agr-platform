@@ -7,9 +7,10 @@
  *   demo        — all-domains.spec.ts with HTML reporter (leadership presentation)
  *
  * Usage:
- *   npx playwright test --project=smoke          # PR gate
- *   npx playwright test --project=full-suite     # full validation
- *   npx playwright test --project=demo           # investor demo
+ *   npm run test:smoke                           # PR gate
+ *   npm run test:full                            # full validation
+ *   npm run test:demo                            # investor demo
+ *   npx playwright test --config=e2e/playwright.config.ts --project=smoke
  *   npx playwright show-report                   # open HTML report after demo run
  */
 
