@@ -130,6 +130,11 @@ def _log_startup_summary(
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # S2/M5: fail fast on dangerous production misconfigurations
     settings.validate_production_settings()
+    if settings.env == "production" and settings.cors_uses_wildcard:
+        logger.warning(
+            "CORS wildcard mode is enabled in production. AGR will allow "
+            "non-credentialed browser requests from any origin."
+        )
     configure_tracing(settings, application)
 
     first_boot = False
@@ -236,7 +241,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    allow_credentials=settings.cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

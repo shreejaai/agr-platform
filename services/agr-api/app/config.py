@@ -19,8 +19,9 @@ class Settings(BaseSettings):
     clerk_secret_key: str = ""
     clerk_publishable_key: str = ""
 
-    # CORS — restrict to known dashboard origin in production.
-    # Use ["*"] only for development. On-prem: set to ["https://your-dashboard-domain.com"]
+    # CORS — wildcard mode is supported for bearer-token clients in any env.
+    # Browsers reject "*" together with credentialed mode, so wildcard mode
+    # automatically disables Access-Control-Allow-Credentials in app.main.
     cors_origins: list[str] = ["*"]
 
     # Deployment mode
@@ -65,26 +66,26 @@ class Settings(BaseSettings):
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
+    @property
+    def cors_uses_wildcard(self) -> bool:
+        return "*" in self.cors_origins
+
+    @property
+    def cors_allow_credentials(self) -> bool:
+        return not self.cors_uses_wildcard
+
     def validate_production_settings(self) -> None:
         """Raise RuntimeError for dangerous defaults that must not reach production.
 
         Called at app startup in main.py lifespan so the process refuses to
         start rather than silently running with insecure config.
         """
-        if self.env == "production":
+        if self.env == "production" and "dev-secret-key" in self.secret_key:
             # S2: a predictable secret_key lets attackers forge approval tokens
-            if "dev-secret-key" in self.secret_key:
-                raise RuntimeError(
-                    "SECRET_KEY must be changed for production. "
-                    'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
-                )
-            # M5: wildcard CORS allows any website to make credentialed requests
-            if self.cors_origins == ["*"]:
-                raise RuntimeError(
-                    "CORS_ORIGINS must be restricted in production. "
-                    "Set CORS_ORIGINS to your dashboard domain(s), e.g. "
-                    'CORS_ORIGINS=["https://dashboard.agr.dev"]'
-                )
+            raise RuntimeError(
+                "SECRET_KEY must be changed for production. "
+                'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+            )
 
 
 settings = Settings()
