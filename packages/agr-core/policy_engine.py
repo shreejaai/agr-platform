@@ -632,6 +632,47 @@ def _extract_attr_pairs(conditions: str, prefix: str) -> dict[str, str]:
     return result
 
 
+def _balanced(rule: str, opening: str, closing: str) -> bool:
+    depth = 0
+    for char in rule:
+        if char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0
+
+
+def _heuristic_validate_cedar_rule(rule: str) -> ValidationResult:
+    lower = rule.lower()
+    if not re.match(r"^\s*(permit|forbid)\s*\(", rule):
+        return ValidationResult(
+            valid=False,
+            error="Cedar rule must start with 'permit(' or 'forbid('.",
+        )
+    if not rule.rstrip().endswith(";"):
+        return ValidationResult(valid=False, error="Cedar rule must end with ';'.")
+    for required in ("principal", "action", "resource"):
+        if required not in lower:
+            return ValidationResult(
+                valid=False,
+                error=f"Cedar rule must reference '{required}'.",
+            )
+    for opening, closing in (("(", ")"), ("{", "}"), ("[", "]")):
+        if not _balanced(rule, opening, closing):
+            return ValidationResult(
+                valid=False,
+                error=f"Cedar rule has unbalanced '{opening}{closing}' delimiters.",
+            )
+    return ValidationResult(valid=True)
+
+
+def _cedar_validate_requires_schema(error: str) -> bool:
+    normalized = error.lower()
+    return "cedar validate" in normalized and "--schema" in normalized
+
+
 def validate_cedar_rule(rule: str) -> ValidationResult:
     stripped = rule.strip()
     if not stripped:
@@ -651,18 +692,15 @@ def validate_cedar_rule(rule: str) -> ValidationResult:
         if proc.returncode == 0:
             return ValidationResult(valid=True)
         error = proc.stderr.strip() or proc.stdout.strip() or "cedar_validation_failed"
+        if _cedar_validate_requires_schema(error):
+            logger.info(
+                "Falling back to heuristic Cedar validation because the installed CLI "
+                "requires an explicit schema."
+            )
+            return _heuristic_validate_cedar_rule(stripped)
         return ValidationResult(valid=False, error=error)
 
-    lower = stripped.lower()
-    if "permit" not in lower and "forbid" not in lower:
-        return ValidationResult(valid=False, error="Cedar rule must contain 'permit' or 'forbid'.")
-    for required in ("principal", "action", "resource"):
-        if required not in lower:
-            return ValidationResult(
-                valid=False,
-                error=f"Cedar rule must reference '{required}'.",
-            )
-    return ValidationResult(valid=True)
+    return _heuristic_validate_cedar_rule(stripped)
 
 
 def _cedar_worker_main(cedar_binary: str) -> int:
