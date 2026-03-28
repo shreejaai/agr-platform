@@ -50,6 +50,51 @@ export interface SsoSettings {
   auto_join: boolean;
 }
 
+export interface OrgApiKey {
+  id: string;
+  key_prefix: string;
+  scopes: string[];
+  name: string;
+  created_by: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked: boolean;
+  created_at: string;
+}
+
+export interface OrgApiKeyCreateRequest {
+  name: string;
+  scopes: string[];
+  expires_at?: string | null;
+}
+
+export interface OrgApiKeyCreateResponse extends OrgApiKey {
+  key: string;
+}
+
+export interface OrgRiskConfig {
+  org_id: string;
+  weight_action_severity: number;
+  weight_context_signals: number;
+  weight_rate_pattern: number;
+  weight_agent_trust: number;
+  weight_amount_scale: number;
+  weight_resource_sensitivity: number;
+  threshold_allow_max: number;
+  threshold_approval_max: number;
+  updated_at: string;
+}
+
+export interface OrgRiskConfigUpdate {
+  weight_action_severity?: number;
+  weight_context_signals?: number;
+  weight_rate_pattern?: number;
+  weight_agent_trust?: number;
+  weight_amount_scale?: number;
+  threshold_allow_max?: number;
+  threshold_approval_max?: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class OrgService {
   private http = inject(HttpClient);
@@ -68,5 +113,27 @@ export class OrgService {
 
   updateSso(body: Partial<SsoSettings>): Observable<SsoSettings> {
     return this.http.put<SsoSettings>('/v1/org/sso', body);
+  }
+
+  listApiKeys(): Observable<OrgApiKey[]> {
+    return this.http.get<OrgApiKey[]>('/v1/org/api_keys');
+  }
+
+  createApiKey(body: OrgApiKeyCreateRequest): Observable<OrgApiKeyCreateResponse> {
+    return this.http.post<OrgApiKeyCreateResponse>('/v1/org/api_keys', body);
+  }
+
+  revokeApiKey(keyId: string): Observable<void> {
+    return this.http.delete<void>(`/v1/org/api_keys/${keyId}`, {
+      responseType: 'text' as 'json',
+    });
+  }
+
+  getRiskConfig(): Observable<OrgRiskConfig> {
+    return this.http.get<OrgRiskConfig>('/v1/org/risk-config');
+  }
+
+  updateRiskConfig(body: OrgRiskConfigUpdate): Observable<OrgRiskConfig> {
+    return this.http.put<OrgRiskConfig>('/v1/org/risk-config', body);
   }
 }

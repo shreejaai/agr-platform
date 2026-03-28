@@ -6,11 +6,16 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException, Request, Response
-from sqlalchemy import select, text
+from sqlalchemy import select
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
-from app.database import async_session_factory
+from app.database import (
+    async_session_factory,
+    reset_current_org_id,
+    set_current_org_id,
+    set_session_rls,
+)
 from app.models import ApiKey, AuthSession, Organization
 
 logger = logging.getLogger(__name__)
@@ -104,7 +109,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.auth_mode = auth_mode
         request.state.auth_expires_at = auth_expires_at
         request.state.scopes = scopes
-        return await call_next(request)
+        org_token = set_current_org_id(org.id)
+        try:
+            return await call_next(request)
+        finally:
+            reset_current_org_id(org_token)
 
     @staticmethod
     async def _lookup_org(
@@ -164,16 +173,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
 async def set_rls_org(session: object, org_id: UUID) -> None:
     """Set the RLS context for the current session.
 
-    Uses a parameterized bind to prevent any SQL injection risk — even though
-    org_id is a UUID, we never interpolate directly into SQL strings.
+    Prefer the session factories in app.database for new code so the RLS
+    context is applied before any queries run on the session.
     """
     from sqlalchemy.ext.asyncio import AsyncSession
 
     if isinstance(session, AsyncSession):
-        # S1: use bindparams — never interpolate org_id directly into SQL text
-        await session.execute(
-            text("SET LOCAL app.current_org_id = :org_id").bindparams(org_id=str(org_id))
-        )
+        await set_session_rls(session, org_id)
 
 
 def require_scope(scope: str) -> Callable[[Request], Awaitable[None]]:

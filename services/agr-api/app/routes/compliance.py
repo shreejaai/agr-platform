@@ -14,6 +14,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
+from app.dependencies import require_role
+from app.middleware.auth import require_scope
 from app.models import AuditEvent, Organization, OrgComplianceConfig
 from app.schemas import (
     ComplianceConfigResponse,
@@ -40,7 +42,11 @@ def _require_admin(request: Request) -> None:
 _SAMPLE_LIMIT = 1000  # max recent events to sample for compliance analysis
 
 
-@router.get("/compliance/config", response_model=list[ComplianceConfigResponse])
+@router.get(
+    "/compliance/config",
+    response_model=list[ComplianceConfigResponse],
+    dependencies=[Depends(require_scope("compliance:read"))],
+)
 async def get_compliance_config(
     request: Request,
     session: AsyncSession = Depends(get_session),
@@ -64,13 +70,16 @@ async def get_compliance_config(
     ]
 
 
-@router.put("/compliance/config", response_model=ComplianceConfigResponse)
+@router.put(
+    "/compliance/config",
+    response_model=ComplianceConfigResponse,
+    dependencies=[Depends(require_scope("compliance:write")), Depends(require_role("admin"))],
+)
 async def update_compliance_config(
     body: ComplianceConfigUpdate,
     request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> ComplianceConfigResponse:
-    _require_admin(request)
     if body.plugin_id not in BUILT_IN_COMPLIANCE_PLUGIN_IDS:
         raise HTTPException(status_code=404, detail="Compliance plugin not found.")
 
@@ -124,7 +133,11 @@ def _payload_risk_factors(payload: dict[str, object]) -> dict[str, int] | None:
     return normalized or None
 
 
-@router.get("/compliance/summary", response_model=ComplianceSummaryResponse)
+@router.get(
+    "/compliance/summary",
+    response_model=ComplianceSummaryResponse,
+    dependencies=[Depends(require_scope("compliance:read"))],
+)
 async def compliance_summary(
     request: Request,
     session: AsyncSession = Depends(get_session),
@@ -215,6 +228,7 @@ async def compliance_summary(
 @router.get(
     "/compliance/export",
     summary="Export compliance report",
+    dependencies=[Depends(require_scope("compliance:read")), Depends(require_role("admin"))],
     description=(
         "Export a compliance posture report for the requested period. "
         "**Admin role required.** "
@@ -230,8 +244,6 @@ async def export_compliance(
     format: str = Query(default="json", pattern=r"^(json|csv|pdf)$"),  # noqa: A002
 ) -> Response:
     """Download a compliance report in JSON or CSV format. Admin-only."""
-    _require_admin(request)
-
     org: Organization = request.state.org
     org_id: uuid.UUID = request.state.org_id
     since = datetime.now(UTC) - timedelta(days=period_days)

@@ -11,6 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
+from app.middleware.auth import require_scope
 from app.models import CopilotConversation, CopilotMessageRecord
 from app.schemas import (
     ConversationDetail,
@@ -28,7 +29,11 @@ router = APIRouter(prefix="/v1/copilot", tags=["copilot"])
 ALLOWED_PLANS = {"startup", "business", "enterprise"}
 
 
-@router.post("/chat", response_model=CopilotResponse)
+@router.post(
+    "/chat",
+    response_model=CopilotResponse,
+    dependencies=[Depends(require_scope("copilot:write"))],
+)
 async def copilot_chat(
     body: CopilotRequest,
     request: Request,
@@ -58,7 +63,11 @@ async def copilot_chat(
     )
 
 
-@router.get("/conversations", response_model=list[ConversationSummary])
+@router.get(
+    "/conversations",
+    response_model=list[ConversationSummary],
+    dependencies=[Depends(require_scope("copilot:read"))],
+)
 async def list_conversations(
     request: Request,
     session: AsyncSession = Depends(get_session),
@@ -82,7 +91,11 @@ async def list_conversations(
     ]
 
 
-@router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
+@router.get(
+    "/conversations/{conversation_id}",
+    response_model=ConversationDetail,
+    dependencies=[Depends(require_scope("copilot:read"))],
+)
 async def get_conversation(
     conversation_id: uuid.UUID,
     request: Request,
@@ -126,7 +139,11 @@ async def get_conversation(
     )
 
 
-@router.delete("/conversations/{conversation_id}", status_code=204)
+@router.delete(
+    "/conversations/{conversation_id}",
+    status_code=204,
+    dependencies=[Depends(require_scope("copilot:write"))],
+)
 async def delete_conversation(
     conversation_id: uuid.UUID,
     request: Request,

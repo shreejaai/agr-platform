@@ -32,6 +32,7 @@ export class AuditService {
     let params = new HttpParams();
     if (filter.event_type) params = params.set('event_type', filter.event_type);
     if (filter.agent_id) params = params.set('agent_id', filter.agent_id);
+    if (filter.policy_id) params = params.set('policy_id', filter.policy_id);
     // Map convenience 'date' to start_date; honour explicit start/end if provided
     if (filter.date) params = params.set('start_date', filter.date);
     if (filter.start_date && !filter.date) params = params.set('start_date', filter.start_date);
@@ -45,6 +46,7 @@ export class AuditService {
     let params = new HttpParams();
     if (p.event_type) params = params.set('event_type', p.event_type);
     if (p.agent_id) params = params.set('agent_id', p.agent_id);
+    if (p.policy_id) params = params.set('policy_id', p.policy_id);
     if (p.action) params = params.set('action', p.action);
     if (p.decision) params = params.set('decision', p.decision);
     if (p.start_date) params = params.set('start_date', p.start_date);

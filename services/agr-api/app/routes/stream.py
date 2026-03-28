@@ -22,7 +22,11 @@ async def evaluation_stream(websocket: WebSocket) -> None:
         await websocket.close(code=4401)
         return
 
-    org, _, _, _, _ = auth_context
+    org, _, _, _, scopes = auth_context
+    if "*" not in scopes and "evaluate:write" not in scopes:
+        await websocket.close(code=4403)
+        return
+
     org_id = str(org.id)
     queue = await subscribe(org_id)
     await websocket.accept()

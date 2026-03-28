@@ -77,6 +77,11 @@ export class ClerkService {
           })
         );
         if (res?.api_key) {
+          if (res.api_key.startsWith('agr_sk_')) {
+            console.warn(
+              'Warning: SSO exchange returned a raw API key. Configure CLERK_SESSION_MODE=session on the backend.',
+            );
+          }
           this.apiKeySvc.setKey(res.api_key);
           return { ok: true };
         }

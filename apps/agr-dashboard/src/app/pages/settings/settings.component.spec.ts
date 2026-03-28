@@ -31,6 +31,11 @@ describe('SettingsComponent', () => {
       'getUsage',
       'getSso',
       'updateSso',
+      'listApiKeys',
+      'createApiKey',
+      'revokeApiKey',
+      'getRiskConfig',
+      'updateRiskConfig',
     ]);
     orgService.getMe.and.returnValue(
       of({
@@ -77,6 +82,21 @@ describe('SettingsComponent', () => {
         domains: [],
         default_role: 'viewer',
         auto_join: false,
+      })
+    );
+    orgService.listApiKeys.and.returnValue(of([]));
+    orgService.getRiskConfig.and.returnValue(
+      of({
+        org_id: 'org-1',
+        weight_action_severity: 0.3,
+        weight_context_signals: 0.2,
+        weight_rate_pattern: 0.2,
+        weight_agent_trust: 0.15,
+        weight_amount_scale: 0.15,
+        weight_resource_sensitivity: 0,
+        threshold_allow_max: 40,
+        threshold_approval_max: 70,
+        updated_at: '2026-03-27T00:00:00Z',
       })
     );
 

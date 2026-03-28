@@ -1,11 +1,24 @@
 import { Component, inject, OnInit, ChangeDetectionStrategy, signal, HostListener } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { PolicyService, SimulateRequest, SimulateResponse } from '../../services/policy.service';
+import { AuditService } from '../../services/audit.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { ComplianceFindingsComponent } from '../../shared/components/compliance-findings/compliance-findings.component';
+import { RelativeTimePipe } from '../../shared/pipes/relative-time.pipe';
 import { RiskBreakdownComponent } from '../../shared/components/risk-breakdown/risk-breakdown.component';
-import { Policy, PolicyCreate, PolicyImportResponse, PolicyImportResult, PolicyTemplate } from '../../core/models/policy.model';
+import {
+  Policy,
+  PolicyCreate,
+  PolicyImportResponse,
+  PolicyImportResult,
+  PolicyTemplate,
+  PolicyTestCaseResult,
+  PolicyTestSuite,
+  PolicyTestSuiteRunResult,
+} from '../../core/models/policy.model';
 
 /** Friendly form fields — converted to PolicyCreate (cedar_rule) on submit. */
 interface PolicyForm {
@@ -20,6 +33,16 @@ interface PolicyForm {
 interface PolicyEditForm {
   name: string;
   cedar_rule: string;
+}
+
+interface PolicyAnalytics {
+  totalEvaluations: number;
+  lastTriggeredAt: string | null;
+  decisions: {
+    ALLOW: number;
+    DENY: number;
+    APPROVAL_REQUIRED: number;
+  };
 }
 
 /** Generate a Cedar rule string from friendly form fields. */
@@ -104,7 +127,15 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
   selector: 'agr-policies',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, BadgeComponent, RiskBreakdownComponent, ComplianceFindingsComponent],
+  imports: [
+    FormsModule,
+    DecimalPipe,
+    BadgeComponent,
+    RiskBreakdownComponent,
+    ComplianceFindingsComponent,
+    RelativeTimePipe,
+    RouterLink,
+  ],
   template: `
     <div class="space-y-4">
       <!-- Toolbar -->
@@ -470,12 +501,43 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
               </tr>
             </thead>
             <tbody>
-              @for (p of items(); track p.id) {
-                <tr class="table-row">
-                  <td class="table-cell font-medium text-slate-200">{{ p.name }}</td>
-                  <td class="table-cell">
-                    <agr-badge [variant]="effectVariant(p.cedar_rule)">
-                      {{ deriveEffect(p.cedar_rule) }}
+	              @for (p of items(); track p.id) {
+	                <tr class="table-row">
+	                  <td class="table-cell font-medium text-slate-200">
+	                    <div>{{ p.name }}</div>
+	                    <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+	                      @if (policyAnalyticsLoading()[p.id]) {
+	                        <span class="text-slate-500">Loading stats…</span>
+	                      } @else if (policyAnalytics()[p.id]) {
+	                        <span class="rounded-full border border-slate-700 px-2 py-0.5 text-slate-300">
+	                          Total {{ policyAnalytics()[p.id]!.totalEvaluations }}
+	                        </span>
+	                        <span class="rounded-full border border-slate-700 px-2 py-0.5 text-slate-300">
+	                          Last triggered {{ policyAnalytics()[p.id]!.lastTriggeredAt | relativeTime }}
+	                        </span>
+	                        <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-300">
+	                          ALLOW {{ policyAnalytics()[p.id]!.decisions.ALLOW }}
+	                        </span>
+	                        <span class="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-red-300">
+	                          DENY {{ policyAnalytics()[p.id]!.decisions.DENY }}
+	                        </span>
+	                        <span class="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-amber-300">
+	                          APPROVAL {{ policyAnalytics()[p.id]!.decisions.APPROVAL_REQUIRED }}
+	                        </span>
+	                      } @else {
+	                        <a
+	                          [routerLink]="['/audit']"
+	                          [queryParams]="{ policy_id: p.id }"
+	                          class="text-sky-400 transition-colors hover:text-sky-300"
+	                        >
+	                          View in Audit Log
+	                        </a>
+	                      }
+	                    </div>
+	                  </td>
+	                  <td class="table-cell">
+	                    <agr-badge [variant]="effectVariant(p.cedar_rule)">
+	                      {{ deriveEffect(p.cedar_rule) }}
                     </agr-badge>
                   </td>
                   <td class="table-cell font-mono text-xs text-slate-300">
@@ -509,8 +571,8 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
       }
 
       <!-- Policy Simulation Panel -->
-      <div class="card border border-slate-700">
-        <div class="flex items-center justify-between mb-4">
+	      <div class="card border border-slate-700">
+	        <div class="flex items-center justify-between mb-4">
           <div>
             <h2 class="text-base font-semibold text-slate-100">Policy Simulation</h2>
             <p class="text-xs text-slate-400 mt-0.5">Test how your policies evaluate a hypothetical tool call without executing it.</p>
@@ -628,14 +690,127 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
               </div>
             }
           </div>
-        }
-      </div>
-    </div>
-  `,
+	        }
+	      </div>
+
+	      <div class="card border border-slate-700">
+	        <div class="flex items-center justify-between gap-3 mb-4">
+	          <div>
+	            <h2 class="text-base font-semibold text-slate-100">Policy Test Suites</h2>
+	            <p class="text-xs text-slate-400 mt-0.5">
+	              Run saved backend test suites to verify expected decisions against the live policy engine.
+	            </p>
+	          </div>
+	          @if (testSuitesLoading()) {
+	            <span class="text-xs text-slate-500">Loading suites…</span>
+	          }
+	        </div>
+
+	        @if (testSuiteError()) {
+	          <div class="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+	            {{ testSuiteError() }}
+	          </div>
+	        }
+
+	        @if (!testSuites().length && !testSuitesLoading()) {
+	          <div class="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-5">
+	            <p class="text-sm text-slate-300">No saved policy test suites yet.</p>
+	            <p class="mt-2 text-xs text-slate-500">
+	              You can still validate policy behavior with the simulation panel above or the backend test-suite APIs.
+	            </p>
+	          </div>
+	        } @else {
+	          <div class="space-y-4">
+	            @for (suite of testSuites(); track suite.id) {
+	              <article class="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+	                <div class="flex items-start justify-between gap-4 flex-wrap">
+	                  <div>
+	                    <h3 class="text-sm font-semibold text-slate-100">{{ suite.name }}</h3>
+	                    @if (suite.description) {
+	                      <p class="mt-1 text-sm text-slate-400">{{ suite.description }}</p>
+	                    }
+	                  </div>
+	                  <button
+	                    class="btn-primary text-sm"
+	                    [disabled]="testSuiteRunning()[suite.id]"
+	                    (click)="runTestSuite(suite.id)"
+	                  >
+	                    {{ testSuiteRunning()[suite.id] ? 'Running…' : 'Run All Tests' }}
+	                  </button>
+	                </div>
+
+	                @if (testSuiteRuns()[suite.id]) {
+	                  <div class="mt-3 flex flex-wrap gap-2 text-[11px]">
+	                    <span class="rounded-full border border-slate-700 px-2 py-0.5 text-slate-300">
+	                      {{ testSuiteRuns()[suite.id]!.total }} total
+	                    </span>
+	                    <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-300">
+	                      {{ testSuiteRuns()[suite.id]!.passed }} passed
+	                    </span>
+	                    <span class="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-red-300">
+	                      {{ testSuiteRuns()[suite.id]!.failed }} failed
+	                    </span>
+	                    <span class="rounded-full border border-slate-700 px-2 py-0.5 text-slate-300">
+	                      {{ testSuiteRuns()[suite.id]!.duration_ms | number:'1.0-0' }} ms
+	                    </span>
+	                  </div>
+	                }
+
+	                <div class="mt-4 overflow-x-auto">
+	                  <table class="w-full text-xs">
+	                    <thead>
+	                      <tr class="border-b border-slate-800 text-left text-slate-500">
+	                        <th class="pb-2 pr-4 font-medium">Agent</th>
+	                        <th class="pb-2 pr-4 font-medium">Action</th>
+	                        <th class="pb-2 pr-4 font-medium">Resource</th>
+	                        <th class="pb-2 pr-4 font-medium">Expected</th>
+	                        <th class="pb-2 font-medium">Last result</th>
+	                      </tr>
+	                    </thead>
+	                    <tbody>
+	                      @for (testCase of suite.test_cases; track testCase.name) {
+	                        <tr class="border-b border-slate-900/80 text-slate-300 last:border-b-0">
+	                          <td class="py-2 pr-4 font-mono">{{ testCase.agent_id }}</td>
+	                          <td class="py-2 pr-4 font-mono">{{ testCase.action }}</td>
+	                          <td class="py-2 pr-4 font-mono">{{ testCase.resource }}</td>
+	                          <td class="py-2 pr-4">
+	                            <span class="rounded-full border border-slate-700 px-2 py-0.5 text-slate-300">
+	                              {{ testCase.expected_decision }}
+	                            </span>
+	                          </td>
+	                          <td class="py-2">
+	                            @if (lastTestCaseResult(suite.id, testCase.name)) {
+	                              <span
+	                                class="rounded-full px-2 py-0.5"
+	                                [class]="
+	                                  lastTestCaseResult(suite.id, testCase.name)!.passed
+	                                    ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+	                                    : 'border border-red-500/30 bg-red-500/10 text-red-300'
+	                                "
+	                              >
+	                                {{ lastTestCaseResult(suite.id, testCase.name)!.passed ? 'Pass' : 'Fail' }}
+	                              </span>
+	                            } @else {
+	                              <span class="text-slate-500">Not run yet</span>
+	                            }
+	                          </td>
+	                        </tr>
+	                      }
+	                    </tbody>
+	                  </table>
+	                </div>
+	              </article>
+	            }
+	          </div>
+	        }
+	      </div>
+	    </div>
+	  `,
 })
 export class PoliciesComponent implements OnInit {
   private svc = inject(PolicyService);
   private route = inject(ActivatedRoute);
+  private auditSvc = inject(AuditService);
 
   readonly loading = signal(true);
   readonly saving = signal(false);
@@ -647,6 +822,13 @@ export class PoliciesComponent implements OnInit {
   readonly templateError = signal('');
   readonly templateActionMessage = signal('');
   readonly editingPolicy = signal<Policy | null>(null);
+  readonly policyAnalytics = signal<Record<string, PolicyAnalytics | null>>({});
+  readonly policyAnalyticsLoading = signal<Record<string, boolean>>({});
+  readonly testSuites = signal<PolicyTestSuite[]>([]);
+  readonly testSuitesLoading = signal(false);
+  readonly testSuiteError = signal('');
+  readonly testSuiteRuns = signal<Record<string, PolicyTestSuiteRunResult>>({});
+  readonly testSuiteRunning = signal<Record<string, boolean>>({});
 
   // Import state
   readonly showImport = signal(false);
@@ -680,6 +862,7 @@ export class PoliciesComponent implements OnInit {
   ngOnInit(): void {
     this.loadList();
     this.loadTemplates();
+    this.loadTestSuites();
     if (this.route.snapshot.queryParamMap.get('onboarding') === 'sample') {
       this.openOnboardingSample();
     }
@@ -704,6 +887,11 @@ export class PoliciesComponent implements OnInit {
     this.svc.list({ limit: 100, active: true }).subscribe({
       next: (res) => {
         this.items.set(res);
+        this.policyAnalytics.set({});
+        this.policyAnalyticsLoading.set(
+          Object.fromEntries(res.map((policy) => [policy.id, true]))
+        );
+        void this.loadPolicyAnalytics(res);
         this.loading.set(false);
       },
       error: () => this.loading.set(false),
@@ -969,6 +1157,40 @@ export class PoliciesComponent implements OnInit {
 
   // --- Simulation ---
 
+  loadTestSuites(): void {
+    this.testSuitesLoading.set(true);
+    this.testSuiteError.set('');
+    this.svc.listTestSuites().subscribe({
+      next: (suites) => {
+        this.testSuites.set(suites);
+        this.testSuitesLoading.set(false);
+      },
+      error: () => {
+        this.testSuitesLoading.set(false);
+        this.testSuiteError.set('Policy test suites are not available right now.');
+      },
+    });
+  }
+
+  runTestSuite(suiteId: string): void {
+    this.testSuiteRunning.update((state) => ({ ...state, [suiteId]: true }));
+    this.testSuiteError.set('');
+    this.svc.runTestSuite(suiteId).subscribe({
+      next: (result) => {
+        this.testSuiteRunning.update((state) => ({ ...state, [suiteId]: false }));
+        this.testSuiteRuns.update((state) => ({ ...state, [suiteId]: result }));
+      },
+      error: () => {
+        this.testSuiteRunning.update((state) => ({ ...state, [suiteId]: false }));
+        this.testSuiteError.set('Unable to run the selected policy test suite.');
+      },
+    });
+  }
+
+  lastTestCaseResult(suiteId: string, caseName: string): PolicyTestCaseResult | null {
+    return this.testSuiteRuns()[suiteId]?.results.find((result) => result.name === caseName) ?? null;
+  }
+
   toggleSimPanel(): void {
     this.showSimPanel.update((v) => !v);
     if (!this.showSimPanel()) {
@@ -1027,6 +1249,52 @@ export class PoliciesComponent implements OnInit {
     if (decision === 'ALLOW') return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40';
     if (decision === 'DENY') return 'bg-red-500/20 text-red-400 border-red-500/40';
     return 'bg-amber-500/20 text-amber-400 border-amber-500/40';
+  }
+
+  private async loadPolicyAnalytics(policies: Policy[]): Promise<void> {
+    for (const policy of policies) {
+      try {
+        const analytics = await this.fetchPolicyAnalytics(policy.id);
+        this.policyAnalytics.update((state) => ({ ...state, [policy.id]: analytics }));
+      } catch {
+        this.policyAnalytics.update((state) => ({ ...state, [policy.id]: null }));
+      } finally {
+        this.policyAnalyticsLoading.update((state) => ({ ...state, [policy.id]: false }));
+      }
+    }
+  }
+
+  private async fetchPolicyAnalytics(policyId: string): Promise<PolicyAnalytics> {
+    const pageSize = 200;
+    let offset = 0;
+    let total = 0;
+    let lastTriggeredAt: string | null = null;
+    const decisions: PolicyAnalytics['decisions'] = {
+      ALLOW: 0,
+      DENY: 0,
+      APPROVAL_REQUIRED: 0,
+    };
+
+    while (true) {
+      const events = await firstValueFrom(
+        this.auditSvc.list({ policy_id: policyId, limit: pageSize, offset })
+      );
+      if (!lastTriggeredAt && events.length > 0) {
+        lastTriggeredAt = events[0].recorded_at;
+      }
+      total += events.length;
+      for (const event of events) {
+        if (event.decision === 'ALLOW' || event.decision === 'DENY' || event.decision === 'APPROVAL_REQUIRED') {
+          decisions[event.decision] += 1;
+        }
+      }
+      if (events.length < pageSize) {
+        break;
+      }
+      offset += pageSize;
+    }
+
+    return { totalEvaluations: total, lastTriggeredAt, decisions };
   }
 
   private emptyForm(): PolicyForm {

@@ -8,6 +8,8 @@ import {
   PolicyImportItem,
   PolicyImportRequest,
   PolicyImportResponse,
+  PolicyTestSuite,
+  PolicyTestSuiteRunResult,
   PolicyTemplate,
 } from '../core/models/policy.model';
 import { ComplianceFinding } from '../core/models/compliance.model';
@@ -116,6 +118,14 @@ export class PolicyService {
 
   rollback(policyId: string, version: number): Observable<Policy> {
     return this.http.post<Policy>(`/v1/policies/${policyId}/rollback`, { version });
+  }
+
+  listTestSuites(): Observable<PolicyTestSuite[]> {
+    return this.http.get<PolicyTestSuite[]>('/v1/policies/test-suites');
+  }
+
+  runTestSuite(suiteId: string): Observable<PolicyTestSuiteRunResult> {
+    return this.http.post<PolicyTestSuiteRunResult>(`/v1/policies/test-suites/${suiteId}/run`, {});
   }
 
   simulatePolicy(payload: {

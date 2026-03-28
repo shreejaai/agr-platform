@@ -283,8 +283,11 @@ async def test_compliance_enforce_mode_blocks_allow_decision(
     assert response.status_code == 200
     data = response.json()
     assert data["decision"] == "DENY"
+    assert data["compliance_block"] is True
     assert data["compliance_blocked"] is True
-    assert "Compliance policy blocked: ART-13" in data["reason"]
+    assert data["compliance_reason"] == data["reason"]
+    assert "Compliance enforcement blocked: [eu_ai_act_art13]" in data["reason"]
+    assert "EU AI Act Art. 13" in data["reason"]
 
 
 @pytest.mark.asyncio
@@ -325,4 +328,6 @@ async def test_compliance_advisory_mode_does_not_block_decision(
     assert response.status_code == 200
     data = response.json()
     assert data["decision"] == "ALLOW"
+    assert data["compliance_block"] is False
+    assert data["compliance_reason"] is None
     assert data["compliance_blocked"] is False
