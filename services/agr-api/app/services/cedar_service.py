@@ -27,6 +27,7 @@ from policy_engine import (  # type: ignore[import-not-found]  # noqa: E402, I00
     close_cedar_process_pool,
     configure_cedar_process_pool,
     evaluate_policies,
+    infer_policy_match as _infer_policy_match,
     initialize_cedar_process_pool,
     set_cedar_degraded,
     validate_cedar_rule as _validate_cedar_rule,
@@ -96,6 +97,16 @@ def evaluate_policy_set(
     context: dict[str, object],
 ) -> EvaluationResult:
     return evaluate_policies(policies, agent_id, action, resource, context)
+
+
+def infer_policy_match(
+    policies: list[dict[str, str]],
+    agent_id: str,
+    action: str,
+    resource: str,
+    context: dict[str, object],
+) -> EvaluationResult:
+    return _infer_policy_match(policies, agent_id, action, resource, context)
 
 
 async def evaluate_request(
