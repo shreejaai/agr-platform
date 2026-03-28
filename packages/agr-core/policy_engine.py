@@ -592,44 +592,222 @@ def _check_when_clause(
     if not when_match:
         return True
 
-    conditions = when_match.group(1)
+    conditions = " ".join(when_match.group(1).split())
+    return _evaluate_condition_expression(conditions, context)
 
-    resource_attrs = _extract_attr_pairs(conditions, "resource")
-    for attr, expected in resource_attrs.items():
-        actual = context.get(attr)
-        if actual is None:
+
+class _MissingValue:
+    def __bool__(self) -> bool:
+        return False
+
+    def __eq__(self, other: object) -> bool:
+        return False
+
+    def __ne__(self, other: object) -> bool:
+        return False
+
+    def __lt__(self, other: object) -> bool:
+        return False
+
+    def __le__(self, other: object) -> bool:
+        return False
+
+    def __gt__(self, other: object) -> bool:
+        return False
+
+    def __ge__(self, other: object) -> bool:
+        return False
+
+    def __str__(self) -> str:
+        return ""
+
+
+_MISSING_VALUE = _MissingValue()
+
+
+def _evaluate_condition_expression(
+    expression: str,
+    context: dict[str, object],
+) -> bool:
+    expr = _strip_outer_parens(expression.strip())
+    if not expr:
+        return True
+
+    or_parts = _split_top_level(expr, "||")
+    if len(or_parts) > 1:
+        return any(_evaluate_condition_expression(part, context) for part in or_parts)
+
+    and_parts = _split_top_level(expr, "&&")
+    if len(and_parts) > 1:
+        return all(_evaluate_condition_expression(part, context) for part in and_parts)
+
+    return _evaluate_atomic_condition(expr, context)
+
+
+def _strip_outer_parens(expression: str) -> str:
+    expr = expression.strip()
+    while expr.startswith("(") and expr.endswith(")") and _is_outer_wrapped(expr):
+        expr = expr[1:-1].strip()
+    return expr
+
+
+def _is_outer_wrapped(expression: str) -> bool:
+    depth = 0
+    in_string = False
+    escaped = False
+
+    for index, char in enumerate(expression):
+        if char == "\\" and in_string and not escaped:
+            escaped = True
+            continue
+        if char == '"' and not escaped:
+            in_string = not in_string
+        elif not in_string:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0 and index != len(expression) - 1:
+                    return False
+        escaped = False
+    return depth == 0
+
+
+def _split_top_level(expression: str, operator: str) -> list[str]:
+    parts: list[str] = []
+    depth = 0
+    in_string = False
+    escaped = False
+    start = 0
+    index = 0
+
+    while index < len(expression):
+        char = expression[index]
+        if char == "\\" and in_string and not escaped:
+            escaped = True
+            index += 1
+            continue
+        if char == '"' and not escaped:
+            in_string = not in_string
+        elif not in_string:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif depth == 0 and expression.startswith(operator, index):
+                parts.append(expression[start:index].strip())
+                index += len(operator)
+                start = index
+                continue
+        escaped = False
+        index += 1
+
+    if not parts:
+        return [expression.strip()]
+    parts.append(expression[start:].strip())
+    return parts
+
+
+def _evaluate_atomic_condition(expression: str, context: dict[str, object]) -> bool:
+    has_match = re.fullmatch(r"(context|resource)\s+has\s+(\w+)", expression)
+    if has_match:
+        return _lookup_attr(context, has_match.group(2)) is not _MISSING_VALUE
+
+    like_match = re.fullmatch(r'(context|resource)\.(\w+)\s+like\s+"([^"]+)"', expression)
+    if like_match:
+        actual = _lookup_attr(context, like_match.group(2))
+        return _matches_like(actual, like_match.group(3))
+
+    compare_match = re.fullmatch(
+        r'(context|resource)\.(\w+)\s*(==|!=|>=|<=|>|<)\s*(true|false|-?\d+(?:\.\d+)?|"[^"]*")',
+        expression,
+    )
+    if compare_match:
+        actual = _lookup_attr(context, compare_match.group(2))
+        expected = _parse_literal(compare_match.group(4))
+        return _compare_values(actual, compare_match.group(3), expected)
+
+    return False
+
+
+def _lookup_attr(context: dict[str, object], attr: str) -> object:
+    return context.get(attr, _MISSING_VALUE)
+
+
+def _matches_like(actual: object, pattern: str) -> bool:
+    if actual is _MISSING_VALUE:
+        return False
+    regex_pattern = "^" + re.escape(pattern).replace(r"\*", ".*").replace(r"\?", ".") + "$"
+    return bool(re.match(regex_pattern, str(actual)))
+
+
+def _parse_literal(raw: str) -> object:
+    if raw == "true":
+        return True
+    if raw == "false":
+        return False
+    if raw.startswith('"') and raw.endswith('"'):
+        return raw[1:-1]
+    if "." in raw:
+        return float(raw)
+    return int(raw)
+
+
+def _compare_values(actual: object, operator: str, expected: object) -> bool:
+    if actual is _MISSING_VALUE:
+        return False
+
+    if isinstance(expected, bool):
+        actual_value = _coerce_bool(actual)
+        if actual_value is _MISSING_VALUE:
             return False
-        if isinstance(expected, str) and expected.endswith("*"):
-            if not str(actual).startswith(expected.rstrip("*")):
-                return False
-        elif str(actual) != str(expected):
+    elif isinstance(expected, (int, float)):
+        actual_value = _coerce_number(actual)
+        if actual_value is _MISSING_VALUE:
             return False
+    else:
+        actual_value = str(actual)
+        expected = str(expected)
 
-    like_patterns = re.findall(r'resource\.(\w+)\s+like\s+"([^"]+)"', conditions)
-    for attr, pattern in like_patterns:
-        actual = context.get(attr, "")
-        regex_pattern = pattern.replace("*", ".*").replace("?", ".")
-        if not re.match(regex_pattern, str(actual)):
+    try:
+        if operator == "==":
+            return actual_value == expected
+        if operator == "!=":
+            return actual_value != expected
+        if operator == ">":
+            return actual_value > expected
+        if operator == ">=":
+            return actual_value >= expected
+        if operator == "<":
+            return actual_value < expected
+        if operator == "<=":
+            return actual_value <= expected
+    except TypeError:
+        return False
+    return False
+
+
+def _coerce_bool(value: object) -> object:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
             return False
-
-    context_attrs = _extract_attr_pairs(conditions, "context")
-    for attr, expected in context_attrs.items():
-        actual = context.get(attr)
-        if actual is None:
-            return False
-        if str(actual) != str(expected):
-            return False
-
-    return True
+    return _MISSING_VALUE
 
 
-def _extract_attr_pairs(conditions: str, prefix: str) -> dict[str, str]:
-    """Extract `prefix.attr == "value"` pairs from a when-clause body."""
-    result: dict[str, str] = {}
-    pattern = rf'{prefix}\.(\w+)\s*==\s*"([^"]+)"'
-    for match in re.finditer(pattern, conditions):
-        result[match.group(1)] = match.group(2)
-    return result
+def _coerce_number(value: object) -> object:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        try:
+            return float(value) if "." in value else int(value)
+        except ValueError:
+            return _MISSING_VALUE
+    return _MISSING_VALUE
 
 
 def _balanced(rule: str, opening: str, closing: str) -> bool:

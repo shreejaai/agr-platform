@@ -133,6 +133,94 @@ unless { context has approval_status && context.approval_status == "approved" };
     assert result.decision == "ALLOW"  # unless clause satisfied → forbid doesn't apply
 
 
+def test_ofac_deny_not_shadowed_by_non_matching_approval_rule() -> None:
+    approval = _make_policy(
+        "wire-approval",
+        """
+forbid(principal, action == Action::"wire.transfer", resource)
+when { context has amount && context.amount > 50000 }
+unless { context has approval_status && context.approval_status == "approved" };
+    """,
+    )
+    ofac = _make_policy(
+        "wire-ofac",
+        """
+forbid(principal, action == Action::"wire.transfer", resource)
+when { context has destination_country &&
+       (context.destination_country == "IR" ||
+        context.destination_country == "KP" ||
+        context.destination_country == "SY" ||
+        context.destination_country == "CU") };
+    """,
+    )
+    result = evaluate_policies(
+        [approval, ofac],
+        "agent-1",
+        "wire.transfer",
+        "recipient",
+        {"amount": 5000, "destination_country": "IR"},
+    )
+    assert result.decision == "DENY"
+    assert result.policy_id == "wire-ofac"
+
+
+def test_payroll_permit_not_shadowed_by_after_hours_approval_rule() -> None:
+    approval = _make_policy(
+        "payroll-approval",
+        """
+forbid(principal, action == Action::"ach.batch_submit", resource)
+when { context has is_after_hours && context.is_after_hours == true &&
+       context has total_amount && context.total_amount > 100000 }
+unless { context has approval_status && context.approval_status == "approved" };
+    """,
+    )
+    permit = _make_policy(
+        "payroll-permit",
+        """
+permit(principal, action == Action::"ach.batch_submit", resource)
+when { context has batch_type && context.batch_type == "payroll" &&
+       context has total_amount && context.total_amount <= 500000 };
+    """,
+    )
+    result = evaluate_policies(
+        [approval, permit],
+        "agent-1",
+        "ach.batch_submit",
+        "payroll",
+        {"batch_type": "payroll", "is_after_hours": False, "total_amount": 380000},
+    )
+    assert result.decision == "ALLOW"
+    assert result.policy_id == "payroll-permit"
+
+
+def test_small_claim_permit_not_shadowed_by_high_fraud_rule() -> None:
+    permit = _make_policy(
+        "claim-permit",
+        """
+permit(principal, action == Action::"claim.approve", resource)
+when { context has claim_amount && context.claim_amount <= 2500 &&
+       context has fraud_score && context.fraud_score < 0.3 };
+    """,
+    )
+    approval = _make_policy(
+        "claim-fraud-review",
+        """
+forbid(principal, action == Action::"claim.approve", resource)
+when { context has fraud_score && context.fraud_score >= 0.75 }
+unless { context has approval_status && context.approval_status == "approved" };
+    """,
+    )
+    result = evaluate_policies(
+        [permit, approval],
+        "agent-1",
+        "claim.approve",
+        "claim",
+        {"claim_amount": 1800, "fraud_score": 0.12},
+    )
+    assert result.decision == "ALLOW"
+    assert result.policy_id == "claim-permit"
+
+
 # --- Forbid overrides permit ---
 
 
