@@ -73,6 +73,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       COPILOT_MODEL: ${COPILOT_MODEL:-claude-sonnet-4-20250514}
       CEDAR_FALLBACK_MODE: ${CEDAR_FALLBACK_MODE:-deny}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:4200"]}
     depends_on:
       postgres:
         condition: service_healthy
@@ -120,11 +121,11 @@ services:
     ports:
       - "7233:7233"
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 7233 || exit 1"]
+      test: ["CMD-SHELL", "temporal operator cluster health --address localhost:7233 2>/dev/null || exit 1"]
       interval: 10s
-      timeout: 5s
-      start_period: 30s
-      retries: 10
+      timeout: 10s
+      start_period: 60s
+      retries: 15
     restart: unless-stopped
 
   temporal-ui:
