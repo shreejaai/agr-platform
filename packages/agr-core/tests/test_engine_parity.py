@@ -51,7 +51,7 @@ WIRE_APPROVAL_POLICY = {
     "id": "wire-approval",
     "cedar_rule": (
         'forbid(principal, action == Action::"wire.transfer", resource) '
-        'when { context has amount && context.amount > 50000 } '
+        "when { context has amount && context.amount > 50000 } "
         'unless { context has approval_status && context.approval_status == "approved" };'
     ),
 }
@@ -60,7 +60,7 @@ OFAC_DENY_POLICY = {
     "id": "wire-ofac",
     "cedar_rule": (
         'forbid(principal, action == Action::"wire.transfer", resource) '
-        'when { context has destination_country && '
+        "when { context has destination_country && "
         '(context.destination_country == "IR" || '
         'context.destination_country == "KP" || '
         'context.destination_country == "SY" || '
@@ -72,8 +72,8 @@ PAYROLL_APPROVAL_POLICY = {
     "id": "payroll-approval",
     "cedar_rule": (
         'forbid(principal, action == Action::"ach.batch_submit", resource) '
-        'when { context has is_after_hours && context.is_after_hours == true && '
-        'context has total_amount && context.total_amount > 100000 } '
+        "when { context has is_after_hours && context.is_after_hours == true && "
+        "context has total_amount && context.total_amount > 100000 } "
         'unless { context has approval_status && context.approval_status == "approved" };'
     ),
 }
@@ -83,7 +83,7 @@ PAYROLL_PERMIT_POLICY = {
     "cedar_rule": (
         'permit(principal, action == Action::"ach.batch_submit", resource) '
         'when { context has batch_type && context.batch_type == "payroll" && '
-        'context has total_amount && context.total_amount <= 500000 };'
+        "context has total_amount && context.total_amount <= 500000 };"
     ),
 }
 
@@ -91,8 +91,8 @@ SMALL_CLAIM_PERMIT_POLICY = {
     "id": "claim-permit",
     "cedar_rule": (
         'permit(principal, action == Action::"claim.approve", resource) '
-        'when { context has claim_amount && context.claim_amount <= 2500 && '
-        'context has fraud_score && context.fraud_score < 0.3 };'
+        "when { context has claim_amount && context.claim_amount <= 2500 && "
+        "context has fraud_score && context.fraud_score < 0.3 };"
     ),
 }
 
@@ -100,7 +100,7 @@ HIGH_FRAUD_APPROVAL_POLICY = {
     "id": "claim-fraud-review",
     "cedar_rule": (
         'forbid(principal, action == Action::"claim.approve", resource) '
-        'when { context has fraud_score && context.fraud_score >= 0.75 } '
+        "when { context has fraud_score && context.fraud_score >= 0.75 } "
         'unless { context has approval_status && context.approval_status == "approved" };'
     ),
 }
