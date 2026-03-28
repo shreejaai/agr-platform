@@ -4,7 +4,7 @@ const STORAGE_KEY = 'agr_api_key';
 
 @Injectable({ providedIn: 'root' })
 export class ApiKeyService {
-  private _key = signal<string | null>(localStorage.getItem(STORAGE_KEY));
+  private _key = signal<string | null>(sessionStorage.getItem(STORAGE_KEY));
 
   getKey(): string | null {
     return this._key();
@@ -14,13 +14,21 @@ export class ApiKeyService {
     return !!this._key();
   }
 
+  isSessionDerived(): boolean {
+    return this._key()?.startsWith('agr_usr_') ?? false;
+  }
+
+  getAuthMode(): 'session' | 'api_key' {
+    return this.isSessionDerived() ? 'session' : 'api_key';
+  }
+
   setKey(key: string): void {
-    localStorage.setItem(STORAGE_KEY, key);
+    sessionStorage.setItem(STORAGE_KEY, key);
     this._key.set(key);
   }
 
   clearKey(): void {
-    localStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(STORAGE_KEY);
     this._key.set(null);
   }
 }

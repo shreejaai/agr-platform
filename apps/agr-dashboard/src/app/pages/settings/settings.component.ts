@@ -3,8 +3,58 @@ import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiKeyService } from '../../services/api-key.service';
 import { ComplianceService } from '../../services/compliance.service';
-import { OrgService, OrgMe, SsoSettings, UsageSummary } from '../../services/org.service';
+import {
+  OrgApiKey,
+  OrgApiKeyCreateResponse,
+  OrgMe,
+  OrgRiskConfig,
+  OrgService,
+  SsoSettings,
+  UsageSummary,
+} from '../../services/org.service';
 import { ClerkService } from '../../core/auth/clerk.service';
+
+const AVAILABLE_API_KEY_SCOPES = [
+  'evaluate:write',
+  'policies:read',
+  'policies:write',
+  'approvals:read',
+  'approvals:write',
+  'agents:read',
+  'agents:write',
+  'audit:read',
+  'webhooks:read',
+  'webhooks:write',
+  'compliance:read',
+  'compliance:write',
+  'org:admin',
+  'copilot:read',
+  'copilot:write',
+] as const;
+
+type AvailableApiKeyScope = (typeof AVAILABLE_API_KEY_SCOPES)[number];
+
+interface RiskConfigFormModel {
+  weight_action_severity: number;
+  weight_context_signals: number;
+  weight_rate_pattern: number;
+  weight_agent_trust: number;
+  weight_amount_scale: number;
+  threshold_allow_max: number;
+  threshold_approval_max: number;
+}
+
+function defaultRiskConfigForm(): RiskConfigFormModel {
+  return {
+    weight_action_severity: 0.3,
+    weight_context_signals: 0.2,
+    weight_rate_pattern: 0.2,
+    weight_agent_trust: 0.15,
+    weight_amount_scale: 0.15,
+    threshold_allow_max: 40,
+    threshold_approval_max: 70,
+  };
+}
 
 @Component({
   selector: 'agr-settings',
@@ -12,7 +62,7 @@ import { ClerkService } from '../../core/auth/clerk.service';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, DecimalPipe],
   template: `
-    <div class="max-w-2xl mx-auto">
+	    <div class="max-w-5xl mx-auto">
       <h1 class="text-2xl font-bold text-slate-100 mb-6">Settings</h1>
 
       <!-- Org Info -->
@@ -337,6 +387,216 @@ import { ClerkService } from '../../core/auth/clerk.service';
         }
       </div>
 
+      <div class="card mb-6">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h2 class="text-base font-semibold text-slate-100 mb-1">Scoped API Keys</h2>
+            <p class="text-sm text-slate-400">
+              Create org API keys with only the scopes each integration needs. New keys default to the full scope set.
+            </p>
+          </div>
+          <span class="rounded-full border border-slate-700 px-2 py-1 text-[11px] uppercase tracking-wide text-slate-400">
+            Admin only
+          </span>
+        </div>
+
+        @if (createdOrgApiKey()) {
+          <div class="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+            <p class="text-sm font-medium text-emerald-300">New key created</p>
+            <p class="mt-2 font-mono text-xs text-emerald-100 break-all">{{ createdOrgApiKey()!.key }}</p>
+            <p class="mt-2 text-xs text-emerald-200/80">Store this key now. AGR only shows the raw value once.</p>
+          </div>
+        }
+
+        @if (orgApiKeysError()) {
+          <div class="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+            {{ orgApiKeysError() }}
+          </div>
+        }
+
+        @if (org()?.role !== 'admin') {
+          <p class="mt-4 text-sm text-slate-500">Only admins can create, view, or revoke scoped org API keys.</p>
+        } @else {
+          <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+            <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+              <h3 class="text-sm font-semibold text-slate-100">Create key</h3>
+              <label class="mt-4 block text-sm text-slate-300">
+                <span class="mb-1 block text-xs text-slate-400">Display name</span>
+                <input
+                  [(ngModel)]="orgApiKeyNameInput"
+                  class="input w-full"
+                  placeholder="CI deploy token"
+                />
+              </label>
+
+              <div class="mt-4">
+                <div class="flex items-center justify-between gap-3">
+                  <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Scopes</span>
+                  <span class="text-xs text-slate-500">{{ selectedOrgApiKeyScopes.length }}/{{ availableApiKeyScopes.length }} selected</span>
+                </div>
+                <div class="mt-3 grid gap-2 sm:grid-cols-2">
+                  @for (scope of availableApiKeyScopes; track scope) {
+                    <label class="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2 text-sm text-slate-300">
+                      <input
+                        type="checkbox"
+                        [checked]="selectedOrgApiKeyScopes.includes(scope)"
+                        (change)="toggleOrgApiKeyScope(scope, $any($event.target).checked)"
+                      />
+                      <span class="font-mono text-xs">{{ scope }}</span>
+                    </label>
+                  }
+                </div>
+              </div>
+
+              <div class="mt-4 flex items-center gap-3">
+                <button
+                  (click)="createOrgApiKey()"
+                  [disabled]="creatingOrgApiKey()"
+                  class="btn-primary"
+                >
+                  {{ creatingOrgApiKey() ? 'Creating…' : 'Create scoped key' }}
+                </button>
+                <button
+                  (click)="resetOrgApiKeyScopes()"
+                  type="button"
+                  class="px-3 py-1.5 text-sm text-slate-400 transition-colors hover:text-slate-200"
+                >
+                  Select all
+                </button>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+              <div class="flex items-center justify-between gap-3">
+                <h3 class="text-sm font-semibold text-slate-100">Issued keys</h3>
+                @if (orgApiKeysLoading()) {
+                  <span class="text-xs text-slate-500">Refreshing…</span>
+                }
+              </div>
+
+              @if (!orgApiKeys().length && !orgApiKeysLoading()) {
+                <p class="mt-4 text-sm text-slate-500">No scoped keys have been created yet.</p>
+              } @else {
+                <div class="mt-4 space-y-3">
+                  @for (key of orgApiKeys(); track key.id) {
+                    <article class="rounded-lg border border-slate-800 bg-slate-900/70 px-4 py-3">
+                      <div class="flex items-start justify-between gap-4">
+                        <div>
+                          <div class="flex flex-wrap items-center gap-2">
+                            <span class="text-sm font-semibold text-slate-100">{{ key.name }}</span>
+                            <span class="rounded-full border border-slate-700 px-2 py-0.5 font-mono text-[11px] text-slate-400">
+                              {{ key.key_prefix }}
+                            </span>
+                            @if (key.revoked) {
+                              <span class="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[11px] text-red-300">
+                                revoked
+                              </span>
+                            }
+                          </div>
+                          <div class="mt-2 flex flex-wrap gap-2">
+                            @for (scope of key.scopes; track scope) {
+                              <span class="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[11px] font-mono text-indigo-300">
+                                {{ scope }}
+                              </span>
+                            }
+                          </div>
+                          <div class="mt-3 text-xs text-slate-500">
+                            Created by {{ key.created_by }} · Last used {{ key.last_used_at ?? 'never' }}
+                          </div>
+                        </div>
+                        <button
+                          (click)="revokeOrgApiKey(key.id)"
+                          [disabled]="key.revoked || revokingOrgApiKeyIds()[key.id]"
+                          class="rounded-lg border border-red-500/30 px-3 py-1.5 text-sm text-red-300 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {{ revokingOrgApiKeyIds()[key.id] ? 'Revoking…' : 'Revoke' }}
+                        </button>
+                      </div>
+                    </article>
+                  }
+                </div>
+              }
+            </div>
+          </div>
+        }
+      </div>
+
+      <div class="card mb-6">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h2 class="text-base font-semibold text-slate-100 mb-1">Risk Configuration</h2>
+            <p class="text-sm text-slate-400">
+              Tune the per-org risk weights and thresholds the backend uses when Cedar allows a request but risk scoring may escalate it.
+            </p>
+          </div>
+          <span class="rounded-full border border-slate-700 px-2 py-1 text-[11px] uppercase tracking-wide text-slate-400">
+            Admin only
+          </span>
+        </div>
+
+        @if (riskConfigError()) {
+          <div class="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+            {{ riskConfigError() }}
+          </div>
+        }
+
+        @if (riskConfigSaved()) {
+          <div class="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
+            Risk configuration saved.
+          </div>
+        }
+
+        @if (org()?.role !== 'admin') {
+          <p class="mt-4 text-sm text-slate-500">
+            Risk tuning is visible to admins only. Non-admins continue using the org defaults set on the backend.
+          </p>
+        } @else {
+          <div class="mt-4 grid gap-4 md:grid-cols-2">
+            <label class="text-sm text-slate-300">
+              <span class="mb-1 block text-xs text-slate-400">Action severity weight</span>
+              <input [(ngModel)]="riskConfigForm.weight_action_severity" type="number" min="0" max="1" step="0.01" class="input w-full" />
+            </label>
+            <label class="text-sm text-slate-300">
+              <span class="mb-1 block text-xs text-slate-400">Context signals weight</span>
+              <input [(ngModel)]="riskConfigForm.weight_context_signals" type="number" min="0" max="1" step="0.01" class="input w-full" />
+            </label>
+            <label class="text-sm text-slate-300">
+              <span class="mb-1 block text-xs text-slate-400">Rate pattern weight</span>
+              <input [(ngModel)]="riskConfigForm.weight_rate_pattern" type="number" min="0" max="1" step="0.01" class="input w-full" />
+            </label>
+            <label class="text-sm text-slate-300">
+              <span class="mb-1 block text-xs text-slate-400">Agent trust weight</span>
+              <input [(ngModel)]="riskConfigForm.weight_agent_trust" type="number" min="0" max="1" step="0.01" class="input w-full" />
+            </label>
+            <label class="text-sm text-slate-300">
+              <span class="mb-1 block text-xs text-slate-400">Amount scale weight</span>
+              <input [(ngModel)]="riskConfigForm.weight_amount_scale" type="number" min="0" max="1" step="0.01" class="input w-full" />
+            </label>
+            <label class="text-sm text-slate-300">
+              <span class="mb-1 block text-xs text-slate-400">Allow max threshold</span>
+              <input [(ngModel)]="riskConfigForm.threshold_allow_max" type="number" min="0" max="100" step="1" class="input w-full" />
+            </label>
+            <label class="text-sm text-slate-300 md:col-span-2">
+              <span class="mb-1 block text-xs text-slate-400">Approval max threshold</span>
+              <input [(ngModel)]="riskConfigForm.threshold_approval_max" type="number" min="0" max="100" step="1" class="input w-full" />
+            </label>
+          </div>
+
+          <div class="mt-4 flex items-center gap-3">
+            <button
+              (click)="saveRiskConfig()"
+              [disabled]="riskConfigSaving() || riskConfigLoading()"
+              class="btn-primary"
+            >
+              {{ riskConfigSaving() ? 'Saving…' : 'Save risk configuration' }}
+            </button>
+            <span class="text-xs text-slate-500">
+              Resource sensitivity continues using the backend’s current default weight.
+            </span>
+          </div>
+        }
+      </div>
+
       <!-- About -->
       <div class="card">
         <h2 class="text-base font-semibold text-slate-100 mb-1">About</h2>
@@ -372,6 +632,18 @@ export class SettingsComponent implements OnInit {
   readonly ssoError = signal('');
   readonly ssoSaved = signal(false);
   readonly sso = signal<SsoSettings | null>(null);
+  readonly availableApiKeyScopes = [...AVAILABLE_API_KEY_SCOPES];
+  readonly orgApiKeys = signal<OrgApiKey[]>([]);
+  readonly orgApiKeysLoading = signal(false);
+  readonly orgApiKeysError = signal('');
+  readonly creatingOrgApiKey = signal(false);
+  readonly createdOrgApiKey = signal<OrgApiKeyCreateResponse | null>(null);
+  readonly revokingOrgApiKeyIds = signal<Record<string, boolean>>({});
+  readonly riskConfig = signal<OrgRiskConfig | null>(null);
+  readonly riskConfigLoading = signal(false);
+  readonly riskConfigSaving = signal(false);
+  readonly riskConfigError = signal('');
+  readonly riskConfigSaved = signal(false);
 
   ssoEnabled = false;
   ssoAutoJoin = false;
@@ -381,6 +653,9 @@ export class SettingsComponent implements OnInit {
   ssoEntityIdInput = '';
   ssoDomainsInput = '';
   ssoDefaultRole: 'admin' | 'operator' | 'viewer' = 'viewer';
+  orgApiKeyNameInput = '';
+  selectedOrgApiKeyScopes: AvailableApiKeyScope[] = [...AVAILABLE_API_KEY_SCOPES];
+  riskConfigForm: RiskConfigFormModel = defaultRiskConfigForm();
 
   ngOnInit(): void {
     if (this.hasKey()) {
@@ -474,7 +749,79 @@ export class SettingsComponent implements OnInit {
     this.org.set(null);
     this.usage.set(null);
     this.sso.set(null);
+    this.orgApiKeys.set([]);
+    this.createdOrgApiKey.set(null);
+    this.riskConfig.set(null);
     this.showKey.set(false);
+  }
+
+  toggleOrgApiKeyScope(scope: AvailableApiKeyScope, checked: boolean): void {
+    if (checked) {
+      this.selectedOrgApiKeyScopes = Array.from(new Set([...this.selectedOrgApiKeyScopes, scope]));
+      return;
+    }
+    this.selectedOrgApiKeyScopes = this.selectedOrgApiKeyScopes.filter((item) => item !== scope);
+  }
+
+  resetOrgApiKeyScopes(): void {
+    this.selectedOrgApiKeyScopes = [...AVAILABLE_API_KEY_SCOPES];
+  }
+
+  createOrgApiKey(): void {
+    if (!this.orgApiKeyNameInput.trim()) {
+      this.orgApiKeysError.set('Provide a name for the scoped API key.');
+      return;
+    }
+    if (!this.selectedOrgApiKeyScopes.length) {
+      this.orgApiKeysError.set('Select at least one scope before creating a key.');
+      return;
+    }
+
+    this.creatingOrgApiKey.set(true);
+    this.orgApiKeysError.set('');
+    this.orgSvc
+      .createApiKey({
+        name: this.orgApiKeyNameInput.trim(),
+        scopes: this.selectedOrgApiKeyScopes,
+      })
+      .subscribe({
+        next: (created) => {
+          this.creatingOrgApiKey.set(false);
+          this.createdOrgApiKey.set(created);
+          this.orgApiKeyNameInput = '';
+          this.resetOrgApiKeyScopes();
+          this.orgApiKeys.update((keys) => [created, ...keys]);
+        },
+        error: () => {
+          this.creatingOrgApiKey.set(false);
+          this.orgApiKeysError.set('Unable to create a scoped API key right now.');
+        },
+      });
+  }
+
+  revokeOrgApiKey(keyId: string): void {
+    this.revokingOrgApiKeyIds.update((state) => ({ ...state, [keyId]: true }));
+    this.orgApiKeysError.set('');
+    this.orgSvc.revokeApiKey(keyId).subscribe({
+      next: () => {
+        this.revokingOrgApiKeyIds.update((state) => {
+          const next = { ...state };
+          delete next[keyId];
+          return next;
+        });
+        this.orgApiKeys.update((keys) =>
+          keys.map((key) => (key.id === keyId ? { ...key, revoked: true } : key))
+        );
+      },
+      error: () => {
+        this.revokingOrgApiKeyIds.update((state) => {
+          const next = { ...state };
+          delete next[keyId];
+          return next;
+        });
+        this.orgApiKeysError.set('Unable to revoke this API key right now.');
+      },
+    });
   }
 
   saveSsoSettings(): void {
@@ -530,7 +877,20 @@ export class SettingsComponent implements OnInit {
   }
 
   private loadOrgContext(): void {
-    this.orgSvc.getMe().subscribe({ next: (o) => this.org.set(o) });
+    this.orgSvc.getMe().subscribe({
+      next: (o) => {
+        this.org.set(o);
+        if (o.role === 'admin') {
+          this.loadScopedApiKeys();
+          this.loadRiskConfig();
+        } else {
+          this.orgApiKeys.set([]);
+          this.orgApiKeysError.set('');
+          this.riskConfig.set(null);
+          this.riskConfigError.set('');
+        }
+      },
+    });
     this.orgSvc.getUsage().subscribe({
       next: (usage) => this.usage.set(usage),
       error: () => this.usage.set(null),
@@ -547,6 +907,54 @@ export class SettingsComponent implements OnInit {
     });
   }
 
+  private loadScopedApiKeys(): void {
+    this.orgApiKeysLoading.set(true);
+    this.orgApiKeysError.set('');
+    this.orgSvc.listApiKeys().subscribe({
+      next: (keys) => {
+        this.orgApiKeys.set(keys);
+        this.orgApiKeysLoading.set(false);
+      },
+      error: () => {
+        this.orgApiKeysLoading.set(false);
+        this.orgApiKeysError.set('Scoped API keys are not available right now.');
+      },
+    });
+  }
+
+  private loadRiskConfig(): void {
+    this.riskConfigLoading.set(true);
+    this.riskConfigError.set('');
+    this.orgSvc.getRiskConfig().subscribe({
+      next: (config) => {
+        this.applyRiskConfig(config);
+        this.riskConfigLoading.set(false);
+      },
+      error: () => {
+        this.riskConfigLoading.set(false);
+        this.riskConfigError.set('Unable to load the risk configuration.');
+      },
+    });
+  }
+
+  saveRiskConfig(): void {
+    this.riskConfigSaving.set(true);
+    this.riskConfigError.set('');
+    this.riskConfigSaved.set(false);
+    this.orgSvc.updateRiskConfig({ ...this.riskConfigForm }).subscribe({
+      next: (config) => {
+        this.applyRiskConfig(config);
+        this.riskConfigSaving.set(false);
+        this.riskConfigSaved.set(true);
+        setTimeout(() => this.riskConfigSaved.set(false), 3000);
+      },
+      error: () => {
+        this.riskConfigSaving.set(false);
+        this.riskConfigError.set('Unable to save the risk configuration.');
+      },
+    });
+  }
+
   private applySsoSettings(settings: SsoSettings): void {
     this.sso.set(settings);
     this.ssoEnabled = settings.enabled;
@@ -558,5 +966,18 @@ export class SettingsComponent implements OnInit {
     this.ssoDomainsInput = settings.domains.join(', ');
     this.ssoDefaultRole = settings.default_role;
     this.ssoError.set('');
+  }
+
+  private applyRiskConfig(config: OrgRiskConfig): void {
+    this.riskConfig.set(config);
+    this.riskConfigForm = {
+      weight_action_severity: config.weight_action_severity,
+      weight_context_signals: config.weight_context_signals,
+      weight_rate_pattern: config.weight_rate_pattern,
+      weight_agent_trust: config.weight_agent_trust,
+      weight_amount_scale: config.weight_amount_scale,
+      threshold_allow_max: config.threshold_allow_max,
+      threshold_approval_max: config.threshold_approval_max,
+    };
   }
 }

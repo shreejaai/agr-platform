@@ -5,13 +5,13 @@ describe('ApiKeyService', () => {
   let service: ApiKeyService;
 
   beforeEach(() => {
-    localStorage.clear();
+    sessionStorage.clear();
     TestBed.configureTestingModule({});
     service = TestBed.inject(ApiKeyService);
   });
 
   afterEach(() => {
-    localStorage.clear();
+    sessionStorage.clear();
   });
 
   it('should be created', () => {

@@ -150,6 +150,14 @@ class EvaluateResponse(BaseModel):
     compliance_findings: list[ComplianceFindingResponse] | None = Field(
         default=None, description="Advisory compliance findings (EU AI Act, SOC2, ISO42001)."
     )
+    compliance_block: bool = Field(
+        default=False,
+        description="True when a compliance plugin in enforce mode blocked the request.",
+    )
+    compliance_reason: str | None = Field(
+        default=None,
+        description="Structured denial reason from the blocking compliance finding, when present.",
+    )
     compliance_blocked: bool = Field(
         default=False,
         description="True when a compliance control upgraded the result to DENY.",

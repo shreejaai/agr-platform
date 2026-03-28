@@ -364,10 +364,11 @@ async def evaluate(
             response.headers["traceparent"] = traceparent
 
     # -------------------------------------------------------------------------
-    # Compliance hooks — advisory only, never blocks; fail-open on errors
+    # Compliance hooks — fail-open on errors; enforce-mode plugins can block
     # -------------------------------------------------------------------------
     compliance_findings: list[dict[str, object]] | None = None
     compliance_blocked = False
+    deny_reason: str | None = None
     try:
         config_rows = await session.execute(
             sa_select(OrgComplianceConfig).where(OrgComplianceConfig.org_id == org_id)
@@ -388,13 +389,14 @@ async def evaluate(
         )
         comp_result = await get_registry().run_all(comp_ctx, enforcement_modes=enforcement_modes)
         compliance_findings = comp_result.to_dict() if comp_result.findings else None
-        if comp_result.blocked and comp_result.blocking_finding is not None:
+        if comp_result.blocking_finding is not None:
             compliance_blocked = True
             result.decision = "DENY"
-            result.reason = (
-                "Compliance policy blocked: "
-                f"{comp_result.blocking_finding.rule_id} — {comp_result.blocking_finding.message}"
+            deny_reason = (
+                f"Compliance enforcement blocked: [{comp_result.blocking_finding.plugin_id}] "
+                f"{comp_result.blocking_finding.message}"
             )
+            result.reason = deny_reason
     except Exception as exc:
         logger.warning("Compliance hooks failed (ignoring): %s", exc)
 
@@ -447,8 +449,8 @@ async def evaluate(
         )
     if compliance_findings:
         extra_payload["compliance_findings"] = compliance_findings
-    if compliance_blocked:
-        extra_payload["compliance_blocked"] = True
+    extra_payload["compliance_blocked"] = compliance_blocked
+    extra_payload["compliance_block_reason"] = deny_reason
 
     await create_audit_event(
         session=session,
@@ -515,6 +517,8 @@ async def evaluate(
         risk_level=risk.level if risk else None,
         risk_factors=risk.factors if risk else None,
         compliance_findings=cast(list[ComplianceFindingResponse] | None, compliance_findings),
+        compliance_block=compliance_blocked,
+        compliance_reason=deny_reason if compliance_blocked else None,
         compliance_blocked=compliance_blocked,
         anomaly_detected=anomaly_detected,
         anomaly_flags=anomaly_flags,

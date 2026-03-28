@@ -68,3 +68,38 @@ export interface PolicyTemplate {
   tags: string[];
   policies: PolicyImportItem[];
 }
+
+export interface PolicyTestCase {
+  name: string;
+  agent_id: string;
+  action: string;
+  resource: string;
+  context: Record<string, unknown>;
+  expected_decision: 'ALLOW' | 'DENY' | 'APPROVAL_REQUIRED';
+}
+
+export interface PolicyTestCaseResult {
+  name: string;
+  passed: boolean;
+  actual_decision: string;
+  expected_decision: string;
+  reason: string;
+  latency_ms: number;
+}
+
+export interface PolicyTestSuite {
+  id: string;
+  name: string;
+  description: string | null;
+  test_cases: PolicyTestCase[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PolicyTestSuiteRunResult {
+  total: number;
+  passed: number;
+  failed: number;
+  results: PolicyTestCaseResult[];
+  duration_ms: number;
+}

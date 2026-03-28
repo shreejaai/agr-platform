@@ -29,6 +29,12 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 DEFAULT_CEDAR_POOL_SIZE = 4
 CEDAR_DEGRADED = False
+CEDAR_FALLBACK_MODE = os.getenv("CEDAR_FALLBACK_MODE", "deny")
+if CEDAR_FALLBACK_MODE not in {"allow", "deny", "warn"}:
+    raise ValueError(
+        "Invalid CEDAR_FALLBACK_MODE=%r. Expected one of {'allow', 'deny', 'warn'}."
+        % CEDAR_FALLBACK_MODE
+    )
 _CEDAR_POOL_SIZE_OVERRIDE: int | None = None
 _cedar_pool: "CedarProcessPool | None" = None
 _cedar_pool_lock = threading.Lock()
@@ -281,31 +287,115 @@ def evaluate_policies(
             return result
         except Exception as exc:
             fallback_reason = f"cedar_cli_error: {exc}"
+            if CEDAR_FALLBACK_MODE == "deny":
+                decision = "DENY"
+                logger.warning(
+                    "Cedar CLI not available — fallback_mode=%r decision=%r "
+                    "fallback_reason=%r agent_id=%r action=%r resource=%r",
+                    CEDAR_FALLBACK_MODE,
+                    decision,
+                    fallback_reason,
+                    agent_id,
+                    action,
+                    resource,
+                )
+                return EvaluationResult(
+                    decision=decision,
+                    reason="Cedar CLI unavailable. Safe deny fallback mode is active.",
+                    policy_id=None,
+                    requires_approval=False,
+                    latency_ms=(time.perf_counter_ns() - start) / 1_000_000,
+                    policy_source="python_fallback",
+                    fallback_used=True,
+                    fallback_reason="cedar_cli_error_safe_deny",
+                )
+            if CEDAR_FALLBACK_MODE == "allow":
+                decision = "ALLOW"
+                logger.warning(
+                    "Cedar CLI not available — fallback_mode=%r decision=%r "
+                    "fallback_reason=%r agent_id=%r action=%r resource=%r",
+                    CEDAR_FALLBACK_MODE,
+                    decision,
+                    fallback_reason,
+                    agent_id,
+                    action,
+                    resource,
+                )
+                return EvaluationResult(
+                    decision=decision,
+                    reason="Cedar CLI unavailable. Safe allow fallback mode is active.",
+                    policy_id=None,
+                    requires_approval=False,
+                    latency_ms=(time.perf_counter_ns() - start) / 1_000_000,
+                    policy_source="python_fallback",
+                    fallback_used=True,
+                    fallback_reason="cedar_cli_error_safe_allow",
+                )
+
+            result = _python_evaluator(cedar_policies, agent_id, action, resource, context)
+            result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
+            result.fallback_used = True
+            result.fallback_reason = fallback_reason
             logger.warning(
-                "Cedar CLI evaluation failed — using Python fallback. "
+                "Cedar CLI not available — fallback_mode=%r decision=%r "
                 "fallback_reason=%r agent_id=%r action=%r resource=%r",
+                CEDAR_FALLBACK_MODE,
+                result.decision,
                 fallback_reason,
                 agent_id,
                 action,
                 resource,
             )
-            result = _python_evaluator(cedar_policies, agent_id, action, resource, context)
-            result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
-            result.fallback_used = True
-            result.fallback_reason = fallback_reason
             return result
 
     fallback_reason = "cedar_cli_not_found"
-    logger.debug(
-        "Cedar CLI not on PATH — using Python fallback. "
-        "Install cedar-policy-cli for authoritative enforcement. "
-        "fallback_reason=%r",
-        fallback_reason,
-    )
+    if CEDAR_FALLBACK_MODE == "deny":
+        decision = "DENY"
+        logger.warning(
+            "Cedar CLI not available — fallback_mode=%r decision=%r fallback_reason=%r",
+            CEDAR_FALLBACK_MODE,
+            decision,
+            fallback_reason,
+        )
+        return EvaluationResult(
+            decision=decision,
+            reason="Cedar CLI not on PATH. Safe deny fallback mode is active.",
+            policy_id=None,
+            requires_approval=False,
+            latency_ms=(time.perf_counter_ns() - start) / 1_000_000,
+            policy_source="python_fallback",
+            fallback_used=True,
+            fallback_reason="cedar_cli_not_found_safe_deny",
+        )
+    if CEDAR_FALLBACK_MODE == "allow":
+        decision = "ALLOW"
+        logger.warning(
+            "Cedar CLI not available — fallback_mode=%r decision=%r fallback_reason=%r",
+            CEDAR_FALLBACK_MODE,
+            decision,
+            fallback_reason,
+        )
+        return EvaluationResult(
+            decision=decision,
+            reason="Cedar CLI not on PATH. Safe allow fallback mode is active.",
+            policy_id=None,
+            requires_approval=False,
+            latency_ms=(time.perf_counter_ns() - start) / 1_000_000,
+            policy_source="python_fallback",
+            fallback_used=True,
+            fallback_reason="cedar_cli_not_found_safe_allow",
+        )
+
     result = _python_evaluator(cedar_policies, agent_id, action, resource, context)
     result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
     result.fallback_used = True
     result.fallback_reason = fallback_reason
+    logger.warning(
+        "Cedar CLI not available — fallback_mode=%r decision=%r fallback_reason=%r",
+        CEDAR_FALLBACK_MODE,
+        result.decision,
+        fallback_reason,
+    )
     return result
 
 

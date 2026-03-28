@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_session
 from app.dependencies import require_role
+from app.middleware.auth import require_scope
 from app.models import Webhook, WebhookDelivery
 from app.schemas import (
     WebhookCreate,
@@ -57,7 +58,12 @@ def _to_response(wh: Webhook, reveal_secret: bool = False) -> WebhookResponse:
     )
 
 
-@router.post("/webhooks", response_model=WebhookResponse, status_code=201)
+@router.post(
+    "/webhooks",
+    response_model=WebhookResponse,
+    status_code=201,
+    dependencies=[Depends(require_scope("webhooks:write"))],
+)
 async def create_webhook(
     body: WebhookCreate,
     request: Request,
@@ -87,7 +93,11 @@ async def create_webhook(
     return _to_response(wh, reveal_secret=True)  # only time the secret is shown
 
 
-@router.get("/webhooks", response_model=list[WebhookResponse])
+@router.get(
+    "/webhooks",
+    response_model=list[WebhookResponse],
+    dependencies=[Depends(require_scope("webhooks:read"))],
+)
 async def list_webhooks(
     request: Request,
     session: AsyncSession = Depends(get_session),
@@ -99,7 +109,11 @@ async def list_webhooks(
     return [_to_response(wh) for wh in result.scalars().all()]
 
 
-@router.get("/webhooks/{webhook_id}", response_model=WebhookResponse)
+@router.get(
+    "/webhooks/{webhook_id}",
+    response_model=WebhookResponse,
+    dependencies=[Depends(require_scope("webhooks:read"))],
+)
 async def get_webhook(
     webhook_id: uuid.UUID,
     request: Request,
@@ -115,7 +129,11 @@ async def get_webhook(
     return _to_response(wh)
 
 
-@router.patch("/webhooks/{webhook_id}", response_model=WebhookResponse)
+@router.patch(
+    "/webhooks/{webhook_id}",
+    response_model=WebhookResponse,
+    dependencies=[Depends(require_scope("webhooks:write"))],
+)
 async def update_webhook(
     webhook_id: uuid.UUID,
     body: WebhookUpdate,
@@ -149,7 +167,11 @@ async def update_webhook(
     return _to_response(wh)
 
 
-@router.delete("/webhooks/{webhook_id}", status_code=204)
+@router.delete(
+    "/webhooks/{webhook_id}",
+    status_code=204,
+    dependencies=[Depends(require_scope("webhooks:write"))],
+)
 async def delete_webhook(
     webhook_id: uuid.UUID,
     request: Request,
@@ -181,7 +203,11 @@ def _delivery_to_response(d: WebhookDelivery) -> WebhookDeliveryResponse:
     )
 
 
-@router.get("/webhooks/{webhook_id}/deliveries", response_model=list[WebhookDeliveryResponse])
+@router.get(
+    "/webhooks/{webhook_id}/deliveries",
+    response_model=list[WebhookDeliveryResponse],
+    dependencies=[Depends(require_scope("webhooks:read"))],
+)
 async def list_deliveries(
     webhook_id: uuid.UUID,
     request: Request,
@@ -212,7 +238,7 @@ async def list_deliveries(
 @router.post(
     "/webhooks/{webhook_id}/deliveries/{delivery_id}/retry",
     response_model=WebhookDeliveryResponse,
-    dependencies=[Depends(require_role("admin"))],
+    dependencies=[Depends(require_scope("webhooks:write")), Depends(require_role("admin"))],
 )
 async def retry_delivery(
     webhook_id: uuid.UUID,
@@ -231,12 +257,12 @@ async def retry_delivery(
 @router.post(
     "/webhooks/{webhook_id}/rotate-secret",
     response_model=WebhookRotateSecretResponse,
-    dependencies=[Depends(require_role("admin"))],
+    dependencies=[Depends(require_scope("webhooks:write")), Depends(require_role("admin"))],
 )
 @router.post(
     "/webhooks/{webhook_id}/rotate_secret",
     response_model=WebhookRotateSecretResponse,
-    dependencies=[Depends(require_role("admin"))],
+    dependencies=[Depends(require_scope("webhooks:write")), Depends(require_role("admin"))],
 )
 async def rotate_webhook_secret(
     webhook_id: uuid.UUID,
@@ -272,6 +298,7 @@ async def rotate_webhook_secret(
 @router.post(
     "/webhooks/{webhook_id}/test",
     response_model=WebhookTestResponse,
+    dependencies=[Depends(require_scope("webhooks:write"))],
 )
 async def test_webhook(
     webhook_id: uuid.UUID,
