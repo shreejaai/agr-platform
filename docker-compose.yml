@@ -118,6 +118,7 @@ services:
       POSTGRES_PWD: ${POSTGRES_PASSWORD}
       POSTGRES_SEEDS: postgres
       BIND_ON_IP: 0.0.0.0
+      BROADCAST_ADDRESS: temporal
     ports:
       - "7233:7233"
     healthcheck:
