@@ -32,8 +32,8 @@ CEDAR_DEGRADED = False
 CEDAR_FALLBACK_MODE = os.getenv("CEDAR_FALLBACK_MODE", "deny")
 if CEDAR_FALLBACK_MODE not in {"allow", "deny", "warn"}:
     raise ValueError(
-        "Invalid CEDAR_FALLBACK_MODE=%r. Expected one of {'allow', 'deny', 'warn'}."
-        % CEDAR_FALLBACK_MODE
+        f"Invalid CEDAR_FALLBACK_MODE={CEDAR_FALLBACK_MODE!r}. "
+        "Expected one of {'allow', 'deny', 'warn'}."
     )
 _CEDAR_POOL_SIZE_OVERRIDE: int | None = None
 _cedar_pool: "CedarProcessPool | None" = None

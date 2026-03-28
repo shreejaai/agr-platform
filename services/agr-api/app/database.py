@@ -29,9 +29,7 @@ async_session_factory = async_sessionmaker(
 
 async def set_session_rls(session: AsyncSession, org_id: UUID) -> None:
     await session.execute(
-        text("SET LOCAL app.current_org_id = :org_id").bindparams(
-            bindparam("org_id", str(org_id))
-        )
+        text("SET LOCAL app.current_org_id = :org_id").bindparams(bindparam("org_id", str(org_id)))
     )
 
 
