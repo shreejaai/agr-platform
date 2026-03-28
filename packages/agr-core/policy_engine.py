@@ -761,7 +761,7 @@ def _compare_values(actual: object, operator: str, expected: object) -> bool:
         actual_value = _coerce_bool(actual)
         if actual_value is _MISSING_VALUE:
             return False
-    elif isinstance(expected, (int, float)):
+    elif isinstance(expected, int | float):
         actual_value = _coerce_number(actual)
         if actual_value is _MISSING_VALUE:
             return False
@@ -800,7 +800,7 @@ def _coerce_bool(value: object) -> object:
 
 
 def _coerce_number(value: object) -> object:
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
+    if isinstance(value, int | float) and not isinstance(value, bool):
         return value
     if isinstance(value, str):
         try:
