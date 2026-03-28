@@ -119,12 +119,6 @@ services:
       POSTGRES_SEEDS: postgres
     ports:
       - "7233:7233"
-    healthcheck:
-      test: ["CMD-SHELL", "temporal operator cluster health --address localhost:7233 2>/dev/null || exit 1"]
-      interval: 10s
-      timeout: 10s
-      start_period: 60s
-      retries: 15
     restart: unless-stopped
 
   temporal-ui:
@@ -132,7 +126,7 @@ services:
     image: temporalio/ui:2.26.2
     depends_on:
       temporal:
-        condition: service_healthy
+        condition: service_started
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_CORS_ORIGINS: http://localhost:8080
@@ -163,7 +157,7 @@ services:
       agr-api:
         condition: service_healthy
       temporal:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
 
 volumes:
