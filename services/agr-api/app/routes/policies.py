@@ -328,7 +328,11 @@ async def list_policy_analytics(
         if analytics.last_triggered_at is None:
             analytics.last_triggered_at = event.recorded_at
         if event.decision in {"ALLOW", "DENY", "APPROVAL_REQUIRED"}:
-            setattr(analytics.decisions, event.decision, getattr(analytics.decisions, event.decision) + 1)
+            setattr(
+                analytics.decisions,
+                event.decision,
+                getattr(analytics.decisions, event.decision) + 1,
+            )
 
     return list(analytics_by_policy_id.values())
 
