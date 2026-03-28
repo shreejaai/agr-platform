@@ -22,7 +22,7 @@ import os
 import httpx
 
 BASE_URL = os.environ.get("AGR_BASE_URL", "http://localhost:8000")
-API_KEY  = os.environ.get("AGR_API_KEY", "agr_sk_09313315b6461ae435c6855e34730c2677392862ae68c318")
+API_KEY  = os.environ.get("AGR_API_KEY", "agr_sk_YOUR_KEY_HERE")
 
 if not API_KEY:
     raise SystemExit("Set AGR_API_KEY first")
