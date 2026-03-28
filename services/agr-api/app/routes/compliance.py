@@ -6,7 +6,7 @@ import json
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from typing import Literal, cast
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
@@ -15,7 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models import AuditEvent, Organization, OrgComplianceConfig
-from app.schemas import ComplianceConfigResponse, ComplianceConfigUpdate, ComplianceSummaryResponse
+from app.schemas import (
+    ComplianceConfigResponse,
+    ComplianceConfigUpdate,
+    ComplianceEnforcementMode,
+    ComplianceSummaryResponse,
+)
 from app.services.compliance_service import (
     BUILT_IN_COMPLIANCE_PLUGIN_IDS,
     normalize_compliance_finding_payload,
@@ -46,7 +51,10 @@ async def get_compliance_config(
     result = await session.execute(
         select(OrgComplianceConfig).where(OrgComplianceConfig.org_id == org_id)
     )
-    current = {row.plugin_id: row.enforcement_mode for row in result.scalars().all()}
+    current: dict[str, ComplianceEnforcementMode] = {
+        row.plugin_id: cast(ComplianceEnforcementMode, row.enforcement_mode)
+        for row in result.scalars().all()
+    }
     return [
         ComplianceConfigResponse(
             plugin_id=plugin_id,
@@ -88,7 +96,7 @@ async def update_compliance_config(
     await session.refresh(config)
     return ComplianceConfigResponse(
         plugin_id=config.plugin_id,
-        enforcement_mode=cast(Literal["advisory", "enforce"], config.enforcement_mode),
+        enforcement_mode=cast(ComplianceEnforcementMode, config.enforcement_mode),
     )
 
 

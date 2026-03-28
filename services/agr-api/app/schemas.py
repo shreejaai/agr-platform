@@ -16,6 +16,10 @@ def _strip_ctrl(v: str) -> str:
     return _CTRL_CHARS.sub("", v)
 
 
+EngineMode = Literal["cedar_cli", "python_fallback", "cache"]
+ComplianceEnforcementMode = Literal["advisory", "enforce"]
+
+
 class EvaluateRequest(BaseModel):
     agent_id: str = Field(
         ...,
@@ -131,7 +135,7 @@ class EvaluateResponse(BaseModel):
     )
     latency_ms: float = Field(..., description="End-to-end evaluation latency in milliseconds.")
     eval_id: str = Field(..., description="Unique evaluation identifier for audit lookup.")
-    engine_mode: Literal["cedar_cli", "python_fallback", "cache"] = Field(
+    engine_mode: EngineMode = Field(
         default="cedar_cli",
         description="Execution engine used for this response.",
     )
@@ -458,12 +462,12 @@ class ComplianceSummaryResponse(BaseModel):
 
 class ComplianceConfigResponse(BaseModel):
     plugin_id: str
-    enforcement_mode: Literal["advisory", "enforce"]
+    enforcement_mode: ComplianceEnforcementMode
 
 
 class ComplianceConfigUpdate(BaseModel):
     plugin_id: str = Field(..., min_length=1, max_length=64)
-    enforcement_mode: Literal["advisory", "enforce"]
+    enforcement_mode: ComplianceEnforcementMode
 
 
 class OrgMeResponse(BaseModel):

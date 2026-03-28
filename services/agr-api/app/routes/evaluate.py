@@ -25,6 +25,7 @@ from app.middleware.tracing import format_traceparent, get_tracer
 from app.schemas import (
     ComplianceFindingResponse,
     DecisionTrace,
+    EngineMode,
     ErrorResponse,
     EvaluateRequest,
     EvaluateResponse,
@@ -57,7 +58,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["evaluate"])
 
 
-def _engine_mode(policy_source: str, fallback_used: bool) -> str:
+def _engine_mode(policy_source: str, fallback_used: bool) -> EngineMode:
     if policy_source == "cache":
         return "cache"
     if fallback_used or policy_source == "no_policies":
