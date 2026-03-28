@@ -1,0 +1,26 @@
+{
+  "name": "agr-e2e-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AGR domain scenario e2e tests — Finance, Pharma, Banking, Insurance",
+  "scripts": {
+    "test:smoke": "playwright test --config=e2e/playwright.config.ts --project=smoke",
+    "test:full": "playwright test --config=e2e/playwright.config.ts --project=full-suite",
+    "test:demo": "playwright test --config=e2e/playwright.config.ts --project=demo",
+    "test:finance": "playwright test --config=e2e/playwright.config.ts e2e/finance.spec.ts",
+    "test:pharma": "playwright test --config=e2e/playwright.config.ts e2e/pharma.spec.ts",
+    "test:banking": "playwright test --config=e2e/playwright.config.ts e2e/banking.spec.ts",
+    "test:insurance": "playwright test --config=e2e/playwright.config.ts e2e/insurance.spec.ts",
+    "report": "playwright show-report e2e/test-results/demo-report"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.43.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
+    "dotenv": "^16.4.0",
+    "typescript": "^5.4.0"
+  }
+}

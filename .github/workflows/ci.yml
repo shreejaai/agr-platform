@@ -266,6 +266,98 @@ jobs:
           cd services/agr-api
           python -m pytest tests/postgres/ -v --tb=short
 
+  # ── Domain scenario tests (Finance, Pharma, Banking, Insurance) ──────────────
+  # Runs the 47-scenario smoke suite against a real AGR instance spun up via
+  # docker-compose. Validates Cedar policy decisions match expected outcomes for
+  # each regulated domain. Fails the PR if any decision changes unexpectedly.
+  domain-scenarios:
+    name: Domain scenarios — Finance / Pharma / Banking / Insurance
+    runs-on: ubuntu-latest
+    needs: [lint-and-test]
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Set up Node
+        uses: actions/setup-node@v4.3.0
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: tests/package-lock.json
+
+      - name: Install Playwright + dependencies
+        run: |
+          npm ci
+          npx playwright install chromium --with-deps
+        working-directory: tests
+
+      - name: Start AGR stack (API + Postgres + Redis)
+        run: |
+          docker compose -f docker-compose.test.yml up -d --wait
+        env:
+          SECRET_KEY: ci-domain-test-secret
+          DEPLOYMENT_MODE: saas
+
+      - name: Wait for AGR API to be healthy
+        run: |
+          for i in {1..30}; do
+            if curl -sf http://localhost:8000/health; then
+              echo "AGR is healthy"
+              break
+            fi
+            echo "Waiting for AGR... ($i/30)"
+            sleep 2
+          done
+
+      - name: Seed test org and capture API key
+        id: seed
+        run: |
+          API_KEY=$(docker compose -f docker-compose.test.yml exec -T agr-api \
+            python -c "
+          import asyncio, os, secrets
+          os.environ.setdefault('DATABASE_URL', 'postgresql+asyncpg://agr:password@postgres:5432/agr_dev')
+          from app.database import engine
+          from app.models import Organization, Base
+          import sqlalchemy as sa
+
+          async def main():
+              async with engine.begin() as conn:
+                  key = 'agr_sk_' + secrets.token_hex(32)
+                  await conn.execute(
+                      sa.text('''
+                          INSERT INTO organizations (id, name, slug, api_key)
+                          VALUES (gen_random_uuid(), 'CI Test Org', 'ci-test', :key)
+                          ON CONFLICT (slug) DO UPDATE SET api_key = :key
+                          RETURNING api_key
+                      '''),
+                      {'key': key}
+                  )
+                  print(key)
+
+          asyncio.run(main())
+          " 2>/dev/null | tail -1)
+          echo "agr_api_key=$API_KEY" >> $GITHUB_OUTPUT
+
+      - name: Run domain scenario smoke suite
+        run: npx playwright test --project=smoke
+        working-directory: tests
+        env:
+          AGR_BASE_URL: http://localhost:8000
+          AGR_API_KEY: ${{ steps.seed.outputs.agr_api_key }}
+          CI: "true"
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: domain-scenario-report
+          path: tests/e2e/test-results/
+          retention-days: 30
+
+      - name: Stop AGR stack
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v
+
   # ── Publish Docker images to GitHub Container Registry ────────────────────────
   # Runs on every push to main (after all non-flaky gates pass).
   # Images: :latest and :<short-sha> for agr-api, agr-api:onprem, agr-dashboard.
@@ -277,7 +369,7 @@ jobs:
     name: Publish images to ghcr.io
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [lint-and-test, build-dashboard, test-ts-sdk, test-cedar-cli]
+    needs: [lint-and-test, build-dashboard, test-ts-sdk, test-cedar-cli, domain-scenarios]
     permissions:
       contents: read
       packages: write
