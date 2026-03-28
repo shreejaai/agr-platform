@@ -57,6 +57,8 @@ jobs:
       REDIS_URL: redis://localhost:6379
       SECRET_KEY: ci-test-secret-key
       ENV: test
+      # This job does not install the Cedar CLI; exercise the Python fallback path instead.
+      CEDAR_FALLBACK_MODE: warn
 
     steps:
       - uses: actions/checkout@v4.2.2
