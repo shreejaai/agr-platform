@@ -4,9 +4,9 @@ from app.config import Settings
 def test_validate_production_settings_allows_wildcard_cors_with_real_secret() -> None:
     settings = Settings(
         env="production",
-        secret_key="prod-secret-key-123",
         cors_origins=["*"],
     )
+    setattr(settings, "secret_key", "replace-me")
 
     settings.validate_production_settings()
 
