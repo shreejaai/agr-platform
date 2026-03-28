@@ -9,10 +9,9 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from app.database import set_session_rls
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.database import set_session_rls
 
 
 async def _set_rls_org(session: AsyncSession, org_id: str) -> None:

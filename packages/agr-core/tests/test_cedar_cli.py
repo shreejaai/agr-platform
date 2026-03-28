@@ -83,7 +83,7 @@ class TestCedarCliRequestFormat:
                     "cedar_rule": (
                         'forbid(principal, action == Action::"wire.transfer", resource) '
                         "when { context has amount && context.amount > 50000 } "
-                        'unless { context has approval_status && '
+                        "unless { context has approval_status && "
                         'context.approval_status == "approved" };'
                     ),
                 }
@@ -92,7 +92,7 @@ class TestCedarCliRequestFormat:
 
         assert (
             'permit(principal, action == Action::"wire.transfer", resource) '
-            'when { (context has amount && context.amount > 50000) && '
+            "when { (context has amount && context.amount > 50000) && "
             '(context has approval_status && context.approval_status == "approved") };'
         ) in policy_text
 

@@ -532,11 +532,7 @@ def _approval_companion_permit(rule: str) -> str | None:
     head = match.group("head").strip()
     when_clause = (match.group("when") or "").strip()
     unless_clause = match.group("unless").strip()
-
-    if when_clause:
-        condition = f"({when_clause}) && ({unless_clause})"
-    else:
-        condition = unless_clause
+    condition = f"({when_clause}) && ({unless_clause})" if when_clause else unless_clause
 
     return f"permit({head}) when {{ {condition} }};"
 
