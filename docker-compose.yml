@@ -111,7 +111,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DB: postgresql
+      DB: postgres12
       DB_PORT: "5432"
       POSTGRES_USER: ${POSTGRES_USER:-agr_svc_usr}
       POSTGRES_PWD: ${POSTGRES_PASSWORD}
