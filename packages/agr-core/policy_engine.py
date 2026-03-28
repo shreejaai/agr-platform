@@ -197,6 +197,9 @@ def get_cedar_process_pool(cedar_binary: str | None = None) -> CedarProcessPool:
         raise RuntimeError("cedar_cli_not_found")
 
     with _cedar_pool_lock:
+        if _cedar_pool is not None and _cedar_pool.cedar_binary != binary:
+            _cedar_pool.close()
+            _cedar_pool = None
         if _cedar_pool is None:
             _cedar_pool = CedarProcessPool(binary, _get_cedar_pool_size())
         return _cedar_pool

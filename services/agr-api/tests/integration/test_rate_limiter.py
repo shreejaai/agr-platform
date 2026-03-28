@@ -14,7 +14,11 @@ async def test_rate_limiter_returns_429_on_51st_request(
     async def fake_check_rate_limit(redis_client, org_id, limit, burst):  # noqa: ANN001
         counter["count"] += 1
         if counter["count"] <= 50:
-            return RateLimitResult(allowed=True, remaining=max(0, 50 - counter["count"]), reset_at=1.0)
+            return RateLimitResult(
+                allowed=True,
+                remaining=max(0, 50 - counter["count"]),
+                reset_at=1.0,
+            )
         return RateLimitResult(allowed=False, remaining=0, reset_at=2.0, retry_after=0.5)
 
     monkeypatch.setattr(rate_limiter_module, "check_rate_limit", fake_check_rate_limit)

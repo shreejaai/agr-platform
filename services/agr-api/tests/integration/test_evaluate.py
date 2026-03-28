@@ -429,7 +429,9 @@ async def test_evaluate_returns_python_fallback_engine_mode_when_cedar_missing(
 
 
 @pytest.mark.asyncio
-async def test_evaluate_sets_engine_header(client: AsyncClient, auth_headers: dict[str, str]) -> None:
+async def test_evaluate_sets_engine_header(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
     response = await client.post(
         "/v1/evaluate",
         json={

@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from agr.client import AGRClient
+if TYPE_CHECKING:
+    from agr.client import AGRClient
 
 try:
     from langchain_core.tools import BaseTool, ToolException
 except ImportError:  # pragma: no cover - optional dependency
-    class ToolException(Exception):
+
+    class ToolGuardError(Exception):
         pass
+
+    ToolException = ToolGuardError
 
     class BaseTool:  # type: ignore[no-redef]
         name: str = "tool"
@@ -68,4 +72,6 @@ class AGRToolGuard(BaseTool):
 
 
 def guard_tools(tools: list[BaseTool], agr_client: AGRClient, agent_id: str) -> list[AGRToolGuard]:
-    return [AGRToolGuard(agr_client=agr_client, wrapped_tool=tool, agent_id=agent_id) for tool in tools]
+    return [
+        AGRToolGuard(agr_client=agr_client, wrapped_tool=tool, agent_id=agent_id) for tool in tools
+    ]

@@ -4,7 +4,7 @@ import queue
 import threading
 import time
 
-from policy_engine import CedarProcessPool
+from policy_engine import CedarProcessPool, close_cedar_process_pool, get_cedar_process_pool
 
 
 class _FakeStdout:
@@ -144,3 +144,18 @@ def test_cedar_pool_respects_semaphore_concurrency_limit(monkeypatch) -> None:
         pool.close()
 
     assert results == ["ALLOW"] * 5
+
+
+def test_get_cedar_process_pool_recreates_pool_when_binary_changes(monkeypatch) -> None:
+    factory = _FakeProcessFactory()
+    monkeypatch.setattr("policy_engine.subprocess.Popen", factory)
+    close_cedar_process_pool()
+
+    try:
+        first_pool = get_cedar_process_pool("/tmp/fake-cedar")
+        second_pool = get_cedar_process_pool("/usr/local/bin/cedar")
+    finally:
+        close_cedar_process_pool()
+
+    assert first_pool is not second_pool
+    assert len(factory.processes) == first_pool.size + second_pool.size

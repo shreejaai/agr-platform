@@ -8,6 +8,7 @@ from typing import Any
 try:
     from langchain_core.callbacks.base import BaseCallbackHandler
 except ImportError:  # pragma: no cover - optional dependency
+
     class BaseCallbackHandler:  # type: ignore[no-redef]
         pass
 

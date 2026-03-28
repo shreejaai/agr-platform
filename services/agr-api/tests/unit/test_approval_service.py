@@ -39,7 +39,7 @@ async def test_create_approval_request_returns_db_only_mode(
         approval_module.start_approval_workflow = original_temporal
         slack_module.send_approval_slack = original_slack
 
-    assert getattr(approval, "workflow_mode") == "db_only"
+    assert approval.workflow_mode == "db_only"
     assert approval.temporal_run_id is None
 
 
@@ -75,5 +75,5 @@ async def test_create_approval_request_returns_temporal_mode(
         approval_module.start_approval_workflow = original_temporal
         slack_module.send_approval_slack = original_slack
 
-    assert getattr(approval, "workflow_mode") == "temporal"
+    assert approval.workflow_mode == "temporal"
     assert approval.temporal_run_id is not None

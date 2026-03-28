@@ -1,7 +1,6 @@
+from app.middleware.versioning import VersionNegotiationMiddleware
 from fastapi import Response
 from starlette.requests import Request
-
-from app.middleware.versioning import VersionNegotiationMiddleware
 
 
 def _request(path: str, headers: list[tuple[bytes, bytes]] | None = None) -> Request:
