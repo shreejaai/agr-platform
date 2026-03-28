@@ -272,3 +272,7 @@ uv.lock
 
 # AI temp files
 ai/tmp/
+
+# Demo seed scripts (contain hardcoded API keys)
+seed.py
+seed_demo.py
