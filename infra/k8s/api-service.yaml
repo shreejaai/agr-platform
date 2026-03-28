@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: agr-api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: agr-api
+  ports:
+    - port: 80
+      targetPort: 8000
+      protocol: TCP
+      name: http

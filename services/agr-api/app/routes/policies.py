@@ -1,17 +1,19 @@
 """CRUD for Cedar policies."""
 
 import logging
+import time
 import uuid
 from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_session
-from app.models import Policy, PolicyVersion
+from app.middleware.auth import require_scope
+from app.models import Policy, PolicyTestSuite, PolicyVersion
 from app.schemas import (
     ComplianceFindingResponse,
     DecisionTrace,
@@ -20,12 +22,18 @@ from app.schemas import (
     PolicyImportResponse,
     PolicyResponse,
     PolicyTemplateResponse,
+    PolicyTestCase,
+    PolicyTestCaseResult,
+    PolicyTestSuiteCreate,
+    PolicyTestSuiteRecordResponse,
+    PolicyTestSuiteRequest,
+    PolicyTestSuiteResponse,
     PolicyUpdate,
     PolicyVersionResponse,
     SimulateRequest,
     SimulateResponse,
 )
-from app.services.cedar_service import evaluate_request
+from app.services.cedar_service import evaluate_policy_set, evaluate_request, validate_cedar_rule
 from app.services.compliance_service import ComplianceContext, get_registry
 from app.services.policy_conflict_service import detect_conflicts
 from app.services.policy_import_service import export_policies, import_policies
@@ -92,6 +100,103 @@ def _policy_to_response(p: Policy, conflicts: list[str] | None = None) -> Policy
     )
 
 
+def _suite_to_response(suite: PolicyTestSuite) -> PolicyTestSuiteRecordResponse:
+    test_cases = list(suite.test_cases or [])
+    return PolicyTestSuiteRecordResponse(
+        id=str(suite.id),
+        name=suite.name,
+        description=suite.description,
+        test_cases=[PolicyTestCase.model_validate(test_case) for test_case in test_cases],
+        created_at=suite.created_at,
+        updated_at=suite.updated_at,
+    )
+
+
+async def _load_policy_set(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    agent_id: str,
+    policy_ids: list[str] | None,
+) -> list[dict[str, str]]:
+    if policy_ids is None:
+        result = await session.execute(
+            select(Policy).where(
+                Policy.org_id == org_id,
+                Policy.state == "active",
+                (Policy.agent_id.is_(None)) | (Policy.agent_id == agent_id),
+            )
+        )
+    else:
+        try:
+            normalized_ids = [uuid.UUID(policy_id) for policy_id in policy_ids]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid policy id: {exc}") from exc
+
+        result = await session.execute(
+            select(Policy).where(
+                Policy.org_id == org_id,
+                Policy.id.in_(normalized_ids),
+            )
+        )
+
+    return [{"id": str(policy.id), "cedar_rule": policy.cedar_rule} for policy in result.scalars()]
+
+
+async def _run_policy_test_suite(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    body: PolicyTestSuiteRequest,
+) -> PolicyTestSuiteResponse:
+    started = time.perf_counter()
+    results: list[PolicyTestCaseResult] = []
+
+    for test_case in body.test_cases:
+        policies = await _load_policy_set(session, org_id, test_case.agent_id, body.policy_ids)
+        evaluation = evaluate_policy_set(
+            policies,
+            test_case.agent_id,
+            test_case.action,
+            test_case.resource,
+            test_case.context,
+        )
+        passed = evaluation.decision == test_case.expected_decision
+        results.append(
+            PolicyTestCaseResult(
+                name=test_case.name,
+                passed=passed,
+                actual_decision=evaluation.decision,
+                expected_decision=test_case.expected_decision,
+                reason=evaluation.reason,
+                latency_ms=evaluation.latency_ms,
+            )
+        )
+
+    passed_count = sum(1 for result in results if result.passed)
+    return PolicyTestSuiteResponse(
+        total=len(results),
+        passed=passed_count,
+        failed=len(results) - passed_count,
+        results=results,
+        duration_ms=(time.perf_counter() - started) * 1000,
+    )
+
+
+def _to_github_actions_output(result: PolicyTestSuiteResponse) -> str:
+    lines: list[str] = []
+    for case in result.results:
+        if case.passed:
+            lines.append(f"::notice title=AGR Policy Test::{case.name} passed")
+            continue
+        lines.append(
+            "::error title=AGR Policy Test::"
+            f"{case.name} expected {case.expected_decision} but got {case.actual_decision}. "
+            f"{case.reason}"
+        )
+    if not lines:
+        lines.append("::notice title=AGR Policy Test::No test cases were executed")
+    return "\n".join(lines)
+
+
 async def _check_conflicts(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -114,7 +219,11 @@ async def _check_conflicts(
     return detect_conflicts(cedar_rule, name, existing)
 
 
-@router.get("/policies", response_model=list[PolicyResponse])
+@router.get(
+    "/policies",
+    response_model=list[PolicyResponse],
+    dependencies=[Depends(require_scope("policies:read"))],
+)
 async def list_policies(
     request: Request,
     session: AsyncSession = Depends(get_session),
@@ -134,13 +243,21 @@ async def list_policies(
     return [_policy_to_response(p) for p in policies]
 
 
-@router.post("/policies", response_model=PolicyResponse, status_code=201)
+@router.post(
+    "/policies",
+    response_model=PolicyResponse,
+    status_code=201,
+    dependencies=[Depends(require_scope("policies:write"))],
+)
 async def create_policy(
     body: PolicyCreate,
     request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> PolicyResponse:
     org_id: uuid.UUID = request.state.org_id
+    validation = validate_cedar_rule(body.cedar_rule)
+    if not validation.valid:
+        raise HTTPException(status_code=422, detail=f"Invalid Cedar rule: {validation.error}")
     conflicts = await _check_conflicts(session, org_id, body.cedar_rule, body.name)
     is_active = _state_to_active(body.state)
     policy = Policy(
@@ -166,7 +283,12 @@ async def create_policy(
 # /{policy_id} so FastAPI does not attempt to parse those literals as UUIDs.
 
 
-@router.post("/policies/import", response_model=PolicyImportResponse, status_code=200)
+@router.post(
+    "/policies/import",
+    response_model=PolicyImportResponse,
+    status_code=200,
+    dependencies=[Depends(require_scope("policies:write"))],
+)
 async def bulk_import_policies(
     body: PolicyImportRequest,
     request: Request,
@@ -184,7 +306,7 @@ async def bulk_import_policies(
     return result
 
 
-@router.get("/policies/export")
+@router.get("/policies/export", dependencies=[Depends(require_scope("policies:read"))])
 async def bulk_export_policies(
     request: Request,
     session: AsyncSession = Depends(get_session),
@@ -199,12 +321,20 @@ async def bulk_export_policies(
     )
 
 
-@router.get("/policies/templates", response_model=list[PolicyTemplateResponse])
+@router.get(
+    "/policies/templates",
+    response_model=list[PolicyTemplateResponse],
+    dependencies=[Depends(require_scope("policies:read"))],
+)
 async def list_policy_templates() -> list[PolicyTemplateResponse]:
     return [PolicyTemplateResponse.model_validate(item) for item in load_policy_templates()]
 
 
-@router.post("/policies/simulate", response_model=SimulateResponse)
+@router.post(
+    "/policies/simulate",
+    response_model=SimulateResponse,
+    dependencies=[Depends(require_scope("policies:read"))],
+)
 async def simulate_policy(
     body: SimulateRequest,
     request: Request,
@@ -289,7 +419,143 @@ async def simulate_policy(
     )
 
 
-@router.get("/policies/{policy_id}", response_model=PolicyResponse)
+@router.post(
+    "/policies/test",
+    response_model=PolicyTestSuiteResponse,
+    dependencies=[Depends(require_scope("policies:read"))],
+)
+async def run_policy_test_cases(
+    body: PolicyTestSuiteRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> PolicyTestSuiteResponse:
+    return await _run_policy_test_suite(session, request.state.org_id, body)
+
+
+@router.get(
+    "/policies/test-suites",
+    response_model=list[PolicyTestSuiteRecordResponse],
+    dependencies=[Depends(require_scope("policies:read"))],
+)
+async def list_policy_test_suites(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> list[PolicyTestSuiteRecordResponse]:
+    result = await session.execute(
+        select(PolicyTestSuite)
+        .where(PolicyTestSuite.org_id == request.state.org_id)
+        .order_by(PolicyTestSuite.updated_at.desc())
+    )
+    return [_suite_to_response(suite) for suite in result.scalars().all()]
+
+
+@router.post(
+    "/policies/test-suites",
+    response_model=PolicyTestSuiteRecordResponse,
+    status_code=201,
+    dependencies=[Depends(require_scope("policies:write"))],
+)
+async def create_policy_test_suite(
+    body: PolicyTestSuiteCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> PolicyTestSuiteRecordResponse:
+    suite = PolicyTestSuite(
+        id=uuid.uuid4(),
+        org_id=request.state.org_id,
+        name=body.name,
+        description=body.description,
+        test_cases=[test_case.model_dump() for test_case in body.test_cases],
+    )
+    session.add(suite)
+    await session.flush()
+    await session.refresh(suite)
+    return _suite_to_response(suite)
+
+
+@router.get(
+    "/policies/test-suites/{suite_id}",
+    response_model=PolicyTestSuiteRecordResponse,
+    dependencies=[Depends(require_scope("policies:read"))],
+)
+async def get_policy_test_suite(
+    suite_id: uuid.UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> PolicyTestSuiteRecordResponse:
+    result = await session.execute(
+        select(PolicyTestSuite).where(
+            PolicyTestSuite.id == suite_id,
+            PolicyTestSuite.org_id == request.state.org_id,
+        )
+    )
+    suite = result.scalar_one_or_none()
+    if suite is None:
+        raise HTTPException(status_code=404, detail="Policy test suite not found.")
+    return _suite_to_response(suite)
+
+
+@router.delete(
+    "/policies/test-suites/{suite_id}",
+    status_code=204,
+    dependencies=[Depends(require_scope("policies:write"))],
+)
+async def delete_policy_test_suite(
+    suite_id: uuid.UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    result = await session.execute(
+        select(PolicyTestSuite).where(
+            PolicyTestSuite.id == suite_id,
+            PolicyTestSuite.org_id == request.state.org_id,
+        )
+    )
+    suite = result.scalar_one_or_none()
+    if suite is None:
+        raise HTTPException(status_code=404, detail="Policy test suite not found.")
+    await session.delete(suite)
+    await session.flush()
+
+
+@router.post(
+    "/policies/test-suites/{suite_id}/run",
+    response_model=PolicyTestSuiteResponse,
+    dependencies=[Depends(require_scope("policies:read"))],
+)
+async def run_policy_test_suite(
+    suite_id: uuid.UUID,
+    request: Request,
+    format: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> PolicyTestSuiteResponse | PlainTextResponse:
+    result = await session.execute(
+        select(PolicyTestSuite).where(
+            PolicyTestSuite.id == suite_id,
+            PolicyTestSuite.org_id == request.state.org_id,
+        )
+    )
+    suite = result.scalar_one_or_none()
+    if suite is None:
+        raise HTTPException(status_code=404, detail="Policy test suite not found.")
+
+    test_cases = list(suite.test_cases or [])
+    suite_request = PolicyTestSuiteRequest(
+        test_cases=[PolicyTestCase.model_validate(test_case) for test_case in test_cases]
+    )
+    run_result = await _run_policy_test_suite(session, request.state.org_id, suite_request)
+
+    if format == "github_actions":
+        status_code = 200 if run_result.failed == 0 else 422
+        return PlainTextResponse(_to_github_actions_output(run_result), status_code=status_code)
+    return run_result
+
+
+@router.get(
+    "/policies/{policy_id}",
+    response_model=PolicyResponse,
+    dependencies=[Depends(require_scope("policies:read"))],
+)
 async def get_policy(
     policy_id: uuid.UUID,
     request: Request,
@@ -309,7 +575,11 @@ async def get_policy(
     return _policy_to_response(policy)
 
 
-@router.patch("/policies/{policy_id}", response_model=PolicyResponse)
+@router.patch(
+    "/policies/{policy_id}",
+    response_model=PolicyResponse,
+    dependencies=[Depends(require_scope("policies:write"))],
+)
 async def update_policy(
     policy_id: uuid.UUID,
     body: PolicyUpdate,
@@ -363,7 +633,11 @@ async def update_policy(
     return _policy_to_response(policy, conflicts=conflicts)
 
 
-@router.patch("/policies/{policy_id}/activate", response_model=PolicyResponse)
+@router.patch(
+    "/policies/{policy_id}/activate",
+    response_model=PolicyResponse,
+    dependencies=[Depends(require_scope("policies:write"))],
+)
 async def activate_policy(
     policy_id: uuid.UUID,
     request: Request,
@@ -391,7 +665,11 @@ async def activate_policy(
     return _policy_to_response(policy)
 
 
-@router.patch("/policies/{policy_id}/archive", response_model=PolicyResponse)
+@router.patch(
+    "/policies/{policy_id}/archive",
+    response_model=PolicyResponse,
+    dependencies=[Depends(require_scope("policies:write"))],
+)
 async def archive_policy(
     policy_id: uuid.UUID,
     request: Request,
@@ -423,6 +701,7 @@ async def archive_policy(
 @router.get(
     "/policies/{policy_id}/versions",
     response_model=list[PolicyVersionResponse],
+    dependencies=[Depends(require_scope("policies:read"))],
 )
 async def list_policy_versions(
     policy_id: uuid.UUID,
@@ -453,6 +732,7 @@ async def list_policy_versions(
 @router.post(
     "/policies/{policy_id}/rollback/{version}",
     response_model=PolicyResponse,
+    dependencies=[Depends(require_scope("policies:write"))],
 )
 async def rollback_policy(
     policy_id: uuid.UUID,
@@ -505,7 +785,11 @@ async def rollback_policy(
     return _policy_to_response(policy)
 
 
-@router.delete("/policies/{policy_id}", status_code=204)
+@router.delete(
+    "/policies/{policy_id}",
+    status_code=204,
+    dependencies=[Depends(require_scope("policies:write"))],
+)
 async def delete_policy(
     policy_id: uuid.UUID,
     request: Request,

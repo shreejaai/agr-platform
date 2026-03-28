@@ -1,19 +1,41 @@
 """Hash-chained append-only audit logger."""
 
+import asyncio
+import csv
 import hashlib
+import io
 import json
 import logging
+import os
+import tempfile
 import uuid
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import Select
 
+from app.database import async_session_factory
 from app.models import AuditEvent
 
 _MAX_PAYLOAD_BYTES = 64_000  # ~64 KB — prevents unbounded JSONB growth
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AuditExportJob:
+    job_id: str
+    format: str
+    status: str = "pending"
+    file_path: str | None = None
+    error: str | None = None
+
+
+_EXPORT_JOBS: dict[str, AuditExportJob] = {}
+_STREAM_BATCH_SIZE = 500
 
 
 def compute_entry_hash(
@@ -100,3 +122,151 @@ async def create_audit_event(
     session.add(event)
     await session.flush()
     return event
+
+
+def _event_to_export_dict(event: AuditEvent) -> dict[str, object]:
+    return {
+        "id": str(event.id),
+        "org_id": str(event.org_id),
+        "sequence_num": event.sequence_num,
+        "event_type": event.event_type,
+        "agent_id": event.agent_id,
+        "action": event.action,
+        "resource": event.resource,
+        "decision": event.decision,
+        "policy_id": str(event.policy_id) if event.policy_id else None,
+        "approval_id": str(event.approval_id) if event.approval_id else None,
+        "payload": event.payload,
+        "prev_hash": event.prev_hash,
+        "entry_hash": event.entry_hash,
+        "recorded_at": event.recorded_at.isoformat(),
+    }
+
+
+def _apply_stream_filters(
+    stmt: Select[tuple[AuditEvent]],
+    org_id: UUID,
+    filters: object,
+) -> Select[tuple[AuditEvent]]:
+    stmt = stmt.where(AuditEvent.org_id == org_id)
+    for attr, column in (
+        ("event_type", AuditEvent.event_type),
+        ("agent_id", AuditEvent.agent_id),
+        ("action", AuditEvent.action),
+        ("resource", AuditEvent.resource),
+        ("decision", AuditEvent.decision),
+        ("policy_id", AuditEvent.policy_id),
+    ):
+        value = getattr(filters, attr, None)
+        if value is not None:
+            stmt = stmt.where(column == value)
+
+    start_date = getattr(filters, "start_date", None)
+    end_date = getattr(filters, "end_date", None)
+    if start_date is not None:
+        stmt = stmt.where(AuditEvent.recorded_at >= start_date)
+    if end_date is not None:
+        stmt = stmt.where(AuditEvent.recorded_at <= end_date)
+    return stmt
+
+
+async def stream_audit_events(
+    session: AsyncSession,
+    org_id: UUID,
+    filters: object,
+    format: str,
+) -> AsyncGenerator[bytes, None]:
+    stmt = _apply_stream_filters(select(AuditEvent), org_id, filters).order_by(
+        AuditEvent.sequence_num.asc()
+    )
+    stmt = stmt.execution_options(stream_results=True, yield_per=_STREAM_BATCH_SIZE)
+    result = await session.stream(stmt)
+
+    if format == "json":
+        first = True
+        yield b"["
+        async for event in result.scalars():
+            if not first:
+                yield b","
+            yield json.dumps(_event_to_export_dict(event), default=str).encode("utf-8")
+            first = False
+        yield b"]"
+        return
+
+    header_buffer = io.StringIO()
+    writer = csv.DictWriter(
+        header_buffer,
+        fieldnames=[
+            "id",
+            "org_id",
+            "sequence_num",
+            "event_type",
+            "agent_id",
+            "action",
+            "resource",
+            "decision",
+            "policy_id",
+            "approval_id",
+            "recorded_at",
+        ],
+    )
+    writer.writeheader()
+    yield header_buffer.getvalue().encode("utf-8")
+
+    async for event in result.scalars():
+        row = _event_to_export_dict(event)
+        row_buffer = io.StringIO()
+        row_writer = csv.DictWriter(row_buffer, fieldnames=writer.fieldnames or [])
+        row_writer.writerow(
+            {
+                "id": row["id"],
+                "org_id": row["org_id"],
+                "sequence_num": row["sequence_num"],
+                "event_type": row["event_type"],
+                "agent_id": row["agent_id"],
+                "action": row["action"],
+                "resource": row["resource"],
+                "decision": row["decision"],
+                "policy_id": row["policy_id"] or "",
+                "approval_id": row["approval_id"] or "",
+                "recorded_at": row["recorded_at"],
+            }
+        )
+        yield row_buffer.getvalue().encode("utf-8")
+
+
+async def _run_export_job(
+    job_id: str,
+    org_id: UUID,
+    filters: dict[str, object],
+    format: str,
+) -> None:
+    job = _EXPORT_JOBS[job_id]
+    fd, path = tempfile.mkstemp(prefix=f"agr_audit_{job_id}_", suffix=f".{format}")
+    os.close(fd)
+
+    try:
+        async with async_session_factory() as session:
+            with open(path, "wb") as handle:
+                filter_obj = type("AuditExportFilters", (), filters)()
+                async for chunk in stream_audit_events(session, org_id, filter_obj, format):
+                    handle.write(chunk)
+        job.file_path = path
+        job.status = "ready"
+    except Exception as exc:
+        job.status = "failed"
+        job.error = str(exc)
+        if os.path.exists(path):
+            os.unlink(path)
+
+
+def start_audit_export_job(org_id: UUID, filters: dict[str, object], format: str) -> AuditExportJob:
+    job_id = str(uuid.uuid4())
+    job = AuditExportJob(job_id=job_id, format=format)
+    _EXPORT_JOBS[job_id] = job
+    asyncio.create_task(_run_export_job(job_id, org_id, filters, format))
+    return job
+
+
+def get_audit_export_job(job_id: str) -> AuditExportJob | None:
+    return _EXPORT_JOBS.get(job_id)

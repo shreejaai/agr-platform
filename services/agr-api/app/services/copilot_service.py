@@ -27,6 +27,7 @@ from app.schemas import (
     CopilotPreview,
     CopilotResponse,
 )
+from app.services.cedar_service import validate_cedar_rule
 from app.services.copilot_prompts import (
     AGENT_REGISTRATION_SYSTEM_PROMPT,
     EXPLANATION_SYSTEM_PROMPT,
@@ -524,6 +525,19 @@ class CopilotService:
                 suggestions=["Show sample policies"],
             )
 
+        validation = validate_cedar_rule(cedar_rule)
+        if not validation.valid:
+            return CopilotResponse(
+                message=(
+                    "I generated a Cedar policy draft, "
+                    "but it failed validation and was not saved."
+                ),
+                action_type="error",
+                suggestions=["Show sample policies", "Try generating the policy again"],
+                cedar_validation_error=validation.error,
+                cedar_valid=False,
+            )
+
         if auto_confirm:
             return await self._create_policy_confirmed(
                 name=name, cedar_rule=cedar_rule, level=level, description=description
@@ -555,6 +569,16 @@ class CopilotService:
     async def _create_policy_confirmed(
         self, name: str, cedar_rule: str, level: str, description: str
     ) -> CopilotResponse:
+        validation = validate_cedar_rule(cedar_rule)
+        if not validation.valid:
+            return CopilotResponse(
+                message="The generated Cedar policy failed validation and was not saved.",
+                action_type="error",
+                suggestions=["Show sample policies", "Regenerate the policy"],
+                cedar_validation_error=validation.error,
+                cedar_valid=False,
+            )
+
         policy = Policy(
             id=uuid.uuid4(),
             org_id=self.org_id,
@@ -578,6 +602,7 @@ class CopilotService:
                 "active": policy.active,
             },
             suggestions=["List all policies", "Create another policy", "Register an agent"],
+            cedar_valid=True,
         )
 
     # ──────────────────────────────────────────────────────────────────────────

@@ -131,6 +131,10 @@ class EvaluateResponse(BaseModel):
     )
     latency_ms: float = Field(..., description="End-to-end evaluation latency in milliseconds.")
     eval_id: str = Field(..., description="Unique evaluation identifier for audit lookup.")
+    engine_mode: Literal["cedar_cli", "python_fallback", "cache"] = Field(
+        default="cedar_cli",
+        description="Execution engine used for this response.",
+    )
     risk_score: int | None = Field(
         default=None, description="0-100 risk score. Higher = more risk.", ge=0, le=100
     )
@@ -141,6 +145,22 @@ class EvaluateResponse(BaseModel):
     )
     compliance_findings: list[ComplianceFindingResponse] | None = Field(
         default=None, description="Advisory compliance findings (EU AI Act, SOC2, ISO42001)."
+    )
+    compliance_blocked: bool = Field(
+        default=False,
+        description="True when a compliance control upgraded the result to DENY.",
+    )
+    idempotency_replayed: bool = Field(
+        default=False,
+        description="True when the response was replayed from a previous Idempotency-Key result.",
+    )
+    anomaly_detected: bool = Field(
+        default=False,
+        description="True when AGR detected unusual behavior for this agent/action pair.",
+    )
+    anomaly_flags: list[str] = Field(
+        default_factory=list,
+        description="Machine-readable anomaly labels such as 'new_action'.",
     )
     decision_trace: DecisionTrace | None = Field(
         default=None, description="Internal decision trace for debugging."
@@ -254,7 +274,7 @@ class ApprovalResponse(BaseModel):
     # Temporal observability — indicates whether a durable workflow is tracking this approval.
     # "temporal"  — Temporal workflow is active (durable, survives restarts)
     # "db_only"   — Temporal not configured; approval tracked by DB row only
-    workflow_mode: str = Field(
+    workflow_mode: Literal["temporal", "db_only"] = Field(
         default="db_only",
         description=(
             "Workflow tracking mode: 'temporal' when a durable Temporal workflow "
@@ -356,6 +376,17 @@ class AgentResponse(BaseModel):
     updated_at: datetime
 
 
+class ActionStats(BaseModel):
+    action: str
+    count: int = Field(..., ge=0)
+
+
+class AgentBehaviorResponse(BaseModel):
+    agent_id: str
+    action_baseline: list[ActionStats] = Field(default_factory=list)
+    anomalies_detected: list[str] = Field(default_factory=list)
+
+
 class OrgRiskConfigResponse(BaseModel):
     org_id: str
     weight_action_severity: float
@@ -405,6 +436,14 @@ class AuditSearchRequest(BaseModel):
     offset: int = Field(default=0, ge=0)
 
 
+class AuditExportJobResponse(BaseModel):
+    job_id: str
+    status: Literal["pending", "ready", "failed"]
+    format: Literal["json", "csv"]
+    download_url: str | None = None
+    error: str | None = None
+
+
 class ComplianceSummaryResponse(BaseModel):
     period_days: int
     total_evaluations: int
@@ -415,6 +454,16 @@ class ComplianceSummaryResponse(BaseModel):
     compliance_score: int = Field(
         ..., ge=0, le=100, description="Aggregate compliance score across sampled findings."
     )
+
+
+class ComplianceConfigResponse(BaseModel):
+    plugin_id: str
+    enforcement_mode: Literal["advisory", "enforce"]
+
+
+class ComplianceConfigUpdate(BaseModel):
+    plugin_id: str = Field(..., min_length=1, max_length=64)
+    enforcement_mode: Literal["advisory", "enforce"]
 
 
 class OrgMeResponse(BaseModel):
@@ -433,6 +482,28 @@ class OrgMeResponse(BaseModel):
     sso_enabled: bool = False
     sso_provider: str | None = None
     created_at: datetime
+
+
+class ApiKeyCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    scopes: list[str] = Field(default_factory=list)
+    expires_at: datetime | None = None
+
+
+class ApiKeyResponse(BaseModel):
+    id: str
+    key_prefix: str
+    scopes: list[str]
+    name: str
+    created_by: str
+    last_used_at: datetime | None
+    expires_at: datetime | None
+    revoked: bool
+    created_at: datetime
+
+
+class ApiKeyCreateResponse(ApiKeyResponse):
+    key: str
 
 
 class ClerkApiKeyResponse(BaseModel):
@@ -589,12 +660,15 @@ class WebhookResponse(BaseModel):
     secret: str
     events: list[str]
     active: bool
+    rotating_secret_expires_at: datetime | None = None
     created_at: datetime
 
 
 class WebhookRotateSecretResponse(BaseModel):
     id: str
     new_secret: str
+    rotating_secret_expires_at: datetime
+    message: str
 
 
 class WebhookTestResponse(BaseModel):
@@ -660,8 +734,62 @@ class PolicyTemplateResponse(BaseModel):
     policies: list[PolicyImportItem] = Field(default_factory=list)
 
 
+class PolicyTestCase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    agent_id: str = Field(..., min_length=1, max_length=256)
+    action: str = Field(..., min_length=1, max_length=256)
+    resource: str = Field(..., min_length=1, max_length=512)
+    context: dict[str, object] = Field(default_factory=dict)
+    expected_decision: Literal["ALLOW", "DENY", "APPROVAL_REQUIRED"]
+
+
+class PolicyTestSuiteRequest(BaseModel):
+    policy_ids: list[str] | None = None
+    test_cases: list[PolicyTestCase] = Field(..., max_length=100)
+
+
+class PolicyTestCaseResult(BaseModel):
+    name: str
+    passed: bool
+    actual_decision: str
+    expected_decision: str
+    reason: str
+    latency_ms: float
+
+
+class PolicyTestSuiteResponse(BaseModel):
+    total: int
+    passed: int
+    failed: int
+    results: list[PolicyTestCaseResult]
+    duration_ms: float
+
+
+class PolicyTestSuiteCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str | None = Field(default=None, max_length=2000)
+    test_cases: list[PolicyTestCase] = Field(..., max_length=100)
+
+
+class PolicyTestSuiteRecordResponse(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    test_cases: list[PolicyTestCase] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
 class HealthResponse(BaseModel):
     status: str
+
+
+class VersionMetadataResponse(BaseModel):
+    api_version: str
+    min_supported_version: str
+    deprecated_versions: list[str] = Field(default_factory=list)
+    latest_version: str
+    changelog_url: str
 
 
 class CopilotMessage(BaseModel):
@@ -708,6 +836,8 @@ class CopilotResponse(BaseModel):
     preview: CopilotPreview | None = None
     created_resource: dict[str, object] | None = None
     suggestions: list[str] | None = None
+    cedar_validation_error: str | None = None
+    cedar_valid: bool = True
 
 
 class PolicyVersionResponse(BaseModel):
@@ -750,6 +880,34 @@ class SimulateResponse(BaseModel):
     risk_factors: dict[str, int] | None = None
     compliance_findings: list[ComplianceFindingResponse] | None = None
     decision_trace: DecisionTrace
+
+
+class ReplayRequest(BaseModel):
+    policy_ids: list[str] | None = None
+
+
+class ReplayResponse(BaseModel):
+    eval_id: str
+    original_decision: str
+    replayed_decision: str
+    changed: bool
+    original_policy_source: str | None = None
+    replayed_policy_source: str
+    original_risk_score: int | None = None
+    replayed_risk_score: int | None = None
+    replayed_at: datetime
+
+
+class EvaluationStreamEvent(BaseModel):
+    eval_id: str
+    agent_id: str
+    action: str
+    resource: str
+    decision: str
+    risk_score: int | None = None
+    risk_level: str | None = None
+    policy_source: str
+    timestamp: datetime
 
 
 class ErrorResponse(BaseModel):

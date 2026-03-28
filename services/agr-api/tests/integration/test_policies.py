@@ -102,3 +102,21 @@ async def test_delete_policy(client: AsyncClient, auth_headers: dict[str, str]) 
 
     get_resp = await client.get(f"/v1/policies/{policy_id}", headers=auth_headers)
     assert get_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_policy_rejects_invalid_cedar_rule(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    response = await client.post(
+        "/v1/policies",
+        json={
+            "name": "Invalid policy",
+            "level": "org",
+            "cedar_rule": "permit(resource);",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
+    assert "Invalid Cedar rule" in str(response.json()["detail"])

@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from app.config import settings as app_settings
 from app.models import AuditEvent, Organization, Policy
 from httpx import AsyncClient
 from sqlalchemy import select, update
@@ -403,3 +404,159 @@ async def test_evaluate_trace_risk_override(
     assert trace["risk_score"] == 95
     assert trace["risk_level"] == "critical"
     assert data["decision"] != "ALLOW"
+
+
+@pytest.mark.asyncio
+async def test_evaluate_returns_python_fallback_engine_mode_when_cedar_missing(
+    client: AsyncClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("policy_engine._find_cedar_cli", lambda: None)
+
+    response = await client.post(
+        "/v1/evaluate",
+        json={
+            "agent_id": "coder-001",
+            "action": "deploy",
+            "resource": "staging-server",
+            "context": {"environment": "staging"},
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["X-AGR-Engine"] == "python_fallback"
+    assert response.json()["engine_mode"] == "python_fallback"
+
+
+@pytest.mark.asyncio
+async def test_evaluate_sets_engine_header(client: AsyncClient, auth_headers: dict[str, str]) -> None:
+    response = await client.post(
+        "/v1/evaluate",
+        json={
+            "agent_id": "coder-001",
+            "action": "deploy",
+            "resource": "staging-server",
+            "context": {"environment": "staging"},
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["X-AGR-Engine"] in {"cedar_cli", "python_fallback", "cache"}
+
+
+@pytest.mark.asyncio
+async def test_evaluate_require_cli_returns_503_when_fallback_used(
+    client: AsyncClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("policy_engine._find_cedar_cli", lambda: None)
+    original = app_settings.cedar_require_cli
+    app_settings.cedar_require_cli = True
+    try:
+        response = await client.post(
+            "/v1/evaluate",
+            json={
+                "agent_id": "coder-001",
+                "action": "deploy",
+                "resource": "staging-server",
+                "context": {"environment": "staging"},
+            },
+            headers=auth_headers,
+        )
+    finally:
+        app_settings.cedar_require_cli = original
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Cedar CLI unavailable. Set CEDAR_REQUIRE_CLI=false to allow fallback."
+    )
+
+
+@pytest.mark.asyncio
+async def test_evaluate_replays_same_idempotency_key(
+    client: AsyncClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.routes.evaluate as evaluate_module
+
+    store: dict[tuple[str, str], dict[str, object]] = {}
+
+    async def fake_get(org_id, key):
+        return store.get((str(org_id), key))
+
+    async def fake_set(org_id, key, response_dict, ttl=86400):
+        store[(str(org_id), key)] = response_dict
+
+    monkeypatch.setattr(evaluate_module, "get_idempotent_response", fake_get)
+    monkeypatch.setattr(evaluate_module, "set_idempotent_response", fake_set)
+
+    headers = {**auth_headers, "Idempotency-Key": "idem-123"}
+    first = await client.post(
+        "/v1/evaluate",
+        json={
+            "agent_id": "coder-001",
+            "action": "deploy",
+            "resource": "staging-server",
+            "context": {"environment": "staging"},
+        },
+        headers=headers,
+    )
+    second = await client.post(
+        "/v1/evaluate",
+        json={
+            "agent_id": "coder-001",
+            "action": "deploy",
+            "resource": "staging-server",
+            "context": {"environment": "staging"},
+        },
+        headers=headers,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["eval_id"] == second.json()["eval_id"]
+    assert second.json()["idempotency_replayed"] is True
+    assert second.headers["X-Idempotency-Replayed"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_evaluate_different_idempotency_keys_return_fresh_responses(
+    client: AsyncClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.routes.evaluate as evaluate_module
+
+    store: dict[tuple[str, str], dict[str, object]] = {}
+
+    async def fake_get(org_id, key):
+        return store.get((str(org_id), key))
+
+    async def fake_set(org_id, key, response_dict, ttl=86400):
+        store[(str(org_id), key)] = response_dict
+
+    monkeypatch.setattr(evaluate_module, "get_idempotent_response", fake_get)
+    monkeypatch.setattr(evaluate_module, "set_idempotent_response", fake_set)
+
+    first = await client.post(
+        "/v1/evaluate",
+        json={
+            "agent_id": "coder-001",
+            "action": "deploy",
+            "resource": "staging-server",
+            "context": {"environment": "staging"},
+        },
+        headers={**auth_headers, "Idempotency-Key": "idem-a"},
+    )
+    second = await client.post(
+        "/v1/evaluate",
+        json={
+            "agent_id": "coder-001",
+            "action": "deploy",
+            "resource": "staging-server",
+            "context": {"environment": "staging"},
+        },
+        headers={**auth_headers, "Idempotency-Key": "idem-b"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["eval_id"] != second.json()["eval_id"]
+    assert second.json()["idempotency_replayed"] is False

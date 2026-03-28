@@ -1,0 +1,105 @@
+{
+  "info": {
+    "name": "AGR Quickstart",
+    "_postman_id": "4c6211dd-ef8c-4eea-a1e5-8d95bbf1a2df",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000" },
+    { "key": "api_key", "value": "agr_sk_..." },
+    { "key": "bearer_token", "value": "Bearer agr_sk_..." }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.collectionVariables.set('bearer_token', 'Bearer ' + pm.collectionVariables.get('api_key'));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Evaluate",
+      "item": [
+        {
+          "name": "Evaluate Action",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "{{bearer_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"agent_id\": \"example-agent\",\n  \"action\": \"read_docs\",\n  \"resource\": \"getting-started\",\n  \"context\": {\"risk_level\": \"low\"}\n}"
+            },
+            "url": "{{base_url}}/v1/evaluate"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Policies",
+      "item": [
+        {
+          "name": "List Policies",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "{{bearer_token}}" }
+            ],
+            "url": "{{base_url}}/v1/policies"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Approvals",
+      "item": [
+        {
+          "name": "List Approvals",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "{{bearer_token}}" }
+            ],
+            "url": "{{base_url}}/v1/approvals"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Agents",
+      "item": [
+        {
+          "name": "List Agents",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "{{bearer_token}}" }
+            ],
+            "url": "{{base_url}}/v1/agents"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audit",
+      "item": [
+        {
+          "name": "List Audit Events",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "{{bearer_token}}" }
+            ],
+            "url": "{{base_url}}/v1/audit"
+          }
+        }
+      ]
+    }
+  ]
+}

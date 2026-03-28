@@ -3,6 +3,7 @@ from agr.client import (
     AGRClient,
     AGRError,
     AGRRateLimitError,
+    ApprovalResult,
     AsyncAGRClient,
     DecisionTrace,
     EvaluationResult,
@@ -19,6 +20,7 @@ __all__ = [
     "AGRError",
     "AGRAuthError",
     "AGRRateLimitError",
+    "ApprovalResult",
     "AGRPolicyEnforcer",
     "AsyncAGRPolicyEnforcer",
 ]

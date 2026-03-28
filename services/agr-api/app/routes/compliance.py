@@ -6,6 +6,7 @@ import json
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
@@ -13,21 +14,82 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.models import AuditEvent, Organization
-from app.schemas import ComplianceSummaryResponse
-from app.services.compliance_service import normalize_compliance_finding_payload
+from app.models import AuditEvent, Organization, OrgComplianceConfig
+from app.schemas import ComplianceConfigResponse, ComplianceConfigUpdate, ComplianceSummaryResponse
+from app.services.compliance_service import (
+    BUILT_IN_COMPLIANCE_PLUGIN_IDS,
+    normalize_compliance_finding_payload,
+)
 
 router = APIRouter(prefix="/v1", tags=["compliance"])
 
 
 def _require_admin(request: Request) -> None:
     """Raise 403 if the caller's org role is not admin."""
-    role: str = getattr(request.state, "role", "viewer")
+    org_role = getattr(getattr(request.state, "org", None), "role", None)
+    role = org_role if isinstance(org_role, str) else getattr(request.state, "role", "viewer")
     if role != "admin":
         raise HTTPException(status_code=403, detail="Admin role required for this operation.")
 
 
 _SAMPLE_LIMIT = 1000  # max recent events to sample for compliance analysis
+
+
+@router.get("/compliance/config", response_model=list[ComplianceConfigResponse])
+async def get_compliance_config(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> list[ComplianceConfigResponse]:
+    _require_admin(request)
+    org_id: uuid.UUID = request.state.org_id
+
+    result = await session.execute(
+        select(OrgComplianceConfig).where(OrgComplianceConfig.org_id == org_id)
+    )
+    current = {row.plugin_id: row.enforcement_mode for row in result.scalars().all()}
+    return [
+        ComplianceConfigResponse(
+            plugin_id=plugin_id,
+            enforcement_mode=current.get(plugin_id, "advisory"),
+        )
+        for plugin_id in BUILT_IN_COMPLIANCE_PLUGIN_IDS
+    ]
+
+
+@router.put("/compliance/config", response_model=ComplianceConfigResponse)
+async def update_compliance_config(
+    body: ComplianceConfigUpdate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> ComplianceConfigResponse:
+    _require_admin(request)
+    if body.plugin_id not in BUILT_IN_COMPLIANCE_PLUGIN_IDS:
+        raise HTTPException(status_code=404, detail="Compliance plugin not found.")
+
+    org_id: uuid.UUID = request.state.org_id
+    result = await session.execute(
+        select(OrgComplianceConfig).where(
+            OrgComplianceConfig.org_id == org_id,
+            OrgComplianceConfig.plugin_id == body.plugin_id,
+        )
+    )
+    config = result.scalar_one_or_none()
+    if config is None:
+        config = OrgComplianceConfig(
+            org_id=org_id,
+            plugin_id=body.plugin_id,
+            enforcement_mode=body.enforcement_mode,
+        )
+        session.add(config)
+    else:
+        config.enforcement_mode = body.enforcement_mode
+
+    await session.flush()
+    await session.refresh(config)
+    return ComplianceConfigResponse(
+        plugin_id=config.plugin_id,
+        enforcement_mode=cast(Literal["advisory", "enforce"], config.enforcement_mode),
+    )
 
 
 def _payload_risk_score(payload: dict[str, object]) -> int | None:

@@ -4,9 +4,10 @@ import json
 import uuid
 
 import pytest
+from app.config import settings as app_settings
 from app.models import AuditEvent, Organization
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -197,3 +198,131 @@ async def test_compliance_export_requires_admin(
         headers={"Authorization": f"Bearer {viewer_org.api_key}"},
     )
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_put_compliance_config_updates_enforcement_mode(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    response = await client.put(
+        "/v1/compliance/config",
+        json={"plugin_id": "eu_ai_act_art13", "enforcement_mode": "enforce"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "plugin_id": "eu_ai_act_art13",
+        "enforcement_mode": "enforce",
+    }
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_update_compliance_config(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_session: AsyncSession,
+    test_org: Organization,
+) -> None:
+    await db_session.execute(
+        update(Organization).where(Organization.id == test_org.id).values(role="viewer")
+    )
+    await db_session.commit()
+
+    response = await client.put(
+        "/v1/compliance/config",
+        json={"plugin_id": "eu_ai_act_art13", "enforcement_mode": "enforce"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_compliance_enforce_mode_blocks_allow_decision(
+    client: AsyncClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.routes.evaluate as evaluate_module
+    from app.services.risk_service import RiskResult
+
+    original_allow = app_settings.risk_thresholds_allow_max
+    original_approval = app_settings.risk_thresholds_approval_max
+    app_settings.risk_thresholds_allow_max = 100
+    app_settings.risk_thresholds_approval_max = 100
+    monkeypatch.setattr(
+        evaluate_module,
+        "compute_risk_score",
+        lambda **kwargs: RiskResult(
+            score=80,
+            level="high",
+            factors={"agent_trust": 18, "context_signals": 8},
+        ),
+    )
+    try:
+        config_response = await client.put(
+            "/v1/compliance/config",
+            json={"plugin_id": "eu_ai_act_art13", "enforcement_mode": "enforce"},
+            headers=auth_headers,
+        )
+        assert config_response.status_code == 200
+
+        response = await client.post(
+            "/v1/evaluate",
+            json={
+                "agent_id": "bot",
+                "action": "deploy",
+                "resource": "staging-server",
+                "context": {"environment": "staging"},
+            },
+            headers=auth_headers,
+        )
+    finally:
+        app_settings.risk_thresholds_allow_max = original_allow
+        app_settings.risk_thresholds_approval_max = original_approval
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["decision"] == "DENY"
+    assert data["compliance_blocked"] is True
+    assert "Compliance policy blocked: ART-13" in data["reason"]
+
+
+@pytest.mark.asyncio
+async def test_compliance_advisory_mode_does_not_block_decision(
+    client: AsyncClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.routes.evaluate as evaluate_module
+    from app.services.risk_service import RiskResult
+
+    original_allow = app_settings.risk_thresholds_allow_max
+    original_approval = app_settings.risk_thresholds_approval_max
+    app_settings.risk_thresholds_allow_max = 100
+    app_settings.risk_thresholds_approval_max = 100
+    monkeypatch.setattr(
+        evaluate_module,
+        "compute_risk_score",
+        lambda **kwargs: RiskResult(
+            score=80,
+            level="high",
+            factors={"agent_trust": 18, "context_signals": 8},
+        ),
+    )
+    try:
+        response = await client.post(
+            "/v1/evaluate",
+            json={
+                "agent_id": "bot",
+                "action": "deploy",
+                "resource": "staging-server",
+                "context": {"environment": "staging"},
+            },
+            headers=auth_headers,
+        )
+    finally:
+        app_settings.risk_thresholds_allow_max = original_allow
+        app_settings.risk_thresholds_approval_max = original_approval
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["decision"] == "ALLOW"
+    assert data["compliance_blocked"] is False

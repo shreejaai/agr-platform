@@ -61,6 +61,9 @@ class Organization(Base):
     approval_requests: Mapped[list["ApprovalRequest"]] = relationship(back_populates="organization")
     agents: Mapped[list["Agent"]] = relationship(back_populates="organization")
     webhooks: Mapped[list["Webhook"]] = relationship(back_populates="organization")
+    policy_test_suites: Mapped[list["PolicyTestSuite"]] = relationship(
+        back_populates="organization"
+    )
 
 
 class Policy(Base):
@@ -206,6 +209,10 @@ class Webhook(Base):
     org_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("organizations.id"), nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     secret: Mapped[str] = mapped_column(Text, nullable=False)
+    rotating_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rotating_secret_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     events: Mapped[list[str]] = mapped_column(
         JSONType, default=lambda: ["approval.approved", "approval.rejected"]
     )
@@ -281,6 +288,21 @@ class OrgRiskConfig(Base):
     )
 
 
+class OrgComplianceConfig(Base):
+    __tablename__ = "org_compliance_configs"
+    __table_args__ = (
+        UniqueConstraint("org_id", "plugin_id", name="uq_org_compliance_config_org_plugin"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    plugin_id: Mapped[str] = mapped_column(Text, nullable=False)
+    enforcement_mode: Mapped[str] = mapped_column(Text, nullable=False, default="advisory")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class OrgMember(Base):
     """Team member within an organization (migration 024).
 
@@ -306,6 +328,28 @@ class OrgMember(Base):
     )
 
 
+class PolicyTestSuite(Base):
+    __tablename__ = "policy_test_suites"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    test_cases: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONType,
+        nullable=False,
+        default=list,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    organization: Mapped["Organization"] = relationship(back_populates="policy_test_suites")
+
+
 class AuthSession(Base):
     __tablename__ = "auth_sessions"
 
@@ -320,6 +364,24 @@ class AuthSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    key_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    key_prefix: Mapped[str] = mapped_column(Text, nullable=False)
+    scopes: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(Text, nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class EvaluationUsage(Base):

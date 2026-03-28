@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select
 
 from app.database import get_session
+from app.middleware.auth import require_scope
 from app.models import EvaluationUsage, Organization
 from app.schemas import AgentUsageResponse, UsageResponse
 from app.services.redis_service import get_current_eval_count
@@ -20,7 +21,11 @@ if TYPE_CHECKING:
 router = APIRouter(prefix="/v1", tags=["org"])
 
 
-@router.get("/usage", response_model=UsageResponse)
+@router.get(
+    "/usage",
+    response_model=UsageResponse,
+    dependencies=[Depends(require_scope("org:admin"))],
+)
 async def get_usage(
     request: Request,
     session: AsyncSession = Depends(get_session),

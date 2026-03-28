@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,18 @@ _RISK_FACTOR_REMEDIATION: dict[str, str] = {
     ),
 }
 
+BUILT_IN_COMPLIANCE_PLUGIN_IDS = {
+    "eu_ai_act_art13": "EU AI Act Art. 13",
+    "soc2_cc61": "SOC 2 CC6.1",
+    "iso42001_sec84": "ISO 42001 Sec. 8.4",
+}
+_RULE_TO_PLUGIN_ID = {
+    "ART-13": "eu_ai_act_art13",
+    "ART-13-CONTEXT": "eu_ai_act_art13",
+    "CC6.1": "soc2_cc61",
+    "SEC-8.4": "iso42001_sec84",
+}
+
 
 @dataclass
 class ComplianceContext:
@@ -126,9 +139,16 @@ class ComplianceFinding:
     severity: str  # "info" | "warning" | "critical"
     message: str
     passed: bool  # True = compliant, False = violation found
+    plugin_id: str | None = None
     remediation_steps: list[str] = field(default_factory=list)
     severity_level: str = "low"
     compliance_score: int = 100
+
+
+@dataclass
+class ComplianceBlockResult:
+    blocked: bool
+    finding: ComplianceFinding | None = None
 
 
 @dataclass
@@ -136,6 +156,8 @@ class ComplianceResult:
     """Aggregated result from all plugins."""
 
     findings: list[ComplianceFinding] = field(default_factory=list)
+    blocked: bool = False
+    blocking_finding: ComplianceFinding | None = None
 
     @property
     def has_violations(self) -> bool:
@@ -179,6 +201,9 @@ class CompliancePlugin(ABC):
     Raising from `check()` is safe — the registry catches and logs it.
     """
 
+    enforcement_mode: Literal["advisory", "enforce"] = "advisory"
+    blocks_on_finding: bool = False
+
     @property
     @abstractmethod
     def name(self) -> str:
@@ -208,7 +233,11 @@ class ComplianceRegistry:
     def plugins(self) -> list[CompliancePlugin]:
         return list(self._plugins)
 
-    async def run_all(self, ctx: ComplianceContext) -> ComplianceResult:
+    async def run_all(
+        self,
+        ctx: ComplianceContext,
+        enforcement_modes: dict[str, str] | None = None,
+    ) -> ComplianceResult:
         """Run all registered plugins and aggregate findings.
 
         Fail-open: plugin errors are logged and skipped — never crash the request.
@@ -218,24 +247,36 @@ class ComplianceRegistry:
         for plugin in self._plugins:
             try:
                 findings = await plugin.check(ctx)
-                all_findings.extend(findings)
+                enriched_findings = [
+                    enrich_compliance_finding(
+                        finding,
+                        risk_score=ctx.risk_score,
+                        risk_level=ctx.risk_level,
+                        risk_factors=ctx.risk_factors,
+                    )
+                    for finding in findings
+                ]
+                all_findings.extend(enriched_findings)
+
+                if plugin.blocks_on_finding:
+                    block_result = _evaluate_blocking_findings(
+                        enriched_findings,
+                        enforcement_modes=enforcement_modes,
+                        default_mode=plugin.enforcement_mode,
+                    )
+                    if block_result.blocked:
+                        return ComplianceResult(
+                            findings=all_findings,
+                            blocked=True,
+                            blocking_finding=block_result.finding,
+                        )
             except Exception as exc:
                 # M9: re-raise process-terminating signals — never swallow them
                 if isinstance(exc, SystemExit | KeyboardInterrupt):
                     raise
                 logger.warning("Compliance plugin %s raised (skipping): %s", plugin.name, exc)
 
-        return ComplianceResult(
-            findings=[
-                enrich_compliance_finding(
-                    finding,
-                    risk_score=ctx.risk_score,
-                    risk_level=ctx.risk_level,
-                    risk_factors=ctx.risk_factors,
-                )
-                for finding in all_findings
-            ]
-        )
+        return ComplianceResult(findings=all_findings)
 
 
 # Module-level singleton — populated by main.py lifespan
@@ -254,6 +295,25 @@ def reset_registry() -> None:
     """Reset the registry. Used in tests only."""
     global _registry
     _registry = None
+
+
+def _evaluate_blocking_findings(
+    findings: list[ComplianceFinding],
+    *,
+    enforcement_modes: dict[str, str] | None,
+    default_mode: str,
+) -> ComplianceBlockResult:
+    modes = enforcement_modes or {}
+    for finding in findings:
+        plugin_id = finding.plugin_id or _RULE_TO_PLUGIN_ID.get(finding.rule_id, finding.plugin)
+        mode = modes.get(plugin_id, default_mode)
+        if (
+            mode == "enforce"
+            and not finding.passed
+            and finding.severity_level in {"high", "critical"}
+        ):
+            return ComplianceBlockResult(blocked=True, finding=finding)
+    return ComplianceBlockResult(blocked=False)
 
 
 def _normalize_risk_level(risk_level: str | None, risk_score: int | None) -> str:

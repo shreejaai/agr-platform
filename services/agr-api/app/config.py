@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     env: str = "development"
     api_base_url: str = "http://localhost:8000"
     dashboard_base_url: str = "http://localhost:4200"
-    temporal_host: str = "localhost:7233"
+    temporal_host: str = ""
     temporal_namespace: str = "default"
     resend_api_key: str = ""
     slack_bot_token: str = ""
@@ -46,6 +46,16 @@ class Settings(BaseSettings):
 
     # Webhook delivery — configurable timeout per attempt (seconds)
     webhook_timeout: float = 10.0
+    webhook_secret_rotation_hours: int = 24
+
+    cedar_pool_size: int = 4
+    cedar_require_cli: bool = False
+    rate_limit_per_second: int = 50
+    rate_limit_burst: int = 100
+    rate_limit_enabled: bool = True
+    otel_enabled: bool = False
+    otel_endpoint: str = "http://localhost:4317"
+    otel_service_name: str = "agr-api"
 
     # Copilot (LLM-powered policy assistant) — paid plans only
     anthropic_api_key: str = ""

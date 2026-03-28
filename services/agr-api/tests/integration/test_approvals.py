@@ -103,12 +103,26 @@ async def test_get_approval_by_id(client: AsyncClient, auth_headers: dict[str, s
     assert data["status"] == "pending"
     assert data["action"] == "deploy"
     assert data["resource"] == "production-server"
+    assert data["workflow_mode"] in {"temporal", "db_only"}
     assert data["workflow_status"] == "running"
     assert data["workflow_fallback_mode"] in {
         "none",
         "db_only_temporal_unavailable",
         "db_only_start_failed",
     }
+
+
+@pytest.mark.asyncio
+async def test_list_approvals_surfaces_workflow_mode(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    approval_id = await _trigger_approval(client, auth_headers)
+
+    response = await client.get("/v1/approvals", headers=auth_headers)
+
+    assert response.status_code == 200
+    approval = next(item for item in response.json() if item["id"] == approval_id)
+    assert approval["workflow_mode"] in {"temporal", "db_only"}
 
 
 @pytest.mark.asyncio

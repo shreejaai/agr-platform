@@ -7,8 +7,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
+from app.middleware.auth import require_scope
 from app.models import Agent
-from app.schemas import AgentRegisterRequest, AgentResponse, AgentUpdateRequest
+from app.schemas import (
+    AgentBehaviorResponse,
+    AgentRegisterRequest,
+    AgentResponse,
+    AgentUpdateRequest,
+)
+from app.services.anomaly_service import get_action_baseline, get_recent_anomalies
 
 router = APIRouter(prefix="/v1", tags=["agents"])
 
@@ -31,7 +38,12 @@ def _to_response(agent: Agent) -> AgentResponse:
     )
 
 
-@router.post("/agents/register", response_model=AgentResponse, status_code=200)
+@router.post(
+    "/agents/register",
+    response_model=AgentResponse,
+    status_code=200,
+    dependencies=[Depends(require_scope("agents:write"))],
+)
 async def register_agent(
     body: AgentRegisterRequest,
     request: Request,
@@ -82,7 +94,11 @@ async def register_agent(
     return _to_response(agent)
 
 
-@router.patch("/agents/{agent_id}", response_model=AgentResponse)
+@router.patch(
+    "/agents/{agent_id}",
+    response_model=AgentResponse,
+    dependencies=[Depends(require_scope("agents:write"))],
+)
 async def update_agent(
     agent_id: uuid.UUID,
     body: AgentUpdateRequest,
@@ -124,7 +140,11 @@ async def update_agent(
     return _to_response(agent)
 
 
-@router.delete("/agents/{agent_id}", status_code=204)
+@router.delete(
+    "/agents/{agent_id}",
+    status_code=204,
+    dependencies=[Depends(require_scope("agents:write"))],
+)
 async def delete_agent(
     agent_id: uuid.UUID,
     request: Request,
@@ -142,7 +162,37 @@ async def delete_agent(
     await session.flush()
 
 
-@router.get("/agents/{agent_id}", response_model=AgentResponse)
+@router.get(
+    "/agents/{agent_id}/behavior",
+    response_model=AgentBehaviorResponse,
+    dependencies=[Depends(require_scope("agents:read"))],
+)
+async def get_agent_behavior(
+    agent_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> AgentBehaviorResponse:
+    org_id: uuid.UUID = request.state.org_id
+    result = await session.execute(
+        select(Agent).where(Agent.org_id == org_id, Agent.agent_id == agent_id)
+    )
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+
+    org_id_str = str(org_id)
+    return AgentBehaviorResponse(
+        agent_id=agent.agent_id,
+        action_baseline=await get_action_baseline(org_id_str, agent.agent_id),
+        anomalies_detected=await get_recent_anomalies(org_id_str, agent.agent_id),
+    )
+
+
+@router.get(
+    "/agents/{agent_id}",
+    response_model=AgentResponse,
+    dependencies=[Depends(require_scope("agents:read"))],
+)
 async def get_agent(
     agent_id: uuid.UUID,
     request: Request,
@@ -158,7 +208,11 @@ async def get_agent(
     return _to_response(agent)
 
 
-@router.get("/agents", response_model=list[AgentResponse])
+@router.get(
+    "/agents",
+    response_model=list[AgentResponse],
+    dependencies=[Depends(require_scope("agents:read"))],
+)
 async def list_agents(
     request: Request,
     session: AsyncSession = Depends(get_session),

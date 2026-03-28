@@ -20,10 +20,11 @@ import json
 import logging
 import time
 import uuid
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.models import Webhook, WebhookDelivery
 
@@ -53,6 +54,54 @@ def _sign_payload(secret: str, timestamp: int, body: str) -> str:
     """Compute HMAC-SHA256 signature for a webhook payload."""
     signed_content = f"{timestamp}.{body}"
     return hmac.new(secret.encode(), signed_content.encode(), hashlib.sha256).hexdigest()
+
+
+def _rotation_active(webhook: Webhook, now: datetime | None = None) -> bool:
+    now = now or datetime.now(UTC)
+    expires_at = webhook.rotating_secret_expires_at
+    return bool(webhook.rotating_secret and expires_at and expires_at > now)
+
+
+def build_signature_headers(
+    webhook: Webhook,
+    timestamp: int,
+    body: str,
+    event: str,
+) -> dict[str, str]:
+    primary_sig = _sign_payload(str(webhook.secret), timestamp, body)
+    headers = {
+        "Content-Type": "application/json",
+        "X-AGR-Signature": f"t={timestamp},v1={primary_sig}",
+        "X-AGR-Signature-1": f"t={timestamp},v1={primary_sig}",
+        "X-AGR-Event": event,
+    }
+    if _rotation_active(webhook):
+        rotating_sig = _sign_payload(str(webhook.rotating_secret), timestamp, body)
+        headers["X-AGR-Signature-2"] = f"t={timestamp},v1={rotating_sig}"
+    return headers
+
+
+def verify_webhook_signature(
+    secret: str,
+    timestamp: int,
+    body: str,
+    signatures: list[str],
+    rotating_secret: str | None = None,
+    rotating_secret_expires_at: datetime | None = None,
+) -> bool:
+    expected = {_sign_payload(secret, timestamp, body)}
+    now = datetime.now(UTC)
+    if rotating_secret and rotating_secret_expires_at and rotating_secret_expires_at > now:
+        expected.add(_sign_payload(rotating_secret, timestamp, body))
+
+    for signature in signatures:
+        try:
+            _, value = signature.split("v1=", 1)
+        except ValueError:
+            continue
+        if value in expected:
+            return True
+    return False
 
 
 async def fire_approval_webhook(
@@ -113,12 +162,7 @@ async def fire_approval_webhook(
 
             async with httpx.AsyncClient(timeout=_webhook_timeout()) as client:
                 for wh in matching:
-                    sig = _sign_payload(str(wh.secret), timestamp, body)
-                    headers = {
-                        "Content-Type": "application/json",
-                        "X-AGR-Signature": f"t={timestamp},v1={sig}",
-                        "X-AGR-Event": event,
-                    }
+                    headers = build_signature_headers(wh, timestamp, body, event)
 
                     delivery = WebhookDelivery(
                         id=uuid.uuid4(),
@@ -173,12 +217,7 @@ async def retry_webhook_delivery(
 
     body = json.dumps(orig_delivery.payload, default=str)
     timestamp = int(time.time())
-    sig = _sign_payload(str(wh.secret), timestamp, body)
-    headers = {
-        "Content-Type": "application/json",
-        "X-AGR-Signature": f"t={timestamp},v1={sig}",
-        "X-AGR-Event": orig_delivery.event,
-    }
+    headers = build_signature_headers(wh, timestamp, body, orig_delivery.event)
 
     new_delivery = WebhookDelivery(
         id=uuid.uuid4(),
@@ -200,6 +239,22 @@ async def retry_webhook_delivery(
     new_delivery.last_error = last_error
     new_delivery.attempts = attempts
     return new_delivery
+
+
+async def clear_expired_rotating_secrets() -> None:
+    from app.database import async_session_factory
+
+    async with async_session_factory() as session:
+        await session.execute(
+            update(Webhook)
+            .where(
+                Webhook.rotating_secret.is_not(None),
+                Webhook.rotating_secret_expires_at.is_not(None),
+                Webhook.rotating_secret_expires_at <= datetime.now(UTC),
+            )
+            .values(rotating_secret=None, rotating_secret_expires_at=None)
+        )
+        await session.commit()
 
 
 async def _deliver_with_retry(

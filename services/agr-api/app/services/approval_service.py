@@ -60,6 +60,7 @@ async def create_approval_request(
         approval.workflow_last_error = workflow_start.error
     if workflow_start.workflow_id:
         approval.temporal_run_id = workflow_start.workflow_id
+    approval.workflow_mode = "temporal" if workflow_start.workflow_id else "db_only"  # type: ignore[attr-defined]
     await session.flush()
 
     # S3: Slack fires as a background task so it runs after the transaction
