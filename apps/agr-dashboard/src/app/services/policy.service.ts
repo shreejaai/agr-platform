@@ -19,6 +19,17 @@ export interface PolicyListParams {
   limit?: number;
 }
 
+export interface PolicyAnalyticsSummary {
+  policy_id: string;
+  total_evaluations: number;
+  last_triggered_at: string | null;
+  decisions: {
+    ALLOW: number;
+    DENY: number;
+    APPROVAL_REQUIRED: number;
+  };
+}
+
 export interface SimulateRequest {
   agent_id: string;
   action: string;
@@ -76,6 +87,12 @@ export class PolicyService {
     if (params.active !== undefined) p = p.set('active', String(params.active));
     if (params.limit != null) p = p.set('limit', String(params.limit));
     return this.http.get<Policy[]>('/v1/policies', { params: p });
+  }
+
+  getAnalytics(active?: boolean): Observable<PolicyAnalyticsSummary[]> {
+    let p = new HttpParams();
+    if (active !== undefined) p = p.set('active', String(active));
+    return this.http.get<PolicyAnalyticsSummary[]>('/v1/policies/analytics', { params: p });
   }
 
   get(id: string): Observable<Policy> {

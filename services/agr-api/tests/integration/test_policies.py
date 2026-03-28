@@ -1,7 +1,10 @@
 """Integration tests for policy CRUD."""
 
 import pytest
+from app.models import Organization, Policy
+from app.services.audit_service import create_audit_event
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.mark.asyncio
@@ -120,3 +123,37 @@ async def test_create_policy_rejects_invalid_cedar_rule(
 
     assert response.status_code == 422
     assert "Invalid Cedar rule" in str(response.json()["detail"])
+
+
+@pytest.mark.asyncio
+async def test_policy_analytics_infers_legacy_audit_rows_without_policy_id(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_session: AsyncSession,
+    test_org: Organization,
+    test_policies: list[Policy],
+) -> None:
+    allow_staging_policy = next(
+        policy for policy in test_policies if policy.name == "Allow staging deploy"
+    )
+
+    await create_audit_event(
+        session=db_session,
+        org_id=test_org.id,
+        event_type="TOOL_ALLOW",
+        agent_id="coder-001",
+        action="deploy",
+        resource="staging-server",
+        decision="ALLOW",
+        payload={"context": {"environment": "staging"}},
+    )
+    await db_session.commit()
+
+    response = await client.get("/v1/policies/analytics?active=true", headers=auth_headers)
+
+    assert response.status_code == 200
+    data = response.json()
+    analytics = next(row for row in data if row["policy_id"] == str(allow_staging_policy.id))
+    assert analytics["total_evaluations"] == 1
+    assert analytics["decisions"]["ALLOW"] == 1
+    assert analytics["last_triggered_at"] is not None

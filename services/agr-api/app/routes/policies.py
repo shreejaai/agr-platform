@@ -1,5 +1,6 @@
 """CRUD for Cedar policies."""
 
+import json
 import logging
 import time
 import uuid
@@ -13,10 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_session
 from app.middleware.auth import require_scope
-from app.models import Policy, PolicyTestSuite, PolicyVersion
+from app.models import AuditEvent, Policy, PolicyTestSuite, PolicyVersion
 from app.schemas import (
     ComplianceFindingResponse,
     DecisionTrace,
+    PolicyAnalyticsResponse,
     PolicyCreate,
     PolicyImportRequest,
     PolicyImportResponse,
@@ -33,7 +35,12 @@ from app.schemas import (
     SimulateRequest,
     SimulateResponse,
 )
-from app.services.cedar_service import evaluate_policy_set, evaluate_request, validate_cedar_rule
+from app.services.cedar_service import (
+    evaluate_policy_set,
+    evaluate_request,
+    infer_policy_match,
+    validate_cedar_rule,
+)
 from app.services.compliance_service import ComplianceContext, get_registry
 from app.services.policy_conflict_service import detect_conflicts
 from app.services.policy_import_service import export_policies, import_policies
@@ -46,6 +53,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["policies"])
 
 _VALID_STATES = frozenset({"draft", "active", "archived"})
+_POLICY_ANALYTICS_EVENT_TYPES = frozenset({"TOOL_ALLOW", "TOOL_DENY", "APPROVAL_REQUESTED"})
 
 
 def _state_to_active(state: str) -> bool:
@@ -241,6 +249,92 @@ async def list_policies(
     result = await session.execute(stmt)
     policies = result.scalars().all()
     return [_policy_to_response(p) for p in policies]
+
+
+@router.get(
+    "/policies/analytics",
+    response_model=list[PolicyAnalyticsResponse],
+    dependencies=[Depends(require_scope("policies:read"))],
+)
+async def list_policy_analytics(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    active: bool | None = None,
+    state: str | None = Query(default=None, pattern=r"^(draft|active|archived)$"),
+) -> list[PolicyAnalyticsResponse]:
+    """Summarize policy trigger counts from audit history.
+
+    Legacy audit rows may not carry policy_id when the Cedar CLI path was used.
+    For those rows, infer the matched policy from the stored request context so
+    policy metrics remain visible in the dashboard.
+    """
+    org_id: uuid.UUID = request.state.org_id
+
+    stmt = select(Policy).where(Policy.org_id == org_id)
+    if state is not None:
+        stmt = stmt.where(Policy.state == state)
+    elif active is not None:
+        stmt = stmt.where(Policy.active == active)
+    stmt = stmt.order_by(Policy.created_at.desc())
+    result = await session.execute(stmt)
+    policies = result.scalars().all()
+    if not policies:
+        return []
+
+    policy_set = [{"id": str(policy.id), "cedar_rule": policy.cedar_rule} for policy in policies]
+    analytics_by_policy_id: dict[str, PolicyAnalyticsResponse] = {
+        str(policy.id): PolicyAnalyticsResponse(policy_id=str(policy.id)) for policy in policies
+    }
+    inference_cache: dict[tuple[str, str, str, str], str | None] = {}
+
+    audit_result = await session.execute(
+        select(AuditEvent)
+        .where(
+            AuditEvent.org_id == org_id,
+            AuditEvent.event_type.in_(tuple(_POLICY_ANALYTICS_EVENT_TYPES)),
+        )
+        .order_by(AuditEvent.recorded_at.desc())
+    )
+
+    for event in audit_result.scalars().all():
+        matched_policy_id = str(event.policy_id) if event.policy_id is not None else None
+        if matched_policy_id not in analytics_by_policy_id:
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            raw_context = payload.get("context")
+            context = raw_context if isinstance(raw_context, dict) else {}
+            cache_key = (
+                event.agent_id,
+                event.action,
+                event.resource,
+                json.dumps(context, sort_keys=True, default=str),
+            )
+            matched_policy_id = inference_cache.get(cache_key)
+            if cache_key not in inference_cache:
+                inferred = infer_policy_match(
+                    policy_set,
+                    event.agent_id,
+                    event.action,
+                    event.resource,
+                    context,
+                )
+                matched_policy_id = inferred.policy_id
+                inference_cache[cache_key] = matched_policy_id
+
+        if matched_policy_id is None or matched_policy_id not in analytics_by_policy_id:
+            continue
+
+        analytics = analytics_by_policy_id[matched_policy_id]
+        analytics.total_evaluations += 1
+        if analytics.last_triggered_at is None:
+            analytics.last_triggered_at = event.recorded_at
+        if event.decision in {"ALLOW", "DENY", "APPROVAL_REQUIRED"}:
+            setattr(
+                analytics.decisions,
+                event.decision,
+                getattr(analytics.decisions, event.decision) + 1,
+            )
+
+    return list(analytics_by_policy_id.values())
 
 
 @router.post(

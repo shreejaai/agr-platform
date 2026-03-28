@@ -407,6 +407,84 @@ async def test_evaluate_trace_risk_override(
 
 
 @pytest.mark.asyncio
+async def test_evaluate_cedar_cli_enriches_policy_id_for_audit(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_session: AsyncSession,
+    test_org: Organization,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import policy_engine
+
+    monkeypatch.setattr(policy_engine, "_find_cedar_cli", lambda: "/usr/bin/cedar")
+    monkeypatch.setattr(policy_engine, "_cedar_cli_authorize", lambda *args, **kwargs: "ALLOW")
+
+    response = await client.post(
+        "/v1/evaluate",
+        json={
+            "agent_id": "coder-001",
+            "action": "deploy",
+            "resource": "staging-server",
+            "context": {"environment": "staging"},
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["policy_id"] is not None
+    assert data["decision_trace"]["matched_policy_id"] == data["policy_id"]
+
+    result = await db_session.execute(
+        select(AuditEvent)
+        .where(AuditEvent.org_id == test_org.id)
+        .order_by(AuditEvent.sequence_num.desc())
+        .limit(1)
+    )
+    event = result.scalar_one()
+    assert event.policy_id is not None
+
+
+@pytest.mark.asyncio
+async def test_evaluate_cedar_cli_enriches_policy_id_for_approval_required(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import policy_engine
+
+    def _fake_authorize(
+        cedar_binary: str,
+        policies: list[dict[str, str]],
+        agent_id: str,
+        action: str,
+        resource_id: str,
+        context: dict[str, object],
+    ) -> str:
+        return "ALLOW" if context.get("approval_status") == "approved" else "DENY"
+
+    monkeypatch.setattr(policy_engine, "_find_cedar_cli", lambda: "/usr/bin/cedar")
+    monkeypatch.setattr(policy_engine, "_cedar_cli_authorize", _fake_authorize)
+
+    response = await client.post(
+        "/v1/evaluate",
+        json={
+            "agent_id": "coder-001",
+            "action": "deploy",
+            "resource": "production-server",
+            "context": {"environment": "production"},
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["decision"] == "APPROVAL_REQUIRED"
+    assert data["policy_id"] is not None
+    assert data["decision_trace"]["matched_policy_id"] == data["policy_id"]
+
+
+@pytest.mark.asyncio
 async def test_evaluate_returns_python_fallback_engine_mode_when_cedar_missing(
     client: AsyncClient, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

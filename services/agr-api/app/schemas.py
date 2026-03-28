@@ -255,6 +255,19 @@ class PolicyResponse(BaseModel):
     conflicts: list[str] | None = None
 
 
+class PolicyDecisionCountsResponse(BaseModel):
+    ALLOW: int = 0
+    DENY: int = 0
+    APPROVAL_REQUIRED: int = 0
+
+
+class PolicyAnalyticsResponse(BaseModel):
+    policy_id: str
+    total_evaluations: int = 0
+    last_triggered_at: datetime | None = None
+    decisions: PolicyDecisionCountsResponse = Field(default_factory=PolicyDecisionCountsResponse)
+
+
 class ApprovalStepResponse(BaseModel):
     id: str
     approval_id: str

@@ -218,6 +218,9 @@ pnpm-debug.log*
 .npm/
 package-lock.json
 yarn.lock
+
+# Local agent context
+AGENTS.md
 pnpm-lock.yaml
 
 # Node build output

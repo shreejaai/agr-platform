@@ -2,9 +2,12 @@ import { Component, inject, OnInit, ChangeDetectionStrategy, signal, HostListene
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
-import { PolicyService, SimulateRequest, SimulateResponse } from '../../services/policy.service';
-import { AuditService } from '../../services/audit.service';
+import {
+  PolicyAnalyticsSummary,
+  PolicyService,
+  SimulateRequest,
+  SimulateResponse,
+} from '../../services/policy.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { ComplianceFindingsComponent } from '../../shared/components/compliance-findings/compliance-findings.component';
 import { RelativeTimePipe } from '../../shared/pipes/relative-time.pipe';
@@ -810,7 +813,6 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
 export class PoliciesComponent implements OnInit {
   private svc = inject(PolicyService);
   private route = inject(ActivatedRoute);
-  private auditSvc = inject(AuditService);
 
   readonly loading = signal(true);
   readonly saving = signal(false);
@@ -891,7 +893,7 @@ export class PoliciesComponent implements OnInit {
         this.policyAnalyticsLoading.set(
           Object.fromEntries(res.map((policy) => [policy.id, true]))
         );
-        void this.loadPolicyAnalytics(res);
+        this.loadPolicyAnalytics(res);
         this.loading.set(false);
       },
       error: () => this.loading.set(false),
@@ -1251,50 +1253,60 @@ export class PoliciesComponent implements OnInit {
     return 'bg-amber-500/20 text-amber-400 border-amber-500/40';
   }
 
-  private async loadPolicyAnalytics(policies: Policy[]): Promise<void> {
-    for (const policy of policies) {
-      try {
-        const analytics = await this.fetchPolicyAnalytics(policy.id);
-        this.policyAnalytics.update((state) => ({ ...state, [policy.id]: analytics }));
-      } catch {
-        this.policyAnalytics.update((state) => ({ ...state, [policy.id]: null }));
-      } finally {
-        this.policyAnalyticsLoading.update((state) => ({ ...state, [policy.id]: false }));
-      }
+  private loadPolicyAnalytics(policies: Policy[]): void {
+    if (policies.length === 0) {
+      this.policyAnalytics.set({});
+      this.policyAnalyticsLoading.set({});
+      return;
     }
+
+    this.svc.getAnalytics(true).subscribe({
+      next: (rows) => {
+        const rowsById = Object.fromEntries(
+          rows.map((row) => [row.policy_id, this.mapAnalyticsRow(row)])
+        );
+        this.policyAnalytics.set(
+          Object.fromEntries(
+            policies.map((policy) => [policy.id, rowsById[policy.id] ?? this.emptyAnalytics()])
+          )
+        );
+        this.policyAnalyticsLoading.set(
+          Object.fromEntries(policies.map((policy) => [policy.id, false]))
+        );
+      },
+      error: () => {
+        this.policyAnalytics.set(
+          Object.fromEntries(policies.map((policy) => [policy.id, null]))
+        );
+        this.policyAnalyticsLoading.set(
+          Object.fromEntries(policies.map((policy) => [policy.id, false]))
+        );
+      },
+    });
   }
 
-  private async fetchPolicyAnalytics(policyId: string): Promise<PolicyAnalytics> {
-    const pageSize = 200;
-    let offset = 0;
-    let total = 0;
-    let lastTriggeredAt: string | null = null;
-    const decisions: PolicyAnalytics['decisions'] = {
-      ALLOW: 0,
-      DENY: 0,
-      APPROVAL_REQUIRED: 0,
+  private mapAnalyticsRow(row: PolicyAnalyticsSummary): PolicyAnalytics {
+    return {
+      totalEvaluations: row.total_evaluations,
+      lastTriggeredAt: row.last_triggered_at,
+      decisions: {
+        ALLOW: row.decisions.ALLOW,
+        DENY: row.decisions.DENY,
+        APPROVAL_REQUIRED: row.decisions.APPROVAL_REQUIRED,
+      },
     };
+  }
 
-    while (true) {
-      const events = await firstValueFrom(
-        this.auditSvc.list({ policy_id: policyId, limit: pageSize, offset })
-      );
-      if (!lastTriggeredAt && events.length > 0) {
-        lastTriggeredAt = events[0].recorded_at;
-      }
-      total += events.length;
-      for (const event of events) {
-        if (event.decision === 'ALLOW' || event.decision === 'DENY' || event.decision === 'APPROVAL_REQUIRED') {
-          decisions[event.decision] += 1;
-        }
-      }
-      if (events.length < pageSize) {
-        break;
-      }
-      offset += pageSize;
-    }
-
-    return { totalEvaluations: total, lastTriggeredAt, decisions };
+  private emptyAnalytics(): PolicyAnalytics {
+    return {
+      totalEvaluations: 0,
+      lastTriggeredAt: null,
+      decisions: {
+        ALLOW: 0,
+        DENY: 0,
+        APPROVAL_REQUIRED: 0,
+      },
+    };
   }
 
   private emptyForm(): PolicyForm {

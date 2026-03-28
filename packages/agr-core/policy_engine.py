@@ -282,6 +282,19 @@ def evaluate_policies(
             result = _cedar_cli_evaluator(
                 cedar_binary, cedar_policies, agent_id, action, resource, context
             )
+            # Cedar CLI is authoritative for the decision, but it does not report
+            # which policy matched. Re-run the lightweight Python matcher so
+            # downstream audit consumers can still attach policy analytics.
+            if result.policy_id is None:
+                inferred = infer_policy_match(
+                    cedar_policies=cedar_policies,
+                    agent_id=agent_id,
+                    action=action,
+                    resource=resource,
+                    context=context,
+                )
+                if inferred.policy_id is not None:
+                    result.policy_id = inferred.policy_id
             result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
             result.fallback_used = False
             return result
@@ -396,6 +409,28 @@ def evaluate_policies(
         result.decision,
         fallback_reason,
     )
+    return result
+
+
+def infer_policy_match(
+    cedar_policies: list[dict[str, str]],
+    agent_id: str,
+    action: str,
+    resource: str,
+    context: dict[str, object],
+) -> EvaluationResult:
+    """Infer the most likely matching policy using the Python matcher.
+
+    This is used to enrich Cedar CLI decisions with a policy_id for analytics
+    and audit correlation. The returned decision is best-effort only; callers
+    should keep the Cedar CLI decision as the source of truth.
+    """
+    start = time.perf_counter_ns()
+    result = _python_evaluator(cedar_policies, agent_id, action, resource, context)
+    result.latency_ms = (time.perf_counter_ns() - start) / 1_000_000
+    result.policy_source = "python_fallback"
+    result.fallback_used = True
+    result.fallback_reason = "policy_match_inference"
     return result
 
 
