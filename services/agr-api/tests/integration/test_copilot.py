@@ -344,6 +344,48 @@ async def test_copilot_create_policy_auto_confirm(
         app_settings.anthropic_api_key = ""
 
 
+@pytest.mark.asyncio
+async def test_copilot_returns_cedar_validation_error_for_bad_rule(
+    client: AsyncClient,
+    startup_org_and_headers: tuple[Organization, dict[str, str]],
+) -> None:
+    org, headers = startup_org_and_headers
+
+    fake_llm_response = MagicMock()
+    fake_llm_response.content = [
+        MagicMock(
+            text=(
+                '{"name": "bad_rule", "cedar_rule": "permit(resource);", '
+                '"description": "Broken policy", "level": "org"}'
+            )
+        )
+    ]
+
+    app_settings.anthropic_api_key = "sk-ant-fake-key-for-testing"
+    app_settings.copilot_enabled = True
+    try:
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.messages.create = AsyncMock(return_value=fake_llm_response)
+            mock_cls.return_value = mock_client
+
+            resp = await client.post(
+                "/v1/copilot/chat",
+                json={
+                    "message": "create a broken policy",
+                    "auto_confirm": False,
+                },
+                headers=headers,
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["action_type"] == "error"
+            assert data["cedar_valid"] is False
+            assert data["cedar_validation_error"] is not None
+    finally:
+        app_settings.anthropic_api_key = ""
+
+
 # ── _parse_json_response unit tests via service directly ─────────────────────
 
 

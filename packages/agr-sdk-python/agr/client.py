@@ -3,12 +3,23 @@
 import asyncio
 import logging
 import os
+import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import httpx
 
 logger = logging.getLogger(__name__)
+SDK_VERSION = "0.1.0"
+
+
+def _default_headers(api_key: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "AGR-Client-Version": f"python-sdk/{SDK_VERSION}",
+        "Accept-Version": "application/vnd.agr.v1+json",
+    }
 
 
 class AGRError(Exception):
@@ -70,6 +81,14 @@ class DecisionTrace:
     risk_override: bool = False
     fallback_used: bool = False
     fallback_reason: str | None = None
+
+
+@dataclass
+class ApprovalResult:
+    approval_id: str
+    status: str
+    decided_by: str | None = None
+    decided_at: str | None = None
 
 
 @dataclass
@@ -203,6 +222,16 @@ def _parse_simulation_result(data: dict[str, object]) -> SimulationResult:
     )
 
 
+def _parse_approval_result(data: dict[str, object], approval_id: str) -> ApprovalResult:
+    decided_at = data.get("decision_at")
+    return ApprovalResult(
+        approval_id=approval_id,
+        status=_get_required_str(data, "status"),
+        decided_by=_get_optional_str(data, "decided_by"),
+        decided_at=decided_at if isinstance(decided_at, str) else None,
+    )
+
+
 def _raise_evaluate_error(response: httpx.Response) -> None:
     if response.status_code == 401:
         data = response.json()
@@ -249,7 +278,7 @@ class AGRClient:
         self.base_url = base_url.rstrip("/")
         kwargs: dict[str, object] = {
             "base_url": self.base_url,
-            "headers": {"Authorization": f"Bearer {self.api_key}"},
+            "headers": _default_headers(self.api_key),
             "timeout": timeout,
         }
         if transport is not None:
@@ -335,6 +364,40 @@ class AGRClient:
                 )
 
             time.sleep(poll_interval)
+
+    def on_approval_resolved(
+        self,
+        approval_id: str,
+        callback: Callable[[ApprovalResult], None],
+        poll_interval: float = 2.0,
+        timeout: float = 3600.0,
+    ) -> threading.Thread:
+        def _runner() -> None:
+            start = time.monotonic()
+            while True:
+                if time.monotonic() - start >= timeout:
+                    callback(ApprovalResult(approval_id=approval_id, status="expired"))
+                    return
+
+                response = self._client.get(f"/v1/approvals/{approval_id}")
+                if response.status_code == 200:
+                    data = response.json()
+                    if isinstance(data, dict):
+                        result = _parse_approval_result(data, approval_id)
+                        if result.status != "pending":
+                            callback(result)
+                            return
+                elif response.status_code >= 400:
+                    raise AGRError(
+                        f"AGR API error ({response.status_code}): {response.text}",
+                        status_code=response.status_code,
+                    )
+
+                time.sleep(poll_interval)
+
+        thread = threading.Thread(target=_runner, daemon=True)
+        thread.start()
+        return thread
 
     def register_agent(
         self, agent_id: str, metadata: dict[str, object] | None = None
@@ -508,7 +571,7 @@ class AsyncAGRClient:
         self.base_url = base_url.rstrip("/")
         kwargs: dict[str, object] = {
             "base_url": self.base_url,
-            "headers": {"Authorization": f"Bearer {self.api_key}"},
+            "headers": _default_headers(self.api_key),
             "timeout": timeout,
         }
         if transport is not None:
@@ -583,6 +646,32 @@ class AsyncAGRClient:
                     return True
                 if status == "rejected":
                     return False
+            elif response.status_code >= 400:
+                raise AGRError(
+                    f"AGR API error ({response.status_code}): {response.text}",
+                    status_code=response.status_code,
+                )
+
+            await asyncio.sleep(poll_interval)
+
+    async def await_approval(
+        self,
+        approval_id: str,
+        poll_interval: float = 2.0,
+        timeout: float = 3600.0,
+    ) -> ApprovalResult:
+        start = time.monotonic()
+        while True:
+            if time.monotonic() - start >= timeout:
+                return ApprovalResult(approval_id=approval_id, status="expired")
+
+            response = await self._client.get(f"/v1/approvals/{approval_id}")
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, dict):
+                    result = _parse_approval_result(data, approval_id)
+                    if result.status != "pending":
+                        return result
             elif response.status_code >= 400:
                 raise AGRError(
                     f"AGR API error ({response.status_code}): {response.text}",

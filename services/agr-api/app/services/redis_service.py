@@ -19,7 +19,10 @@ import contextlib
 import hashlib
 import json
 import logging
-from typing import Literal, TypedDict
+import time
+from collections.abc import Awaitable
+from dataclasses import dataclass
+from typing import Literal, TypedDict, cast
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -30,12 +33,56 @@ logger = logging.getLogger(__name__)
 
 _EVAL_CACHE_TTL = 60  # seconds
 _RATE_KEY_TTL = 60 * 60 * 24 * 31  # 31 days — reset handled at billing cycle
+_IDEMPOTENCY_TTL = 60 * 60 * 24
 
-_redis_client: "aioredis.Redis[str] | None" = None  # type: ignore[type-arg]
+_redis_client: aioredis.Redis | None = None
 _redis_unavailable: bool = False  # set True after a failed init so we stop retrying
 
+_TOKEN_BUCKET_LUA = """
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local refill_rate = tonumber(ARGV[2])
+local capacity = tonumber(ARGV[3])
 
-def _get_redis() -> "aioredis.Redis[str] | None":  # type: ignore[type-arg]
+local data = redis.call("HMGET", key, "tokens", "timestamp")
+local tokens = tonumber(data[1])
+local timestamp = tonumber(data[2])
+
+if tokens == nil then
+  tokens = capacity
+end
+if timestamp == nil then
+  timestamp = now
+end
+
+local delta = math.max(0, now - timestamp)
+tokens = math.min(capacity, tokens + (delta * refill_rate))
+
+local allowed = 0
+local retry_after = 0
+if tokens >= 1 then
+  allowed = 1
+  tokens = tokens - 1
+else
+  retry_after = (1 - tokens) / refill_rate
+end
+
+redis.call("HMSET", key, "tokens", tokens, "timestamp", now)
+redis.call("EXPIRE", key, math.ceil(capacity / refill_rate) + 1)
+
+return {allowed, tokens, now + retry_after, retry_after}
+"""
+
+
+@dataclass
+class RateLimitResult:
+    allowed: bool
+    remaining: int
+    reset_at: float
+    retry_after: float | None = None
+
+
+def _get_redis() -> aioredis.Redis | None:
     """Return the module-level Redis connection pool, lazily initialised.
 
     `aioredis.from_url()` creates a connection pool (not a single connection).
@@ -66,6 +113,10 @@ def _get_redis() -> "aioredis.Redis[str] | None":  # type: ignore[type-arg]
     return _redis_client
 
 
+def get_redis_client() -> aioredis.Redis | None:
+    return _get_redis()
+
+
 def _eval_key(
     org_id: UUID,
     agent_id: str,
@@ -84,6 +135,14 @@ def _eval_key(
 
 def _rate_key(org_id: UUID) -> str:
     return f"evalcount:{org_id}"
+
+
+def _token_bucket_key(org_id: str) -> str:
+    return f"ratelimit:{org_id}"
+
+
+def _idempotency_key(org_id: UUID, key: str) -> str:
+    return f"idempotent:{org_id}:{key}"
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +191,36 @@ async def set_cached_eval(
         )
     except Exception as exc:
         logger.debug("Cache SET error: %s", exc)
+
+
+async def get_idempotent_response(
+    org_id: UUID,
+    key: str,
+) -> dict[str, object] | None:
+    r = _get_redis()
+    if r is None:
+        return None
+    try:
+        raw = await r.get(_idempotency_key(org_id, key))
+        return json.loads(raw) if raw else None
+    except Exception as exc:
+        logger.debug("Idempotency GET error: %s", exc)
+        return None
+
+
+async def set_idempotent_response(
+    org_id: UUID,
+    key: str,
+    response_dict: dict[str, object],
+    ttl: int = _IDEMPOTENCY_TTL,
+) -> None:
+    r = _get_redis()
+    if r is None:
+        return
+    try:
+        await r.setex(_idempotency_key(org_id, key), ttl, json.dumps(response_dict, default=str))
+    except Exception as exc:
+        logger.debug("Idempotency SET error: %s", exc)
 
 
 _SCAN_BATCH_SIZE = 500  # keys per DEL call — prevents single huge command
@@ -208,6 +297,45 @@ async def rate_limit_incr(
     except Exception as exc:
         logger.warning("Redis rate limit check failed (falling back to DB): %s", exc)
         return False, db_count
+
+
+async def check_rate_limit(
+    redis_client: aioredis.Redis | None,
+    org_id: str,
+    limit: int,
+    burst: int,
+) -> RateLimitResult:
+    if redis_client is None:
+        now = time.time()
+        return RateLimitResult(allowed=True, remaining=max(0, burst - 1), reset_at=now)
+
+    now = time.time()
+    try:
+        raw_result = redis_client.eval(
+            _TOKEN_BUCKET_LUA,
+            1,
+            _token_bucket_key(org_id),
+            str(now),
+            str(limit),
+            str(burst),
+        )
+        raw = await cast(Awaitable[object], raw_result)
+        if not isinstance(raw, list) or len(raw) != 4:
+            raise RuntimeError(f"Unexpected token bucket response: {raw!r}")
+
+        allowed = bool(int(float(raw[0])))
+        remaining = max(0, int(float(raw[1])))
+        reset_at = float(raw[2])
+        retry_after_raw = float(raw[3])
+        return RateLimitResult(
+            allowed=allowed,
+            remaining=remaining,
+            reset_at=reset_at,
+            retry_after=None if allowed else retry_after_raw,
+        )
+    except Exception as exc:
+        logger.warning("Redis token bucket failed (allowing request): %s", exc)
+        return RateLimitResult(allowed=True, remaining=max(0, burst - 1), reset_at=now)
 
 
 async def increment_eval_count(org_id: UUID, db_count: int) -> int:

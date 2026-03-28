@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.dependencies import require_role
+from app.middleware.auth import require_scope
 from app.models import OrgRiskConfig
 from app.schemas import OrgRiskConfigResponse, OrgRiskConfigUpdate
 
@@ -49,7 +50,11 @@ async def _get_or_create(session: AsyncSession, org_id: uuid.UUID) -> OrgRiskCon
     return cfg
 
 
-@router.get("/org/risk-config", response_model=OrgRiskConfigResponse)
+@router.get(
+    "/org/risk-config",
+    response_model=OrgRiskConfigResponse,
+    dependencies=[Depends(require_scope("org:admin"))],
+)
 async def get_risk_config(
     request: Request,
     session: AsyncSession = Depends(get_session),
@@ -63,7 +68,7 @@ async def get_risk_config(
 @router.put(
     "/org/risk-config",
     response_model=OrgRiskConfigResponse,
-    dependencies=[Depends(require_role("admin"))],
+    dependencies=[Depends(require_role("admin")), Depends(require_scope("org:admin"))],
 )
 async def update_risk_config(
     body: OrgRiskConfigUpdate,

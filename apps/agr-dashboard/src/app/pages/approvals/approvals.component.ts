@@ -79,6 +79,12 @@ function slaCountdown(expiresAt: string): { label: string; urgent: boolean } | n
         }
       </div>
 
+      @if (hasDbOnlyApprovals()) {
+        <div class="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          Warning: Approval workflows are running in database-only mode. Configure Temporal for production durability.
+        </div>
+      }
+
       @if (loading()) {
         <div class="py-16 text-center text-slate-500 text-sm">Loading...</div>
       } @else if (items().length === 0) {
@@ -418,6 +424,7 @@ export class ApprovalsComponent implements OnInit, OnDestroy {
   readonly objectKeys = Object.keys;
 
   readonly pendingCount = computed(() => this.items().filter((approval) => approval.status === 'pending').length);
+  readonly hasDbOnlyApprovals = computed(() => this.items().some((approval) => approval.workflow_mode === 'db_only'));
 
   private readonly slaMap = signal<Map<string, { label: string; urgent: boolean }>>(new Map());
   private slaInterval: ReturnType<typeof setInterval> | null = null;

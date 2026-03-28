@@ -54,6 +54,15 @@ export interface ApprovalApiResponse {
   agent_id: string;
   action: string;
   resource: string;
+  decision_at?: string | null;
+  decided_by?: string | null;
+}
+
+export interface ApprovalResult {
+  approvalId: string;
+  status: "approved" | "rejected" | "expired";
+  decidedBy?: string;
+  decidedAt?: string;
 }
 
 export interface AgentApiResponse {

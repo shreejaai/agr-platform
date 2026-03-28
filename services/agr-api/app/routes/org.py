@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.database import get_session
 from app.dependencies import require_role
+from app.middleware.auth import require_scope
 from app.models import Organization
 from app.schemas import OrgMeResponse, SSOSettingsResponse, SSOSettingsUpdateRequest
 from app.services.sso_service import parse_sso_domains, serialize_sso_domains
@@ -25,7 +26,11 @@ def _normalize_sso_default_role(role: str) -> Literal["admin", "operator", "view
     return "viewer"
 
 
-@router.get("/org/me", response_model=OrgMeResponse)
+@router.get(
+    "/org/me",
+    response_model=OrgMeResponse,
+    dependencies=[Depends(require_scope("org:admin"))],
+)
 async def get_org_me(request: Request) -> OrgMeResponse:
     """Return the authenticated org's profile and usage stats."""
     org: Organization = request.state.org
@@ -64,7 +69,7 @@ def _sso_response(org: Organization) -> SSOSettingsResponse:
 @router.get(
     "/org/sso",
     response_model=SSOSettingsResponse,
-    dependencies=[Depends(require_role("admin"))],
+    dependencies=[Depends(require_role("admin")), Depends(require_scope("org:admin"))],
 )
 async def get_org_sso_settings(request: Request) -> SSOSettingsResponse:
     org: Organization = request.state.org
@@ -74,7 +79,7 @@ async def get_org_sso_settings(request: Request) -> SSOSettingsResponse:
 @router.put(
     "/org/sso",
     response_model=SSOSettingsResponse,
-    dependencies=[Depends(require_role("admin"))],
+    dependencies=[Depends(require_role("admin")), Depends(require_scope("org:admin"))],
 )
 async def update_org_sso_settings(
     body: SSOSettingsUpdateRequest,

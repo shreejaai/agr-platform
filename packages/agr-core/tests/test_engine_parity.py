@@ -47,6 +47,64 @@ CONTEXT_PERMIT = {
     "cedar_rule": ('permit(principal, action, resource) when { context.env == "staging" };'),
 }
 
+WIRE_APPROVAL_POLICY = {
+    "id": "wire-approval",
+    "cedar_rule": (
+        'forbid(principal, action == Action::"wire.transfer", resource) '
+        "when { context has amount && context.amount > 50000 } "
+        'unless { context has approval_status && context.approval_status == "approved" };'
+    ),
+}
+
+OFAC_DENY_POLICY = {
+    "id": "wire-ofac",
+    "cedar_rule": (
+        'forbid(principal, action == Action::"wire.transfer", resource) '
+        "when { context has destination_country && "
+        '(context.destination_country == "IR" || '
+        'context.destination_country == "KP" || '
+        'context.destination_country == "SY" || '
+        'context.destination_country == "CU") };'
+    ),
+}
+
+PAYROLL_APPROVAL_POLICY = {
+    "id": "payroll-approval",
+    "cedar_rule": (
+        'forbid(principal, action == Action::"ach.batch_submit", resource) '
+        "when { context has is_after_hours && context.is_after_hours == true && "
+        "context has total_amount && context.total_amount > 100000 } "
+        'unless { context has approval_status && context.approval_status == "approved" };'
+    ),
+}
+
+PAYROLL_PERMIT_POLICY = {
+    "id": "payroll-permit",
+    "cedar_rule": (
+        'permit(principal, action == Action::"ach.batch_submit", resource) '
+        'when { context has batch_type && context.batch_type == "payroll" && '
+        "context has total_amount && context.total_amount <= 500000 };"
+    ),
+}
+
+SMALL_CLAIM_PERMIT_POLICY = {
+    "id": "claim-permit",
+    "cedar_rule": (
+        'permit(principal, action == Action::"claim.approve", resource) '
+        "when { context has claim_amount && context.claim_amount <= 2500 && "
+        "context has fraud_score && context.fraud_score < 0.3 };"
+    ),
+}
+
+HIGH_FRAUD_APPROVAL_POLICY = {
+    "id": "claim-fraud-review",
+    "cedar_rule": (
+        'forbid(principal, action == Action::"claim.approve", resource) '
+        "when { context has fraud_score && context.fraud_score >= 0.75 } "
+        'unless { context has approval_status && context.approval_status == "approved" };'
+    ),
+}
+
 PARITY_CASES = [
     # id, description, policies, agent, action, resource, context, expected
     (
@@ -138,6 +196,36 @@ PARITY_CASES = [
         "prod",
         {},
         "DENY",
+    ),
+    (
+        "ofac_deny_not_shadowed_by_wire_approval",
+        "specific OFAC deny beats unrelated approval-gated wire rule",
+        [WIRE_APPROVAL_POLICY, OFAC_DENY_POLICY],
+        "finance-agent",
+        "wire.transfer",
+        "recipient",
+        {"amount": 5000, "destination_country": "IR"},
+        "DENY",
+    ),
+    (
+        "payroll_allow_not_shadowed_by_after_hours_rule",
+        "routine payroll stays ALLOW when after-hours approval rule does not match",
+        [PAYROLL_APPROVAL_POLICY, PAYROLL_PERMIT_POLICY],
+        "finance-agent",
+        "ach.batch_submit",
+        "payroll",
+        {"batch_type": "payroll", "is_after_hours": False, "total_amount": 380000},
+        "ALLOW",
+    ),
+    (
+        "small_claim_allow_not_shadowed_by_high_fraud_rule",
+        "small low-fraud claim stays ALLOW when fraud review rule does not match",
+        [SMALL_CLAIM_PERMIT_POLICY, HIGH_FRAUD_APPROVAL_POLICY],
+        "claims-agent",
+        "claim.approve",
+        "claim",
+        {"claim_amount": 1800, "fraud_score": 0.12},
+        "ALLOW",
     ),
 ]
 

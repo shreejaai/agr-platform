@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 
 from app.database import get_session
+from app.middleware.auth import require_scope
 from app.models import OrgMember
 from app.schemas import (
     ErrorResponse,
@@ -68,6 +69,7 @@ def _require_admin(request: Request) -> None:
 @router.get(
     "/members",
     response_model=list[OrgMemberResponse],
+    dependencies=[Depends(require_scope("org:admin"))],
     responses={401: {"model": ErrorResponse}},
     summary="List team members",
     description=(
@@ -91,6 +93,7 @@ async def list_members(
     "/members/invite",
     response_model=OrgMemberResponse,
     status_code=201,
+    dependencies=[Depends(require_scope("org:admin"))],
     responses={
         401: {"model": ErrorResponse},
         403: {"model": ErrorResponse},
@@ -159,6 +162,7 @@ async def invite_member(
 @router.patch(
     "/members/{member_id}",
     response_model=OrgMemberResponse,
+    dependencies=[Depends(require_scope("org:admin"))],
     responses={
         401: {"model": ErrorResponse},
         403: {"model": ErrorResponse},
@@ -213,6 +217,7 @@ async def update_member_role(
     "/members/{member_id}",
     status_code=204,
     response_model=None,
+    dependencies=[Depends(require_scope("org:admin"))],
     responses={
         401: {"model": ErrorResponse},
         403: {"model": ErrorResponse},

@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
+from app.middleware.auth import require_scope
 from app.models import ApprovalRequest, ApprovalStep
 from app.schemas import (
     ApprovalDecideRequest,
@@ -185,7 +186,11 @@ async def _apply_decision(
     return approval
 
 
-@router.get("/approvals", response_model=list[ApprovalResponse])
+@router.get(
+    "/approvals",
+    response_model=list[ApprovalResponse],
+    dependencies=[Depends(require_scope("approvals:read"))],
+)
 async def list_approvals(
     request: Request,
     session: AsyncSession = Depends(get_session),
@@ -420,7 +425,11 @@ async def decide_via_email_post(
     )
 
 
-@router.get("/approvals/{approval_id}", response_model=ApprovalResponse)
+@router.get(
+    "/approvals/{approval_id}",
+    response_model=ApprovalResponse,
+    dependencies=[Depends(require_scope("approvals:read"))],
+)
 async def get_approval(
     approval_id: uuid.UUID,
     request: Request,
@@ -440,7 +449,11 @@ async def get_approval(
     return _to_response(approval)
 
 
-@router.post("/approvals/{approval_id}/decide", response_model=ApprovalResponse)
+@router.post(
+    "/approvals/{approval_id}/decide",
+    response_model=ApprovalResponse,
+    dependencies=[Depends(require_scope("approvals:write"))],
+)
 async def decide_approval(
     approval_id: uuid.UUID,
     body: ApprovalDecideRequest,
@@ -462,7 +475,11 @@ async def decide_approval(
     return _to_response(approval)
 
 
-@router.post("/approvals/{approval_id}/approve", response_model=ApprovalResponse)
+@router.post(
+    "/approvals/{approval_id}/approve",
+    response_model=ApprovalResponse,
+    dependencies=[Depends(require_scope("approvals:write"))],
+)
 async def approve_request(
     approval_id: uuid.UUID,
     body: ApprovalDecisionRequest,
@@ -483,7 +500,11 @@ async def approve_request(
     return _to_response(approval)
 
 
-@router.post("/approvals/{approval_id}/reject", response_model=ApprovalResponse)
+@router.post(
+    "/approvals/{approval_id}/reject",
+    response_model=ApprovalResponse,
+    dependencies=[Depends(require_scope("approvals:write"))],
+)
 async def reject_request(
     approval_id: uuid.UUID,
     body: ApprovalDecisionRequest,
@@ -504,7 +525,11 @@ async def reject_request(
     return _to_response(approval)
 
 
-@router.post("/approvals/{approval_id}/escalate", response_model=ApprovalResponse)
+@router.post(
+    "/approvals/{approval_id}/escalate",
+    response_model=ApprovalResponse,
+    dependencies=[Depends(require_scope("approvals:write"))],
+)
 async def escalate_approval(
     approval_id: uuid.UUID,
     body: ApprovalEscalateRequest,
@@ -568,7 +593,11 @@ async def escalate_approval(
     return _to_response(approval)
 
 
-@router.get("/approvals/{approval_id}/steps", response_model=list[ApprovalStepResponse])
+@router.get(
+    "/approvals/{approval_id}/steps",
+    response_model=list[ApprovalStepResponse],
+    dependencies=[Depends(require_scope("approvals:read"))],
+)
 async def list_approval_steps(
     approval_id: uuid.UUID,
     request: Request,
@@ -604,7 +633,12 @@ async def list_approval_steps(
     ]
 
 
-@router.post("/approvals/{approval_id}/steps", response_model=ApprovalStepResponse, status_code=201)
+@router.post(
+    "/approvals/{approval_id}/steps",
+    response_model=ApprovalStepResponse,
+    status_code=201,
+    dependencies=[Depends(require_scope("approvals:write"))],
+)
 async def add_approval_step(
     approval_id: uuid.UUID,
     body: ApprovalStepCreate,

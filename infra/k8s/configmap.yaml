@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agr-config
+data:
+  # Set to "saas" or "onprem" depending on your deployment.
+  DEPLOYMENT_MODE: "onprem"
+  # Comma-separated dashboard origins, e.g. https://dashboard.example.com
+  CORS_ORIGINS: "http://localhost:4200"
+  # Cedar worker pool size for concurrent policy evaluation.
+  CEDAR_POOL_SIZE: "4"
+  # Set to "true" to hard-fail when Cedar CLI is unavailable.
+  CEDAR_REQUIRE_CLI: "false"

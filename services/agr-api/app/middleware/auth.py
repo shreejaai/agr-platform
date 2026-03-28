@@ -1,16 +1,17 @@
+import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import Request, Response
+from fastapi import HTTPException, Request, Response
 from sqlalchemy import select, text
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.database import async_session_factory
-from app.models import AuthSession, Organization
+from app.models import ApiKey, AuthSession, Organization
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +21,12 @@ UNPROTECTED_PATHS = {
     "/docs",
     "/openapi.json",
     "/redoc",
+    "/v1/meta",
     "/v1/approvals/decide",
     "/v1/slack/interactivity",
     "/v1/clerk/webhook",
     "/v1/clerk/api-key",  # uses Clerk session JWT, not agr_sk_ key
+    "/v1/stream/evaluations",
 }
 
 # Human-readable hints differ between SaaS and on-prem deployments
@@ -94,27 +97,52 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 media_type="application/json",
             )
 
-        org, role, auth_mode, auth_expires_at = auth_lookup
+        org, role, auth_mode, auth_expires_at, scopes = auth_lookup
         request.state.org_id = org.id
         request.state.org = org
         request.state.role = role
         request.state.auth_mode = auth_mode
         request.state.auth_expires_at = auth_expires_at
+        request.state.scopes = scopes
         return await call_next(request)
 
     @staticmethod
     async def _lookup_org(
         api_key: str,
-    ) -> tuple[Organization, str, str, datetime | None] | None:
+    ) -> tuple[Organization, str, str, datetime | None, list[str]] | None:
         async with async_session_factory() as session:
             if api_key.startswith("agr_sk_"):
+                now = datetime.now(UTC)
+                key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+                scoped_result = await session.execute(
+                    select(ApiKey, Organization)
+                    .join(Organization, Organization.id == ApiKey.org_id)
+                    .where(
+                        ApiKey.key_hash == key_hash,
+                        ApiKey.revoked.is_(False),
+                        (ApiKey.expires_at.is_(None)) | (ApiKey.expires_at > now),
+                    )
+                )
+                scoped_row = scoped_result.one_or_none()
+                if scoped_row is not None:
+                    scoped_key, scoped_org = scoped_row
+                    scoped_key.last_used_at = now
+                    await session.commit()
+                    return (
+                        scoped_org,
+                        scoped_org.role,
+                        "scoped_api_key",
+                        None,
+                        list(scoped_key.scopes or ["*"]),
+                    )
+
                 result = await session.execute(
                     select(Organization).where(Organization.api_key == api_key)
                 )
                 org = result.scalar_one_or_none()
                 if org is None:
                     return None
-                return org, org.role, "api_key", None
+                return org, org.role, "api_key", None, ["*"]
 
             result = await session.execute(
                 select(AuthSession, Organization)
@@ -130,7 +158,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             auth_session, org = row
             if org is None:
                 return None
-            return org, auth_session.role, "sso_session", auth_session.expires_at
+            return org, auth_session.role, "sso_session", auth_session.expires_at, ["*"]
 
 
 async def set_rls_org(session: object, org_id: UUID) -> None:
@@ -146,3 +174,19 @@ async def set_rls_org(session: object, org_id: UUID) -> None:
         await session.execute(
             text("SET LOCAL app.current_org_id = :org_id").bindparams(org_id=str(org_id))
         )
+
+
+def require_scope(scope: str) -> Callable[[Request], Awaitable[None]]:
+    async def _check(request: Request) -> None:
+        scopes: list[str] = getattr(request.state, "scopes", ["*"])
+        if "*" in scopes or scope in scopes:
+            return
+        raise HTTPException(status_code=403, detail=f"Missing required scope: {scope}")
+
+    return _check
+
+
+async def authenticate_token(
+    api_key: str,
+) -> tuple[Organization, str, str, datetime | None, list[str]] | None:
+    return await AuthMiddleware._lookup_org(api_key)

@@ -2,6 +2,7 @@ import { AGRAuthError, AGRError, AGRRateLimitError } from "./errors.js";
 import type {
   AgentApiResponse,
   ApprovalApiResponse,
+  ApprovalResult,
   EvaluateApiResponse,
   EvaluationResult,
   PolicyImportRequest,
@@ -29,6 +30,7 @@ const DEFAULT_BASE_URL = "https://api.agr.dev";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_APPROVAL_TIMEOUT_MS = 3_600_000;
+const SDK_VERSION = "0.1.0";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,6 +51,18 @@ function makeEvaluationResult(data: EvaluateApiResponse): EvaluationResult {
     allowed: data.decision === "ALLOW",
     denied: data.decision === "DENY",
     requiresApproval: data.decision === "APPROVAL_REQUIRED",
+  };
+}
+
+function makeApprovalResult(
+  approvalId: string,
+  data: ApprovalApiResponse,
+): ApprovalResult {
+  return {
+    approvalId,
+    status: data.status as "approved" | "rejected" | "expired",
+    decidedBy: data.decided_by ?? undefined,
+    decidedAt: data.decision_at ?? undefined,
   };
 }
 
@@ -92,6 +106,8 @@ export class AGRClient {
           Authorization: `Bearer ${this.apiKey}`,
           "Content-Type": "application/json",
           Accept: "application/json",
+          "AGR-Client-Version": `ts-sdk/${SDK_VERSION}`,
+          "Accept-Version": "application/vnd.agr.v1+json",
         },
         body: body !== undefined ? JSON.stringify(body) : undefined,
         signal: controller.signal,
@@ -189,6 +205,52 @@ export class AGRClient {
 
       await delay(pollInterval);
     }
+  }
+
+  onApprovalResolved(
+    approvalId: string,
+    callback: (result: ApprovalResult) => void,
+    options: { pollInterval?: number; timeout?: number } = {},
+  ): () => void {
+    const pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL_MS;
+    const timeoutMs = options.timeout ?? DEFAULT_APPROVAL_TIMEOUT_MS;
+    const started = Date.now();
+    let cancelled = false;
+
+    const tick = async (): Promise<void> => {
+      if (cancelled) return;
+      if (Date.now() - started >= timeoutMs) {
+        cancelled = true;
+        clearInterval(interval);
+        callback({ approvalId, status: "expired" });
+        return;
+      }
+
+      try {
+        const data = await this._request<ApprovalApiResponse>(
+          "GET",
+          `/v1/approvals/${approvalId}`,
+        );
+        if (data.status !== "pending") {
+          cancelled = true;
+          clearInterval(interval);
+          callback(makeApprovalResult(approvalId, data));
+        }
+      } catch {
+        cancelled = true;
+        clearInterval(interval);
+      }
+    };
+
+    const interval = setInterval(() => {
+      void tick();
+    }, pollInterval);
+    void tick();
+
+    return (): void => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }
 
   /**

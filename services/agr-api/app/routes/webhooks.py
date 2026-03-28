@@ -4,11 +4,13 @@ import json
 import secrets
 import time
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_session
 from app.dependencies import require_role
 from app.models import Webhook, WebhookDelivery
@@ -20,7 +22,7 @@ from app.schemas import (
     WebhookTestResponse,
     WebhookUpdate,
 )
-from app.services.webhook_service import _sign_payload, retry_webhook_delivery
+from app.services.webhook_service import build_signature_headers, retry_webhook_delivery
 
 router = APIRouter(prefix="/v1", tags=["webhooks"])
 
@@ -50,6 +52,7 @@ def _to_response(wh: Webhook, reveal_secret: bool = False) -> WebhookResponse:
         secret=wh.secret if reveal_secret else _SECRET_PLACEHOLDER,
         events=list(wh.events) if wh.events else [],
         active=wh.active,
+        rotating_secret_expires_at=wh.rotating_secret_expires_at,
         created_at=wh.created_at,
     )
 
@@ -230,15 +233,17 @@ async def retry_delivery(
     response_model=WebhookRotateSecretResponse,
     dependencies=[Depends(require_role("admin"))],
 )
+@router.post(
+    "/webhooks/{webhook_id}/rotate_secret",
+    response_model=WebhookRotateSecretResponse,
+    dependencies=[Depends(require_role("admin"))],
+)
 async def rotate_webhook_secret(
     webhook_id: uuid.UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> WebhookRotateSecretResponse:
-    """Generate a new HMAC secret for a webhook. Old secret is immediately invalid.
-
-    The new secret is shown once — update your receiver to verify with it.
-    """
+    """Generate a new HMAC secret with a temporary grace period for the old one."""
     org_id: uuid.UUID = request.state.org_id
     result = await session.execute(
         select(Webhook).where(Webhook.id == webhook_id, Webhook.org_id == org_id)
@@ -247,10 +252,21 @@ async def rotate_webhook_secret(
     if not wh:
         raise HTTPException(status_code=404, detail="Webhook not found.")
 
+    grace_expires_at = datetime.now(UTC) + timedelta(hours=settings.webhook_secret_rotation_hours)
     new_secret = "agr_wh_" + secrets.token_hex(24)
+    wh.rotating_secret = wh.secret
+    wh.rotating_secret_expires_at = grace_expires_at
     wh.secret = new_secret
     await session.flush()
-    return WebhookRotateSecretResponse(id=str(wh.id), new_secret=new_secret)
+    return WebhookRotateSecretResponse(
+        id=str(wh.id),
+        new_secret=new_secret,
+        rotating_secret_expires_at=grace_expires_at,
+        message=(
+            f"Old signature accepted for {settings.webhook_secret_rotation_hours} hours. "
+            f"Update your endpoint before {grace_expires_at.isoformat()}."
+        ),
+    )
 
 
 @router.post(
@@ -286,12 +302,7 @@ async def test_webhook(
     }
     body = json.dumps(payload, default=str)
     timestamp = int(time.time())
-    sig = _sign_payload(str(wh.secret), timestamp, body)
-    headers = {
-        "Content-Type": "application/json",
-        "X-AGR-Signature": f"t={timestamp},v1={sig}",
-        "X-AGR-Event": event,
-    }
+    headers = build_signature_headers(wh, timestamp, body, event)
 
     delivery = WebhookDelivery(
         id=uuid.uuid4(),

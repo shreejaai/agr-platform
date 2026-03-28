@@ -22,6 +22,8 @@ from app.services.compliance_service import (
 class AuditTrailCompliancePlugin(CompliancePlugin):
     """Validates that each evaluate call meets minimum audit trail requirements."""
 
+    blocks_on_finding = True
+
     @property
     def name(self) -> str:
         return "audit_trail_check"
@@ -37,6 +39,7 @@ class AuditTrailCompliancePlugin(CompliancePlugin):
         findings.append(
             ComplianceFinding(
                 plugin=self.name,
+                plugin_id="eu_ai_act_art13",
                 standard="EU_AI_ACT",
                 rule_id="ART-13",
                 severity="warning",
@@ -57,6 +60,7 @@ class AuditTrailCompliancePlugin(CompliancePlugin):
         findings.append(
             ComplianceFinding(
                 plugin=self.name,
+                plugin_id="soc2_cc61",
                 standard="SOC2",
                 rule_id="CC6.1",
                 severity="warning",
@@ -75,6 +79,7 @@ class AuditTrailCompliancePlugin(CompliancePlugin):
         findings.append(
             ComplianceFinding(
                 plugin=self.name,
+                plugin_id="iso42001_sec84",
                 standard="ISO42001",
                 rule_id="SEC-8.4",
                 severity="info",
@@ -94,6 +99,7 @@ class AuditTrailCompliancePlugin(CompliancePlugin):
             findings.append(
                 ComplianceFinding(
                     plugin=self.name,
+                    plugin_id="eu_ai_act_art13",
                     standard="EU_AI_ACT",
                     rule_id="ART-13-CONTEXT",
                     severity="info",

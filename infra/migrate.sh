@@ -54,4 +54,12 @@ $PSQL -f /migrations/024_org_members.sql
 echo "  024 done"
 $PSQL -f /migrations/025_enterprise_auth_usage_workflows.sql
 echo "  025 done"
+$PSQL -f /migrations/026_compliance_enforcement.sql
+echo "  026 done"
+$PSQL -f /migrations/027_api_key_scopes.sql
+echo "  027 done"
+$PSQL -f /migrations/028_webhook_secret_rotation.sql
+echo "  028 done"
+$PSQL -f /migrations/029_policy_test_suites.sql
+echo "  029 done"
 echo "All migrations complete."

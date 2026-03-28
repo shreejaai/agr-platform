@@ -1,23 +1,37 @@
 """Audit trail query and chain-verification endpoints."""
 
-import csv
-import io
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, cast
 
-from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
 from app.database import get_session
+from app.middleware.auth import require_scope
 from app.models import AuditEvent
-from app.schemas import AuditEventResponse, AuditSearchRequest, AuditVerifyResponse
-from app.services.audit_service import compute_entry_hash
+from app.schemas import (
+    AuditEventResponse,
+    AuditExportJobResponse,
+    AuditSearchRequest,
+    AuditVerifyResponse,
+    ReplayRequest,
+    ReplayResponse,
+)
+from app.services.audit_service import (
+    compute_entry_hash,
+    get_audit_export_job,
+    start_audit_export_job,
+    stream_audit_events,
+)
+from app.services.replay_service import replay_evaluation
 
-router = APIRouter(prefix="/v1", tags=["audit"])
+router = APIRouter(
+    prefix="/v1", tags=["audit"], dependencies=[Depends(require_scope("audit:read"))]
+)
 
 
 def _event_to_response(e: AuditEvent) -> AuditEventResponse:
@@ -134,90 +148,60 @@ async def search_audit_events(
     return [_event_to_response(e) for e in result.scalars().all()]
 
 
-_CSV_FIELDS = [
-    "id",
-    "sequence_num",
-    "event_type",
-    "agent_id",
-    "action",
-    "resource",
-    "decision",
-    "policy_id",
-    "approval_id",
-    "recorded_at",
-]
-_EXPORT_PAGE_SIZE = 1000
-_EXPORT_MAX_ROWS = 50_000
-
-
-@router.post("/audit/export")
+@router.post("/audit/export", response_model=None)
 async def export_audit_events(
     body: AuditSearchRequest,
     request: Request,
+    format: Literal["json", "csv"] = "csv",
+    async_export: bool = False,
     session: AsyncSession = Depends(get_session),
-) -> StreamingResponse:
-    """Stream audit events matching filters as a CSV file.
-
-    Streams rows in pages of 1 000 to avoid loading the full result set into
-    memory. Caps at 50 000 rows; use offset/pagination for larger exports.
-    """
+) -> Response:
     org_id: uuid.UUID = request.state.org_id
+    if async_export:
+        job = start_audit_export_job(org_id, body.model_dump(), format)
+        payload = AuditExportJobResponse(job_id=job.job_id, status="pending", format=format)
+        return JSONResponse(status_code=202, content=payload.model_dump())
 
-    async def _generate() -> Any:
-        buf = io.StringIO()
-        writer = csv.DictWriter(buf, fieldnames=_CSV_FIELDS, extrasaction="ignore")
-        writer.writeheader()
-        yield buf.getvalue()
-
-        exported = 0
-        page_offset = body.offset
-        while exported < _EXPORT_MAX_ROWS:
-            batch = min(_EXPORT_PAGE_SIZE, _EXPORT_MAX_ROWS - exported)
-            stmt = _apply_filters(
-                select(AuditEvent),
-                org_id,
-                event_type=body.event_type,
-                agent_id=body.agent_id,
-                action=body.action,
-                resource=body.resource,
-                decision=body.decision,
-                policy_id=body.policy_id,
-                start_date=body.start_date,
-                end_date=body.end_date,
-            )
-            stmt = stmt.order_by(AuditEvent.sequence_num.asc()).offset(page_offset).limit(batch)
-            result = await session.execute(stmt)
-            events = result.scalars().all()
-            if not events:
-                break
-            buf = io.StringIO()
-            writer = csv.DictWriter(buf, fieldnames=_CSV_FIELDS, extrasaction="ignore")
-            for e in events:
-                writer.writerow(
-                    {
-                        "id": str(e.id),
-                        "sequence_num": e.sequence_num,
-                        "event_type": e.event_type,
-                        "agent_id": e.agent_id,
-                        "action": e.action,
-                        "resource": e.resource,
-                        "decision": e.decision,
-                        "policy_id": str(e.policy_id) if e.policy_id else "",
-                        "approval_id": str(e.approval_id) if e.approval_id else "",
-                        "recorded_at": e.recorded_at.isoformat(),
-                    }
-                )
-            yield buf.getvalue()
-            exported += len(events)
-            page_offset += len(events)
-            if len(events) < batch:
-                break
-
+    filename = f'audit_{datetime.utcnow().strftime("%Y%m%d_%H%M%S")}.{format}'
+    media_type = "application/json" if format == "json" else "text/csv"
     return StreamingResponse(
-        _generate(),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=audit_export.csv"},
+        stream_audit_events(session, org_id, body, format),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/audit/export/{job_id}", response_model=AuditExportJobResponse)
+async def get_audit_export_status(
+    job_id: str,
+    request: Request,
+) -> AuditExportJobResponse:
+    job = get_audit_export_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Audit export job not found.")
+
+    download_url = None
+    if job.status == "ready" and job.file_path:
+        download_url = str(request.url_for("download_audit_export", job_id=job_id))
+
+    return AuditExportJobResponse(
+        job_id=job.job_id,
+        status=cast(Literal["pending", "ready", "failed"], job.status),
+        format=cast(Literal["json", "csv"], job.format),
+        download_url=download_url,
+        error=job.error,
+    )
+
+
+@router.get("/audit/export/{job_id}/download", name="download_audit_export")
+async def download_audit_export(job_id: str) -> FileResponse:
+    job = get_audit_export_job(job_id)
+    if job is None or job.status != "ready" or job.file_path is None:
+        raise HTTPException(status_code=404, detail="Audit export job not ready.")
+
+    media_type = "application/json" if job.format == "json" else "text/csv"
+    filename = f"audit_export_{job_id}.{job.format}"
+    return FileResponse(job.file_path, media_type=media_type, filename=filename)
 
 
 _VERIFY_PAGE_SIZE = 1000  # rows per batch — prevents OOM on large audit logs
@@ -278,3 +262,13 @@ async def verify_audit_chain(
             break
 
     return AuditVerifyResponse(valid=True, total=total_verified)
+
+
+@router.post("/audit/{eval_id}/replay", response_model=ReplayResponse)
+async def replay_audit_event(
+    eval_id: str,
+    body: ReplayRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> ReplayResponse:
+    return await replay_evaluation(session, request.state.org_id, eval_id, body.policy_ids)

@@ -4,7 +4,7 @@
 .PHONY: help lint typecheck test test-unit test-integration test-postgres \
         test-sdk-py test-sdk-ts test-cedar test-dashboard \
         dev dev-infra dev-dashboard build-dashboard \
-        migrate review-package clean
+        migrate review-package quickstart clean
 
 # ── Formatting ────────────────────────────────────────────────────────────────
 
@@ -79,6 +79,13 @@ dev-dashboard:
 
 build-dashboard:
 	cd apps/agr-dashboard && npm run build -- --configuration production
+
+quickstart:
+	@docker compose up -d postgres redis
+	@sleep 2
+	@docker compose up -d agr-api
+	@echo "AGR running. API: http://localhost:8000/docs"
+	@echo "Try: curl -H 'Authorization: Bearer agr_sk_...' http://localhost:8000/v1/evaluate"
 
 # ── Migrations ────────────────────────────────────────────────────────────────
 

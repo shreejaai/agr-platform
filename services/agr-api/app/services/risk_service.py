@@ -16,6 +16,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from app.middleware.tracing import get_tracer
+
 
 @dataclass
 class RiskResult:
@@ -236,28 +238,41 @@ def compute_risk_score(
         RiskResult with score (0-100), level ("low"|"medium"|"high"),
         and per-factor breakdown.
     """
-    effective_weights = weights if weights is not None else _WEIGHTS
+    tracer = get_tracer()
+    span_cm = tracer.start_as_current_span("risk.compute") if tracer else None
 
-    raw: dict[str, float] = {
-        "action_severity": _score_action_severity(action),
-        "context_signals": _score_context_signals(context),
-        "rate_pattern": _score_rate_pattern(eval_count, eval_limit),
-        "agent_trust": _score_agent_trust(agent_id, trust_level),
-        "amount_scale": _score_amount_scale(context),
-        "resource_sensitivity": _score_resource_sensitivity(resource),
-    }
+    def _compute() -> RiskResult:
+        effective_weights = weights if weights is not None else _WEIGHTS
 
-    weighted_score = sum(raw[k] * effective_weights.get(k, _WEIGHTS[k]) for k in raw)
-    final = min(100, max(0, round(weighted_score)))
+        raw: dict[str, float] = {
+            "action_severity": _score_action_severity(action),
+            "context_signals": _score_context_signals(context),
+            "rate_pattern": _score_rate_pattern(eval_count, eval_limit),
+            "agent_trust": _score_agent_trust(agent_id, trust_level),
+            "amount_scale": _score_amount_scale(context),
+            "resource_sensitivity": _score_resource_sensitivity(resource),
+        }
 
-    # Per-factor contribution (rounded integers for the response)
-    factors = {k: round(raw[k] * effective_weights.get(k, _WEIGHTS[k])) for k in raw}
+        weighted_score = sum(raw[k] * effective_weights.get(k, _WEIGHTS[k]) for k in raw)
+        final = min(100, max(0, round(weighted_score)))
+        factors = {k: round(raw[k] * effective_weights.get(k, _WEIGHTS[k])) for k in raw}
 
-    if final <= 30:
-        level = "low"
-    elif final <= 70:
-        level = "medium"
-    else:
-        level = "high"
+        if final <= 30:
+            level = "low"
+        elif final <= 70:
+            level = "medium"
+        else:
+            level = "high"
 
-    return RiskResult(score=final, level=level, factors=factors)
+        return RiskResult(score=final, level=level, factors=factors)
+
+    if span_cm is None:
+        return _compute()
+
+    with span_cm as span:
+        result = _compute()
+        span.set_attribute("agr.agent_id", agent_id)
+        span.set_attribute("agr.action", action)
+        span.set_attribute("agr.risk_score", result.score)
+        span.set_attribute("agr.risk_level", result.level)
+        return result

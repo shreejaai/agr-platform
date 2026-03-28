@@ -274,6 +274,13 @@ jobs:
     name: Domain scenarios — Finance / Pharma / Banking / Insurance
     runs-on: ubuntu-latest
     needs: [lint-and-test]
+    env:
+      COMPOSE_PROJECT_NAME: agr-domain-scenarios-ci
+      POSTGRES_USER: agr
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: agr_dev
+      SECRET_KEY: ci-domain-test-secret
+      DEPLOYMENT_MODE: saas
 
     steps:
       - uses: actions/checkout@v4.2.2
@@ -293,53 +300,61 @@ jobs:
 
       - name: Start AGR stack (API + Postgres + Redis)
         run: |
-          docker compose -f docker-compose.test.yml up -d --wait
-        env:
-          SECRET_KEY: ci-domain-test-secret
-          DEPLOYMENT_MODE: saas
+          docker compose -f docker-compose.yml up -d --build --wait agr-api
 
       - name: Wait for AGR API to be healthy
         run: |
           for i in {1..30}; do
-            if curl -sf http://localhost:8000/health; then
-              echo "AGR is healthy"
-              break
+            if curl -sf http://localhost:8000/health/ready > /dev/null; then
+              echo "AGR is ready"
+              exit 0
             fi
             echo "Waiting for AGR... ($i/30)"
             sleep 2
           done
+          docker compose -f docker-compose.yml ps
+          docker compose -f docker-compose.yml logs --tail=200 agr-api
+          exit 1
 
       - name: Seed test org and capture API key
         id: seed
         run: |
-          API_KEY=$(docker compose -f docker-compose.test.yml exec -T agr-api \
-            python -c "
-          import asyncio, os, secrets
-          os.environ.setdefault('DATABASE_URL', 'postgresql+asyncpg://agr:password@postgres:5432/agr_dev')
-          from app.database import engine
-          from app.models import Organization, Base
+          API_KEY=$(docker compose -f docker-compose.yml exec -T agr-api python - <<'PY'
+          import asyncio
+          import secrets
+
           import sqlalchemy as sa
+
+          from app.database import engine
+
 
           async def main():
               async with engine.begin() as conn:
-                  key = 'agr_sk_' + secrets.token_hex(32)
+                  key = "agr_sk_" + secrets.token_hex(32)
                   await conn.execute(
-                      sa.text('''
+                      sa.text("""
                           INSERT INTO organizations (id, name, slug, api_key)
                           VALUES (gen_random_uuid(), 'CI Test Org', 'ci-test', :key)
                           ON CONFLICT (slug) DO UPDATE SET api_key = :key
                           RETURNING api_key
-                      '''),
-                      {'key': key}
+                      """),
+                      {"key": key},
                   )
                   print(key)
 
+
           asyncio.run(main())
-          " 2>/dev/null | tail -1)
+          PY
+          )
+          API_KEY=$(printf '%s\n' "$API_KEY" | tail -n 1)
+          if [ -z "$API_KEY" ]; then
+            echo "Failed to seed CI test organization API key" >&2
+            exit 1
+          fi
           echo "agr_api_key=$API_KEY" >> $GITHUB_OUTPUT
 
       - name: Run domain scenario smoke suite
-        run: npx playwright test --project=smoke
+        run: npm run test:smoke
         working-directory: tests
         env:
           AGR_BASE_URL: http://localhost:8000
@@ -356,7 +371,7 @@ jobs:
 
       - name: Stop AGR stack
         if: always()
-        run: docker compose -f docker-compose.test.yml down -v
+        run: docker compose -f docker-compose.yml down -v
 
   # ── Publish Docker images to GitHub Container Registry ────────────────────────
   # Runs on every push to main (after all non-flaky gates pass).
