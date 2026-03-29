@@ -69,17 +69,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return apply_cors_headers(
                 request,
                 Response(
-                content=json.dumps(
-                    {
-                        "error": "unauthorized",
-                        "message": (
-                            "Missing or invalid Authorization header. "
-                            f"Provide a Bearer token. {hint}"
-                        ),
-                    }
-                ),
-                status_code=401,
-                media_type="application/json",
+                    content=json.dumps(
+                        {
+                            "error": "unauthorized",
+                            "message": (
+                                "Missing or invalid Authorization header. "
+                                f"Provide a Bearer token. {hint}"
+                            ),
+                        }
+                    ),
+                    status_code=401,
+                    media_type="application/json",
                 ),
             )
 
@@ -89,14 +89,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return apply_cors_headers(
                 request,
                 Response(
-                content=json.dumps(
-                    {
-                        "error": "unauthorized",
-                        "message": f"Invalid API key format. {hint}",
-                    }
-                ),
-                status_code=401,
-                media_type="application/json",
+                    content=json.dumps(
+                        {
+                            "error": "unauthorized",
+                            "message": f"Invalid API key format. {hint}",
+                        }
+                    ),
+                    status_code=401,
+                    media_type="application/json",
                 ),
             )
 
