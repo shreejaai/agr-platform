@@ -7,6 +7,7 @@ from starlette.responses import Response
 
 from app.config import settings
 from app.middleware.auth import UNPROTECTED_PATHS
+from app.middleware.cors_utils import apply_cors_headers
 from app.services.redis_service import check_rate_limit, get_redis_client
 
 _RATE_LIMITED_PATHS = frozenset({"/v1/evaluate"})
@@ -38,15 +39,18 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
 
         if not result.allowed:
             retry_after = result.retry_after or 0
-            return JSONResponse(
-                status_code=429,
-                content={"error": "rate_limited", "message": "Rate limit exceeded."},
-                headers={
-                    "Retry-After": str(retry_after),
-                    "X-RateLimit-Limit": str(limit),
-                    "X-RateLimit-Remaining": "0",
-                    "X-RateLimit-Reset": str(result.reset_at),
-                },
+            return apply_cors_headers(
+                request,
+                JSONResponse(
+                    status_code=429,
+                    content={"error": "rate_limited", "message": "Rate limit exceeded."},
+                    headers={
+                        "Retry-After": str(retry_after),
+                        "X-RateLimit-Limit": str(limit),
+                        "X-RateLimit-Remaining": "0",
+                        "X-RateLimit-Reset": str(result.reset_at),
+                    },
+                ),
             )
 
         response = await call_next(request)

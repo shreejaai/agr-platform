@@ -73,7 +73,9 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       COPILOT_MODEL: ${COPILOT_MODEL:-claude-sonnet-4-20250514}
       CEDAR_FALLBACK_MODE: ${CEDAR_FALLBACK_MODE:-deny}
-      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:4200"]}
+      # Wildcard CORS keeps local demos simple, including file:// origins used
+      # by examples/demo/interactive-demo.html.
+      CORS_ORIGINS: ${CORS_ORIGINS:-["*"]}
     depends_on:
       postgres:
         condition: service_healthy

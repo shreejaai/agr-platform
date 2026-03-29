@@ -238,6 +238,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Starlette executes middleware in reverse registration order, so register the
+# rate limiter before auth to ensure auth populates request.state.org_id first.
+# Register CORS last so it is the outermost wrapper and also decorates early
+# auth / rate-limit error responses with the correct CORS headers.
+app.add_middleware(RateLimiterMiddleware)
+app.add_middleware(AuthMiddleware)
+app.add_middleware(VersionNegotiationMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -245,12 +253,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# Starlette executes middleware in reverse registration order, so register the
-# rate limiter before auth to ensure auth populates request.state.org_id first.
-app.add_middleware(RateLimiterMiddleware)
-app.add_middleware(AuthMiddleware)
-app.add_middleware(VersionNegotiationMiddleware)
-app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(health.router)
 app.include_router(evaluate.router)
