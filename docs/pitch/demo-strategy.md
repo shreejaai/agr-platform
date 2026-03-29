@@ -31,6 +31,7 @@ This creates: 5 policies, 4 agents, ~15 audit events, 2 pending approvals.
 examples/demo/interactive-demo.html
 ```
 Open in Chrome. No server needed — it's pure HTML/JS that calls your AGR API directly.
+If you override `CORS_ORIGINS`, use `["*"]` or include `null` so `file://` requests from the demo are allowed.
 
 Or serve with a direct URL:
 ```

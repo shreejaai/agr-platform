@@ -16,6 +16,7 @@ from app.database import (
     set_current_org_id,
     set_session_rls,
 )
+from app.middleware.cors_utils import apply_cors_headers
 from app.models import ApiKey, AuthSession, Organization
 
 logger = logging.getLogger(__name__)
@@ -65,41 +66,50 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not auth_header or not auth_header.startswith("Bearer "):
             hint = _HINT_MISSING.get(mode, _HINT_MISSING["saas"])
             # M1: use json.dumps so hint text never breaks the JSON structure
-            return Response(
-                content=json.dumps(
-                    {
-                        "error": "unauthorized",
-                        "message": (
-                            "Missing or invalid Authorization header. "
-                            f"Provide a Bearer token. {hint}"
-                        ),
-                    }
+            return apply_cors_headers(
+                request,
+                Response(
+                    content=json.dumps(
+                        {
+                            "error": "unauthorized",
+                            "message": (
+                                "Missing or invalid Authorization header. "
+                                f"Provide a Bearer token. {hint}"
+                            ),
+                        }
+                    ),
+                    status_code=401,
+                    media_type="application/json",
                 ),
-                status_code=401,
-                media_type="application/json",
             )
 
         api_key = auth_header.removeprefix("Bearer ").strip()
         if not (api_key.startswith("agr_sk_") or api_key.startswith("agr_usr_")):
             hint = _HINT_FORMAT.get(mode, _HINT_FORMAT["saas"])
-            return Response(
-                content=json.dumps(
-                    {
-                        "error": "unauthorized",
-                        "message": f"Invalid API key format. {hint}",
-                    }
+            return apply_cors_headers(
+                request,
+                Response(
+                    content=json.dumps(
+                        {
+                            "error": "unauthorized",
+                            "message": f"Invalid API key format. {hint}",
+                        }
+                    ),
+                    status_code=401,
+                    media_type="application/json",
                 ),
-                status_code=401,
-                media_type="application/json",
             )
 
         auth_lookup = await self._lookup_org(api_key)
         if auth_lookup is None:
             hint = _HINT_NOT_FOUND.get(mode, _HINT_NOT_FOUND["saas"])
-            return Response(
-                content=json.dumps({"error": "unauthorized", "message": hint}),
-                status_code=401,
-                media_type="application/json",
+            return apply_cors_headers(
+                request,
+                Response(
+                    content=json.dumps({"error": "unauthorized", "message": hint}),
+                    status_code=401,
+                    media_type="application/json",
+                ),
             )
 
         org, role, auth_mode, auth_expires_at, scopes = auth_lookup
