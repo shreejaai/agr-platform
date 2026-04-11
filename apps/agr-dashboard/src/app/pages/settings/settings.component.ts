@@ -9,6 +9,7 @@ import {
   OrgMe,
   OrgRiskConfig,
   OrgService,
+  OrgSettings,
   SsoSettings,
   UsageSummary,
 } from '../../services/org.service';
@@ -597,6 +598,79 @@ function defaultRiskConfigForm(): RiskConfigFormModel {
         }
       </div>
 
+      <!-- Governance Settings -->
+      <div class="card mb-6">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h2 class="text-base font-semibold text-slate-100 mb-1">Governance Settings</h2>
+            <p class="text-sm text-slate-400">
+              Controls what happens when an agent request matches no active policy.
+            </p>
+          </div>
+          <span class="rounded-full border border-slate-700 px-2 py-1 text-[11px] uppercase tracking-wide text-slate-400">
+            Admin only
+          </span>
+        </div>
+
+        @if (orgSettingsError()) {
+          <div class="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+            {{ orgSettingsError() }}
+          </div>
+        }
+
+        @if (orgSettingsSaved()) {
+          <div class="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
+            Governance settings saved.
+          </div>
+        }
+
+        @if (org()?.role !== 'admin') {
+          <p class="mt-4 text-sm text-slate-500">Only admins can update governance settings.</p>
+        } @else {
+          <div class="mt-4 space-y-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-2">No-policy fallback action</label>
+              <div class="space-y-2">
+                <label class="flex items-start gap-3 cursor-pointer rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3 hover:border-slate-700 transition-colors"
+                       [class.border-indigo-500]="noPolicyAction === 'deny'">
+                  <input type="radio" [(ngModel)]="noPolicyAction" value="deny" class="mt-0.5 accent-indigo-500" />
+                  <div>
+                    <span class="text-sm font-medium text-slate-100">Deny</span>
+                    <p class="text-xs text-slate-500 mt-0.5">All requests with no matching policy are blocked. Safest default — use when policies should be exhaustive.</p>
+                  </div>
+                </label>
+                <label class="flex items-start gap-3 cursor-pointer rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3 hover:border-slate-700 transition-colors"
+                       [class.border-indigo-500]="noPolicyAction === 'allow'">
+                  <input type="radio" [(ngModel)]="noPolicyAction" value="allow" class="mt-0.5 accent-indigo-500" />
+                  <div>
+                    <span class="text-sm font-medium text-slate-100">Allow</span>
+                    <p class="text-xs text-slate-500 mt-0.5">Requests with no matching policy pass through. Risk scoring and compliance checks still apply. Use when policies cover only sensitive actions.</p>
+                  </div>
+                </label>
+                <label class="flex items-start gap-3 cursor-pointer rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3 hover:border-slate-700 transition-colors"
+                       [class.border-indigo-500]="noPolicyAction === 'approval_required'">
+                  <input type="radio" [(ngModel)]="noPolicyAction" value="approval_required" class="mt-0.5 accent-indigo-500" />
+                  <div>
+                    <span class="text-sm font-medium text-slate-100">Require approval</span>
+                    <p class="text-xs text-slate-500 mt-0.5">Unmatched requests queue for human review. High-trust mode — approve selectively while building policy coverage.</p>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <button
+                (click)="saveOrgSettings()"
+                [disabled]="orgSettingsSaving()"
+                class="btn-primary"
+              >
+                {{ orgSettingsSaving() ? 'Saving…' : 'Save governance settings' }}
+              </button>
+            </div>
+          </div>
+        }
+      </div>
+
       <!-- About -->
       <div class="card">
         <h2 class="text-base font-semibold text-slate-100 mb-1">About</h2>
@@ -644,6 +718,12 @@ export class SettingsComponent implements OnInit {
   readonly riskConfigSaving = signal(false);
   readonly riskConfigError = signal('');
   readonly riskConfigSaved = signal(false);
+  readonly orgSettings = signal<OrgSettings | null>(null);
+  readonly orgSettingsSaving = signal(false);
+  readonly orgSettingsSaved = signal(false);
+  readonly orgSettingsError = signal('');
+
+  noPolicyAction: 'deny' | 'allow' | 'approval_required' = 'deny';
 
   ssoEnabled = false;
   ssoAutoJoin = false;
@@ -883,6 +963,7 @@ export class SettingsComponent implements OnInit {
         if (o.role === 'admin') {
           this.loadScopedApiKeys();
           this.loadRiskConfig();
+          this.loadOrgSettings();
         } else {
           this.orgApiKeys.set([]);
           this.orgApiKeysError.set('');
@@ -933,6 +1014,35 @@ export class SettingsComponent implements OnInit {
       error: () => {
         this.riskConfigLoading.set(false);
         this.riskConfigError.set('Unable to load the risk configuration.');
+      },
+    });
+  }
+
+  private loadOrgSettings(): void {
+    this.orgSvc.getSettings().subscribe({
+      next: (s) => {
+        this.orgSettings.set(s);
+        this.noPolicyAction = s.no_policy_action;
+      },
+      error: () => this.orgSettingsError.set('Unable to load governance settings.'),
+    });
+  }
+
+  saveOrgSettings(): void {
+    this.orgSettingsSaving.set(true);
+    this.orgSettingsError.set('');
+    this.orgSettingsSaved.set(false);
+    this.orgSvc.updateSettings({ no_policy_action: this.noPolicyAction }).subscribe({
+      next: (s) => {
+        this.orgSettings.set(s);
+        this.noPolicyAction = s.no_policy_action;
+        this.orgSettingsSaving.set(false);
+        this.orgSettingsSaved.set(true);
+        setTimeout(() => this.orgSettingsSaved.set(false), 3000);
+      },
+      error: () => {
+        this.orgSettingsSaving.set(false);
+        this.orgSettingsError.set('Unable to save governance settings.');
       },
     });
   }

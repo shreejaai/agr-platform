@@ -136,4 +136,16 @@ export class OrgService {
   updateRiskConfig(body: OrgRiskConfigUpdate): Observable<OrgRiskConfig> {
     return this.http.put<OrgRiskConfig>('/v1/org/risk-config', body);
   }
+
+  getSettings(): Observable<OrgSettings> {
+    return this.http.get<OrgSettings>('/v1/org/settings');
+  }
+
+  updateSettings(body: Partial<OrgSettings>): Observable<OrgSettings> {
+    return this.http.patch<OrgSettings>('/v1/org/settings', body);
+  }
+}
+
+export interface OrgSettings {
+  no_policy_action: 'deny' | 'allow' | 'approval_required';
 }

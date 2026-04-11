@@ -116,7 +116,12 @@ async def evaluate_request(
     action: str,
     resource: str,
     context: dict[str, object],
+    no_policy_action: str = "deny",
 ) -> EvaluationResult:
-    """Load policies and evaluate a request against them."""
+    """Load policies and evaluate a request against them.
+
+    no_policy_action controls the fallback decision when no active policies exist:
+      'deny' | 'allow' | 'approval_required'
+    """
     policies = await load_active_policies(session, org_id, agent_id)
-    return evaluate_policies(policies, agent_id, action, resource, context)
+    return evaluate_policies(policies, agent_id, action, resource, context, no_policy_action)

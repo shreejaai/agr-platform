@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { AuditService, AuditVerifyResult } from '../../services/audit.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { RelativeTimePipe } from '../../shared/pipes/relative-time.pipe';
-import { AuditEvent } from '../../core/models/audit-event.model';
+import { AuditEvent, AuditPayload } from '../../core/models/audit-event.model';
 
 const EVENT_TYPES = [
   'TOOL_ALLOW', 'TOOL_DENY', 'APPROVAL_REQUESTED', 'APPROVAL_APPROVED', 'APPROVAL_REJECTED',
@@ -165,6 +165,7 @@ const DECISIONS = ['ALLOW', 'DENY', 'APPROVAL_REQUIRED'];
           <table class="w-full text-sm">
             <thead>
               <tr>
+                <th class="table-header w-6"></th>
                 <th class="table-header">Event</th>
                 <th class="table-header">Agent</th>
                 <th class="table-header">Action</th>
@@ -175,7 +176,20 @@ const DECISIONS = ['ALLOW', 'DENY', 'APPROVAL_REQUIRED'];
             </thead>
             <tbody>
               @for (ev of items(); track ev.id) {
-                <tr class="table-row">
+                <!-- Main row — click to toggle detail -->
+                <tr
+                  class="table-row cursor-pointer select-none"
+                  (click)="toggleDetail(ev.id)"
+                >
+                  <td class="table-cell text-slate-500 text-xs">
+                    <svg
+                      class="w-3 h-3 transition-transform"
+                      [class.rotate-90]="expandedId() === ev.id"
+                      fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                    >
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </td>
                   <td class="table-cell">
                     <agr-badge [variant]="eventVariant(ev.event_type)">{{ ev.event_type }}</agr-badge>
                   </td>
@@ -188,11 +202,128 @@ const DECISIONS = ['ALLOW', 'DENY', 'APPROVAL_REQUIRED'];
                     @if (ev.decision) {
                       <agr-badge [variant]="decisionVariant(ev.decision)">{{ ev.decision }}</agr-badge>
                     }
+                    @if (blockReason(ev); as reason) {
+                      <p class="text-[11px] text-slate-500 mt-0.5 leading-tight">{{ reason }}</p>
+                    }
                   </td>
                   <td class="table-cell text-right text-slate-400 whitespace-nowrap">
                     {{ ev.recorded_at | relativeTime }}
                   </td>
                 </tr>
+
+                <!-- Detail panel — shown when row is expanded -->
+                @if (expandedId() === ev.id) {
+                  <tr>
+                    <td colspan="7" class="px-4 pb-4 bg-slate-900/60 border-b border-slate-800">
+                      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3">
+
+                        <!-- Decision context -->
+                        <div class="space-y-2">
+                          <h4 class="text-xs font-semibold text-slate-300 uppercase tracking-wider">Decision Context</h4>
+                          <div class="space-y-1 text-xs">
+                            @if (ev.payload?.eval_id) {
+                              <div class="flex gap-2">
+                                <span class="text-slate-500 w-32 flex-shrink-0">Eval ID</span>
+                                <span class="font-mono text-slate-300 truncate">{{ ev.payload!.eval_id }}</span>
+                              </div>
+                            }
+                            @if (ev.policy_id) {
+                              <div class="flex gap-2">
+                                <span class="text-slate-500 w-32 flex-shrink-0">Policy ID</span>
+                                <span class="font-mono text-slate-300 truncate">{{ ev.policy_id }}</span>
+                              </div>
+                            }
+                            @if (ev.approval_id) {
+                              <div class="flex gap-2">
+                                <span class="text-slate-500 w-32 flex-shrink-0">Approval ID</span>
+                                <span class="font-mono text-slate-300 truncate">{{ ev.approval_id }}</span>
+                              </div>
+                            }
+                            @if (ev.payload?.policy_source) {
+                              <div class="flex gap-2">
+                                <span class="text-slate-500 w-32 flex-shrink-0">Engine</span>
+                                <span class="font-mono text-slate-300">{{ ev.payload!.policy_source }}</span>
+                              </div>
+                            }
+                            @if (ev.payload?.no_policy_fallback) {
+                              <div class="flex gap-2">
+                                <span class="text-slate-500 w-32 flex-shrink-0">Fallback mode</span>
+                                <span class="font-mono text-amber-400">
+                                  no_policy_action={{ ev.payload!.no_policy_action ?? 'deny' }}
+                                </span>
+                              </div>
+                            }
+                            @if (ev.payload?.fallback_used) {
+                              <div class="flex gap-2">
+                                <span class="text-slate-500 w-32 flex-shrink-0">Fallback reason</span>
+                                <span class="font-mono text-amber-400 text-wrap">{{ ev.payload!.fallback_reason }}</span>
+                              </div>
+                            }
+                            @if (ev.payload?.cached) {
+                              <div class="flex gap-2">
+                                <span class="text-slate-500 w-32 flex-shrink-0">Cache</span>
+                                <span class="text-slate-400">Served from Redis cache</span>
+                              </div>
+                            }
+                          </div>
+                        </div>
+
+                        <!-- Risk scoring -->
+                        @if (ev.payload?.risk_score != null) {
+                          <div class="space-y-2">
+                            <h4 class="text-xs font-semibold text-slate-300 uppercase tracking-wider">Risk Scoring</h4>
+                            <div class="space-y-1 text-xs">
+                              <div class="flex gap-2">
+                                <span class="text-slate-500 w-32 flex-shrink-0">Score</span>
+                                <span [class]="riskScoreClass(ev.payload!.risk_score!)">
+                                  {{ ev.payload!.risk_score }}/100 ({{ ev.payload!.risk_level }})
+                                </span>
+                              </div>
+                              @if (ev.payload!.risk_factors) {
+                                @for (kv of riskFactorEntries(ev.payload!.risk_factors!); track kv[0]) {
+                                  <div class="flex gap-2">
+                                    <span class="text-slate-500 w-32 flex-shrink-0">{{ kv[0] }}</span>
+                                    <span class="text-slate-300">{{ kv[1] }}</span>
+                                  </div>
+                                }
+                              }
+                            </div>
+                          </div>
+                        }
+
+                        <!-- Compliance -->
+                        @if (ev.payload?.compliance_blocked) {
+                          <div class="space-y-2 md:col-span-2">
+                            <h4 class="text-xs font-semibold text-red-400 uppercase tracking-wider">Compliance Block</h4>
+                            <p class="text-xs text-red-300">{{ ev.payload!.compliance_block_reason }}</p>
+                          </div>
+                        }
+
+                        <!-- Sequence & hash -->
+                        <div class="space-y-2 md:col-span-2">
+                          <h4 class="text-xs font-semibold text-slate-300 uppercase tracking-wider">Chain Info</h4>
+                          <div class="space-y-1 text-xs font-mono text-slate-500">
+                            <div>seq: {{ ev.sequence_num }}</div>
+                            <div class="truncate">hash: {{ ev.entry_hash }}</div>
+                          </div>
+                        </div>
+
+                        <!-- Raw payload toggle -->
+                        <div class="md:col-span-2">
+                          <button
+                            (click)="toggleRaw(ev.id); $event.stopPropagation()"
+                            class="text-xs text-slate-500 hover:text-slate-300 underline"
+                          >
+                            {{ showRawId() === ev.id ? 'Hide' : 'Show' }} raw payload
+                          </button>
+                          @if (showRawId() === ev.id) {
+                            <pre class="mt-2 p-3 bg-slate-950 rounded text-xs text-slate-400 overflow-auto max-h-64 whitespace-pre-wrap">{{ payloadJson(ev) }}</pre>
+                          }
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                }
               }
             </tbody>
           </table>
@@ -239,6 +370,10 @@ export class AuditComponent implements OnInit {
   readonly items = signal<AuditEvent[]>([]);
   readonly chainResult = signal<AuditVerifyResult | null>(null);
   readonly exportError = signal('');
+  /** ID of the currently expanded row; null = all collapsed. */
+  readonly expandedId = signal<string | null>(null);
+  /** ID of the row showing raw JSON payload. */
+  readonly showRawId = signal<string | null>(null);
 
   readonly currentPage = () => Math.floor(this.offset() / this.pageSize);
 
@@ -259,6 +394,8 @@ export class AuditComponent implements OnInit {
 
   resetAndLoad(): void {
     this.offset.set(0);
+    this.expandedId.set(null);
+    this.showRawId.set(null);
     this.load();
   }
 
@@ -284,12 +421,45 @@ export class AuditComponent implements OnInit {
 
   nextPage(): void {
     this.offset.update((o) => o + this.pageSize);
+    this.expandedId.set(null);
+    this.showRawId.set(null);
     this.load();
   }
 
   prevPage(): void {
     this.offset.update((o) => Math.max(0, o - this.pageSize));
+    this.expandedId.set(null);
+    this.showRawId.set(null);
     this.load();
+  }
+
+  toggleDetail(id: string): void {
+    this.expandedId.update((cur) => (cur === id ? null : id));
+    if (this.showRawId() !== id) {
+      this.showRawId.set(null);
+    }
+  }
+
+  toggleRaw(id: string): void {
+    this.showRawId.update((cur) => (cur === id ? null : id));
+  }
+
+  payloadJson(ev: AuditEvent): string {
+    try {
+      return JSON.stringify(ev.payload, null, 2);
+    } catch {
+      return String(ev.payload);
+    }
+  }
+
+  riskFactorEntries(factors: Record<string, number>): [string, number][] {
+    return Object.entries(factors);
+  }
+
+  riskScoreClass(score: number): string {
+    if (score >= 71) return 'text-red-400 font-semibold';
+    if (score >= 31) return 'text-amber-400 font-semibold';
+    return 'text-emerald-400 font-semibold';
   }
 
   verifyChain(): void {
@@ -342,6 +512,17 @@ export class AuditComponent implements OnInit {
       APPROVAL_REJECTED: 'danger',
     };
     return map[type] ?? 'neutral';
+  }
+
+  blockReason(ev: AuditEvent): string | null {
+    const p = ev.payload;
+    if (!p) return null;
+    if (p.compliance_blocked) return 'Compliance block';
+    if (p.no_policy_fallback) return `No policy: ${p.no_policy_action ?? 'deny'}`;
+    if (p.risk_score != null && ev.decision !== 'ALLOW') {
+      return `Risk score: ${p.risk_score}`;
+    }
+    return null;
   }
 
   decisionVariant(decision: string): 'success' | 'danger' | 'warning' | 'neutral' {

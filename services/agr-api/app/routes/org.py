@@ -10,7 +10,13 @@ from app.database import get_session
 from app.dependencies import require_role
 from app.middleware.auth import require_scope
 from app.models import Organization
-from app.schemas import OrgMeResponse, SSOSettingsResponse, SSOSettingsUpdateRequest
+from app.schemas import (
+    OrgMeResponse,
+    OrgSettingsResponse,
+    OrgSettingsUpdateRequest,
+    SSOSettingsResponse,
+    SSOSettingsUpdateRequest,
+)
 from app.services.sso_service import parse_sso_domains, serialize_sso_domains
 
 if TYPE_CHECKING:
@@ -49,6 +55,7 @@ async def get_org_me(request: Request) -> OrgMeResponse:
         auth_expires_at=getattr(request.state, "auth_expires_at", None),
         sso_enabled=org.sso_enabled,
         sso_provider=org.sso_provider,
+        no_policy_action=org.no_policy_action,
         created_at=org.created_at,
     )
 
@@ -63,6 +70,50 @@ def _sso_response(org: Organization) -> SSOSettingsResponse:
         domains=parse_sso_domains(org.sso_domains),
         default_role=_normalize_sso_default_role(org.sso_default_role),
         auto_join=org.sso_auto_join,
+    )
+
+
+@router.get(
+    "/org/settings",
+    response_model=OrgSettingsResponse,
+    dependencies=[Depends(require_scope("org:admin"))],
+)
+async def get_org_settings(request: Request) -> OrgSettingsResponse:
+    """Return org-level governance settings."""
+    org: Organization = request.state.org
+    return OrgSettingsResponse(
+        no_policy_action=org.no_policy_action,
+    )
+
+
+@router.patch(
+    "/org/settings",
+    response_model=OrgSettingsResponse,
+    dependencies=[Depends(require_role("admin")), Depends(require_scope("org:admin"))],
+)
+async def update_org_settings(
+    body: OrgSettingsUpdateRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> OrgSettingsResponse:
+    """Update org-level governance settings.
+
+    no_policy_action controls what happens when /v1/evaluate finds no matching policy:
+      deny             — block the action (safe production default)
+      allow            — permit the action (useful in onboarding / dev mode)
+      approval_required — gate the action on human approval
+    """
+    org = await session.get(Organization, request.state.org_id)
+    if org is None:
+        raise RuntimeError("Authenticated organization could not be reloaded.")
+
+    if body.no_policy_action is not None:
+        org.no_policy_action = body.no_policy_action
+
+    await session.flush()
+    await session.refresh(org)
+    return OrgSettingsResponse(
+        no_policy_action=org.no_policy_action,
     )
 
 

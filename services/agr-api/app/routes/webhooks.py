@@ -1,10 +1,12 @@
 """Webhook CRUD — register URLs to receive approval decision push notifications."""
 
+import ipaddress
 import json
 import secrets
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
@@ -24,6 +26,57 @@ from app.schemas import (
     WebhookUpdate,
 )
 from app.services.webhook_service import build_signature_headers, retry_webhook_delivery
+
+# Private/reserved IP blocks — AGR server cannot reach these from a public host
+_PRIVATE_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),    # loopback
+    ipaddress.ip_network("10.0.0.0/8"),     # RFC1918
+    ipaddress.ip_network("172.16.0.0/12"),  # RFC1918
+    ipaddress.ip_network("192.168.0.0/16"), # RFC1918
+    ipaddress.ip_network("169.254.0.0/16"), # link-local
+    ipaddress.ip_network("::1/128"),        # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),       # IPv6 unique-local
+]
+
+_LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
+
+
+def _url_reachability_warning(url: str) -> str | None:
+    """Return a warning string if the URL is not reachable from a remote AGR server.
+
+    AGR delivers webhooks server-to-server. Localhost/private IPs only work
+    if both AGR and the target app are on the same private network.
+
+    Returns None if the URL looks publicly reachable, otherwise a human-readable warning.
+    """
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower().strip("[]")
+    except Exception:
+        return None
+
+    # Named loopback
+    if host in _LOOPBACK_HOSTNAMES:
+        return (
+            "This URL points to localhost. AGR delivers webhooks server-to-server from a "
+            "remote host — it cannot reach your local machine. "
+            "Use a public tunnel (ngrok, cloudflared) or a publicly reachable URL instead."
+        )
+
+    # Numeric private IP
+    try:
+        addr = ipaddress.ip_address(host)
+        for net in _PRIVATE_NETWORKS:
+            if addr in net:
+                return (
+                    f"This URL uses a private/reserved IP address ({host}). "
+                    "AGR delivers webhooks from a remote server and cannot reach private network addresses. "
+                    "Use a publicly reachable URL or a public tunnel (ngrok, cloudflared)."
+                )
+    except ValueError:
+        pass  # not a bare IP — hostname, fine
+
+    return None
 
 router = APIRouter(prefix="/v1", tags=["webhooks"])
 
@@ -45,6 +98,7 @@ def _to_response(wh: Webhook, reveal_secret: bool = False) -> WebhookResponse:
     """Convert a Webhook model to a response schema.
 
     Secret is masked on all read endpoints — only revealed once on creation.
+    url_warning is populated whenever the stored URL is not publicly reachable.
     """
     return WebhookResponse(
         id=str(wh.id),
@@ -55,6 +109,7 @@ def _to_response(wh: Webhook, reveal_secret: bool = False) -> WebhookResponse:
         active=wh.active,
         rotating_secret_expires_at=wh.rotating_secret_expires_at,
         created_at=wh.created_at,
+        url_warning=_url_reachability_warning(wh.url),
     )
 
 

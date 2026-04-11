@@ -257,6 +257,30 @@ async def clear_expired_rotating_secrets() -> None:
         await session.commit()
 
 
+def _classify_delivery_error(exc: Exception) -> str:
+    """Return a short structured error code for a delivery exception.
+
+    Format: <type>: <human-readable summary>
+    Callers store this in webhook_deliveries.last_error — keep under 500 chars.
+    """
+    name = type(exc).__name__
+    msg = str(exc)
+
+    # httpx-specific error hierarchy (most specific first)
+    if "ConnectError" in name:
+        return f"connection_refused: {msg[:200]}"
+    if "DNSError" in name or "NameResolutionError" in name or "getaddrinfo" in msg.lower():
+        return f"dns_error: {msg[:200]}"
+    if "TimeoutException" in name or "ConnectTimeout" in name or "ReadTimeout" in name:
+        return f"timeout: {msg[:200]}"
+    if "SSLError" in name or "CertificateVerifyError" in name or "ssl" in msg.lower():
+        return f"ssl_error: {msg[:200]}"
+    if "RemoteProtocolError" in name or "ProtocolError" in name:
+        return f"protocol_error: {msg[:200]}"
+    # Fallback for unknown network errors
+    return f"network_error: {name}: {msg[:180]}"
+
+
 async def _deliver_with_retry(
     client: httpx.AsyncClient,
     webhook_id: object,
@@ -267,7 +291,9 @@ async def _deliver_with_retry(
     """Attempt delivery up to _MAX_ATTEMPTS times with exponential backoff.
 
     Returns (status, http_status, last_error, attempts).
-    status is "delivered" on success, "failed" after all retries exhausted.
+    status is "success" on success, "failed" after all retries exhausted.
+    last_error is a structured string: '<error_type>: <detail>' for network
+    errors, or 'HTTP <code>: <reason>' for HTTP-level failures.
     """
     delay = _BACKOFF_BASE
     last_error: str | None = None
@@ -285,8 +311,15 @@ async def _deliver_with_retry(
                     resp.status_code,
                     attempt,
                 )
-                return "delivered", http_status, None, attempt
-            last_error = f"HTTP {resp.status_code}"
+                return "success", http_status, None, attempt
+
+            # Structured HTTP error
+            reason = resp.reason_phrase or ""
+            if resp.status_code >= 500:
+                last_error = f"http_5xx: HTTP {resp.status_code} {reason}".strip()
+            else:
+                last_error = f"http_4xx: HTTP {resp.status_code} {reason}".strip()
+
             logger.warning(
                 "Webhook %s non-2xx response: %s %d (attempt=%d/%d)",
                 webhook_id,
@@ -304,14 +337,14 @@ async def _deliver_with_retry(
                 )
                 return "failed", http_status, last_error, attempt
         except Exception as exc:
-            last_error = str(exc)
+            last_error = _classify_delivery_error(exc)
             logger.warning(
                 "Webhook %s delivery error to %s (attempt=%d/%d): %s",
                 webhook_id,
                 url,
                 attempt,
                 _MAX_ATTEMPTS,
-                exc,
+                last_error,
             )
 
         if attempt < _MAX_ATTEMPTS:
@@ -319,9 +352,10 @@ async def _deliver_with_retry(
             delay *= 2
 
     logger.error(
-        "Webhook %s permanently failed after %d attempts to %s",
+        "Webhook %s permanently failed after %d attempts to %s — last_error=%r",
         webhook_id,
         _MAX_ATTEMPTS,
         url,
+        last_error,
     )
     return "failed", http_status, last_error, _MAX_ATTEMPTS

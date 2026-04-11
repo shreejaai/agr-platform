@@ -272,6 +272,7 @@ async def evaluate(
             action=body.action,
             resource=body.resource,
             context=body.context,
+            no_policy_action=org.no_policy_action,
         )
     response.headers["X-AGR-Engine"] = _engine_mode(result.policy_source, result.fallback_used)
 
@@ -437,8 +438,11 @@ async def evaluate(
         "policy_source": result.policy_source,
         "fallback_used": result.fallback_used,
     }
-    if result.fallback_used and result.fallback_reason:
+    if result.fallback_reason:
         extra_payload["fallback_reason"] = result.fallback_reason
+    if result.policy_source == "no_policies":
+        extra_payload["no_policy_fallback"] = True
+        extra_payload["no_policy_action"] = org.no_policy_action
     if risk is not None:
         extra_payload.update(
             {
@@ -531,6 +535,7 @@ async def evaluate(
             risk_override=risk is not None and result.decision != cedar_decision,
             fallback_used=result.fallback_used,
             fallback_reason=result.fallback_reason,
+            no_policy_action=org.no_policy_action if result.policy_source == "no_policies" else None,
         ),
     )
     if idempotency_key:

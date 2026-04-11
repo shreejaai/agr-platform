@@ -101,6 +101,14 @@ class DecisionTrace(BaseModel):
         default=None,
         description="Machine-readable reason Cedar CLI was not used (populated when fallback_used=true).",
     )
+    no_policy_action: str | None = Field(
+        default=None,
+        description=(
+            "Org-configured fallback mode applied when no policies matched. "
+            "Only present when policy_source='no_policies'. "
+            "Values: deny | allow | approval_required."
+        ),
+    )
 
 
 class ComplianceFindingResponse(BaseModel):
@@ -506,7 +514,29 @@ class OrgMeResponse(BaseModel):
     auth_expires_at: datetime | None = None
     sso_enabled: bool = False
     sso_provider: str | None = None
+    # No-policy fallback mode (migration 030)
+    no_policy_action: str = "deny"
     created_at: datetime
+
+
+class OrgSettingsUpdateRequest(BaseModel):
+    """PATCH /v1/org/settings — partial update for org-level governance settings."""
+
+    no_policy_action: Literal["deny", "allow", "approval_required"] | None = Field(
+        default=None,
+        description=(
+            "Decision when no Cedar policy matches the request. "
+            "'deny' = block (safe default); "
+            "'allow' = permit action when no policy applies; "
+            "'approval_required' = gate action on human approval."
+        ),
+    )
+
+
+class OrgSettingsResponse(BaseModel):
+    """Response for GET/PATCH /v1/org/settings."""
+
+    no_policy_action: str
 
 
 class ApiKeyCreate(BaseModel):
@@ -687,6 +717,8 @@ class WebhookResponse(BaseModel):
     active: bool
     rotating_secret_expires_at: datetime | None = None
     created_at: datetime
+    # Reachability warning — set when URL is localhost/private (AGR server cannot reach it)
+    url_warning: str | None = None
 
 
 class WebhookRotateSecretResponse(BaseModel):

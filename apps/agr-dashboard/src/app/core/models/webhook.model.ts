@@ -7,6 +7,8 @@ export interface Webhook {
   secret: string;
   events: WebhookEvent[];
   active: boolean;
+  rotating_secret_expires_at: string | null;
+  url_warning: string | null;
   created_at: string;
 }
 

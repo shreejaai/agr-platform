@@ -44,7 +44,8 @@ const AVAILABLE_EVENTS: WebhookEvent[] = ['approval.approved', 'approval.rejecte
           <div class="space-y-3">
             <div>
               <label for="webhook-url" class="block text-xs text-slate-400 mb-1">Endpoint URL</label>
-              <input id="webhook-url" [(ngModel)]="formUrl" class="input w-full font-mono text-sm"
+              <input id="webhook-url" [(ngModel)]="formUrl" (ngModelChange)="onFormUrlChange($event)"
+                     class="input w-full font-mono text-sm"
                      placeholder="https://your-server.com/agr-events" type="url" />
             </div>
             <div>
@@ -64,6 +65,11 @@ const AVAILABLE_EVENTS: WebhookEvent[] = ['approval.approved', 'approval.rejecte
               </div>
             </div>
 
+            @if (formUrlWarning()) {
+              <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                <span class="font-medium">Reachability warning:</span> {{ formUrlWarning() }}
+              </div>
+            }
             @if (formError()) {
               <p class="text-sm text-red-400">{{ formError() }}</p>
             }
@@ -95,7 +101,8 @@ const AVAILABLE_EVENTS: WebhookEvent[] = ['approval.approved', 'approval.rejecte
           <div class="space-y-3">
             <div>
               <label for="edit-webhook-url" class="block text-xs text-slate-400 mb-1">Endpoint URL</label>
-              <input id="edit-webhook-url" [(ngModel)]="editUrl" class="input w-full font-mono text-sm" type="url" />
+              <input id="edit-webhook-url" [(ngModel)]="editUrl" (ngModelChange)="onEditUrlChange($event)"
+                     class="input w-full font-mono text-sm" type="url" />
             </div>
             <div>
               <p class="block text-xs text-slate-400 mb-2">Events to subscribe</p>
@@ -114,6 +121,11 @@ const AVAILABLE_EVENTS: WebhookEvent[] = ['approval.approved', 'approval.rejecte
               </div>
             </div>
 
+            @if (editUrlWarning() ?? editingWebhook()?.url_warning; as warn) {
+              <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                <span class="font-medium">Reachability warning:</span> {{ warn }}
+              </div>
+            }
             @if (formError()) {
               <p class="text-sm text-red-400">{{ formError() }}</p>
             }
@@ -159,6 +171,15 @@ Signed content:  "&#123;timestamp&#125;.&#123;json_body&#125;"</pre>
                     <span class="text-xs text-slate-500">{{ webhook.created_at | relativeTime }}</span>
                   </div>
                   <p class="text-sm font-mono text-slate-200 truncate">{{ webhook.url }}</p>
+                  @if (webhook.url_warning) {
+                    <div class="mt-1 flex items-start gap-1.5">
+                      <svg class="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <p class="text-xs text-amber-400">{{ webhook.url_warning }}</p>
+                    </div>
+                  }
                   <div class="flex flex-wrap gap-1 mt-2">
                     @for (evt of webhook.events; track evt) {
                       <span class="text-xs font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
@@ -306,6 +327,8 @@ export class WebhooksComponent implements OnInit {
   readonly orgRole = signal<'admin' | 'operator' | 'viewer'>('viewer');
   readonly retryingDeliveryId = signal<string | null>(null);
   readonly canRetryDeliveries = computed(() => this.orgRole() === 'admin');
+  readonly formUrlWarning = signal<string | null>(null);
+  readonly editUrlWarning = signal<string | null>(null);
 
   formUrl = '';
   formEvents: WebhookEvent[] = [...AVAILABLE_EVENTS];
@@ -361,6 +384,7 @@ export class WebhooksComponent implements OnInit {
     this.editUrl = webhook.url;
     this.editEvents = [...webhook.events];
     this.formError.set('');
+    this.editUrlWarning.set(this.urlReachabilityWarning(webhook.url));
     this.showForm.set(true);
   }
 
@@ -396,6 +420,7 @@ export class WebhooksComponent implements OnInit {
       next: (res) => {
         this.saving.set(false);
         this.createdSecret.set(res.secret);
+        this.formUrlWarning.set(res.url_warning ?? null);
         this.loadList();
       },
       error: (err) => {
@@ -477,6 +502,48 @@ export class WebhooksComponent implements OnInit {
     this.editEvents = [...AVAILABLE_EVENTS];
     this.formError.set('');
     this.createdSecret.set('');
+    this.formUrlWarning.set(null);
+    this.editUrlWarning.set(null);
+  }
+
+  /**
+   * Client-side reachability check — mirrors the backend _url_reachability_warning logic.
+   * Returns a warning string for localhost/private IPs, null for public URLs.
+   */
+  urlReachabilityWarning(url: string): string | null {
+    if (!url.trim()) return null;
+    let hostname: string;
+    try {
+      hostname = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    } catch {
+      return null; // unparseable URL — let server validate
+    }
+    const loopback = new Set(['localhost', '127.0.0.1', '::1']);
+    if (loopback.has(hostname)) {
+      return (
+        'This URL points to localhost. AGR delivers webhooks server-to-server from a ' +
+        'remote host — it cannot reach your local machine. ' +
+        'Use a public tunnel (ngrok, cloudflared) or a publicly reachable HTTPS URL.'
+      );
+    }
+    // Private IPv4 ranges: 10.x.x.x, 172.16-31.x.x, 192.168.x.x, 169.254.x.x
+    const privateIpv4 = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)/;
+    if (privateIpv4.test(hostname)) {
+      return (
+        `This URL uses a private IP address (${hostname}). ` +
+        'AGR delivers webhooks from a remote server and cannot reach private networks. ' +
+        'Use a publicly reachable URL or a tunnel (ngrok, cloudflared).'
+      );
+    }
+    return null;
+  }
+
+  onFormUrlChange(url: string): void {
+    this.formUrlWarning.set(this.urlReachabilityWarning(url));
+  }
+
+  onEditUrlChange(url: string): void {
+    this.editUrlWarning.set(this.urlReachabilityWarning(url));
   }
 
   deliveryStatusVariant(status: WebhookDelivery['status']): 'success' | 'warning' | 'danger' | 'neutral' {

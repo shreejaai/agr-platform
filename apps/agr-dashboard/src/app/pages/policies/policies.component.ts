@@ -30,7 +30,18 @@ interface PolicyForm {
   action: string;
   resource_attr: string;
   resource_value: string;
+  /** Optional: context attribute condition (e.g. "environment") */
+  context_attr: string;
+  /** Operator for context condition: == | != | > | < | >= | <= */
+  context_op: '==' | '!=' | '>' | '<' | '>=' | '<=';
+  context_value: string;
+  /** Optional: numeric threshold (e.g. amount > 10000) */
+  threshold_attr: string;
+  threshold_op: '>' | '<' | '>=' | '<=';
+  threshold_value: string;
   level: 'org' | 'project' | 'agent';
+  /** When true, shows raw Cedar editor instead of friendly form */
+  advancedMode: boolean;
 }
 
 interface PolicyEditForm {
@@ -48,28 +59,91 @@ interface PolicyAnalytics {
   };
 }
 
-/** Generate a Cedar rule string from friendly form fields. */
+/** Generate a Cedar rule string from friendly form fields (deterministic, no AI). */
 function buildCedarRule(form: PolicyForm): string {
   const action = form.action.trim();
+  const hasResource = form.resource_attr.trim() && form.resource_value.trim();
+  const hasContext = form.context_attr.trim() && form.context_value.trim();
+  const hasThreshold = form.threshold_attr.trim() && form.threshold_value.trim();
+
+  // Build when-clause conditions
+  const conditions: string[] = [];
+  if (hasResource) {
+    const attr = form.resource_attr.trim();
+    const val = form.resource_value.trim();
+    conditions.push(`resource has ${attr} && resource.${attr} == "${val}"`);
+  }
+  if (hasContext) {
+    const attr = form.context_attr.trim();
+    const val = form.context_value.trim();
+    const op = form.context_op || '==';
+    // Numeric ops don't need quotes; string equality does
+    const numericOps = new Set(['>', '<', '>=', '<=']);
+    const valExpr = numericOps.has(op) ? val : `"${val}"`;
+    conditions.push(`context has ${attr} && context.${attr} ${op} ${valExpr}`);
+  }
+  if (hasThreshold) {
+    const attr = form.threshold_attr.trim();
+    const val = form.threshold_value.trim();
+    const op = form.threshold_op || '>';
+    conditions.push(`context has ${attr} && context.${attr} ${op} ${val}`);
+  }
+
+  const whenClause = conditions.length > 0
+    ? `\nwhen { ${conditions.join(' &&\n       ')} }`
+    : '';
 
   if (form.effect === 'require_approval') {
-    let rule = `forbid(principal, action == Action::"${action}", resource)`;
-    if (form.resource_attr.trim() && form.resource_value.trim()) {
-      rule += `\nwhen { resource has ${form.resource_attr} && resource.${form.resource_attr} == "${form.resource_value}" }`;
-    }
-    rule += '\nunless { context has approval_status && context.approval_status == "approved" };';
-    return rule;
+    return (
+      `forbid(principal, action == Action::"${action}", resource)` +
+      whenClause +
+      '\nunless { context has approval_status && context.approval_status == "approved" };'
+    );
   }
 
   const kw = form.effect === 'allow' ? 'permit' : 'forbid';
-  let rule = `${kw}(principal, action == Action::"${action}", resource)`;
-  if (form.resource_attr.trim() && form.resource_value.trim()) {
-    rule += `\nwhen { resource has ${form.resource_attr} && resource.${form.resource_attr} == "${form.resource_value}" };`;
-  } else {
-    rule += ';';
-  }
-  return rule;
+  return `${kw}(principal, action == Action::"${action}", resource)${whenClause};`;
 }
+
+/** Quick-fill templates for the policy builder. */
+const BUILDER_TEMPLATES: Array<{ label: string; form: Partial<PolicyForm> }> = [
+  {
+    label: 'Allow web search',
+    form: { effect: 'allow', action: 'web_search', resource_attr: '', resource_value: '' },
+  },
+  {
+    label: 'Deny file delete',
+    form: { effect: 'deny', action: 'file_delete', resource_attr: '', resource_value: '' },
+  },
+  {
+    label: 'Require approval — production deploy',
+    form: {
+      effect: 'require_approval',
+      action: 'deploy',
+      context_attr: 'environment',
+      context_op: '==',
+      context_value: 'production',
+    },
+  },
+  {
+    label: 'Require approval — large transfer',
+    form: {
+      effect: 'require_approval',
+      action: 'transfer_funds',
+      threshold_attr: 'amount',
+      threshold_op: '>',
+      threshold_value: '10000',
+    },
+  },
+  {
+    label: 'Deny customer data export',
+    form: { effect: 'deny', action: 'export_customer_data', resource_attr: '', resource_value: '' },
+  },
+  {
+    label: 'Allow read-only DB query',
+    form: { effect: 'allow', action: 'db_query', resource_attr: '', resource_value: '' },
+  },
+];
 
 /** Derive human-readable effect from a cedar_rule string. */
 function deriveEffect(cedar_rule: string): string {
@@ -399,36 +473,107 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
               </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label for="policy-effect" class="block text-xs text-slate-400 mb-1">Effect</label>
-                <select id="policy-effect" [(ngModel)]="form.effect" class="input w-full">
-                  <option value="allow">Allow</option>
-                  <option value="deny">Deny</option>
-                  <option value="require_approval">Require approval</option>
-                </select>
-              </div>
-              <div>
-                <label for="policy-action" class="block text-xs text-slate-400 mb-1">Action (tool name)</label>
-                <input id="policy-action" [(ngModel)]="form.action" class="input w-full" placeholder="web_search" />
-              </div>
-            </div>
-
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label for="policy-resource-attr" class="block text-xs text-slate-400 mb-1">When resource has attribute</label>
-                <input id="policy-resource-attr" [(ngModel)]="form.resource_attr" class="input w-full" placeholder="environment (optional)" />
-              </div>
-              <div>
-                <label for="policy-resource-value" class="block text-xs text-slate-400 mb-1">equals value</label>
-                <input id="policy-resource-value" [(ngModel)]="form.resource_value" class="input w-full" placeholder="production (optional)" />
+            <!-- Quick templates -->
+            <div>
+              <p class="text-xs text-slate-400 mb-2">Quick templates</p>
+              <div class="flex flex-wrap gap-2">
+                @for (tpl of builderTemplates; track tpl.label) {
+                  <button
+                    type="button"
+                    (click)="applyBuilderTemplate(tpl.form)"
+                    class="px-2.5 py-1 text-xs rounded-full border border-slate-700
+                           text-slate-400 hover:border-indigo-500 hover:text-indigo-300 transition-colors"
+                  >{{ tpl.label }}</button>
+                }
               </div>
             </div>
 
-            @if (previewRule()) {
+            <!-- Mode toggle: builder vs raw Cedar -->
+            <div class="flex items-center gap-3">
+              <label class="flex items-center gap-2 cursor-pointer text-xs text-slate-400 select-none">
+                <input type="checkbox" [(ngModel)]="form.advancedMode" class="rounded" />
+                Raw Cedar editor
+              </label>
+              @if (form.advancedMode) {
+                <span class="text-xs text-amber-400">Advanced mode — edit Cedar rule directly</span>
+              }
+            </div>
+
+            @if (!form.advancedMode) {
+              <!-- Friendly builder -->
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label for="policy-effect" class="block text-xs text-slate-400 mb-1">Effect</label>
+                  <select id="policy-effect" [(ngModel)]="form.effect" class="input w-full">
+                    <option value="allow">Allow</option>
+                    <option value="deny">Deny</option>
+                    <option value="require_approval">Require approval (approval gate)</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="policy-action" class="block text-xs text-slate-400 mb-1">Action (tool name)</label>
+                  <input id="policy-action" [(ngModel)]="form.action" class="input w-full" placeholder="web_search" />
+                </div>
+              </div>
+
+              <!-- Resource condition (optional) -->
               <div>
-                <p class="block text-xs text-slate-400 mb-1">Generated Cedar rule</p>
-                <pre class="text-xs bg-slate-900 rounded p-2 text-indigo-300 overflow-x-auto">{{ previewRule() }}</pre>
+                <p class="text-xs text-slate-400 mb-1">Resource condition <span class="text-slate-600">(optional)</span></p>
+                <div class="grid grid-cols-2 gap-3">
+                  <input [(ngModel)]="form.resource_attr" class="input w-full text-sm" placeholder="Attribute: environment" />
+                  <input [(ngModel)]="form.resource_value" class="input w-full text-sm" placeholder="Value: production" />
+                </div>
+              </div>
+
+              <!-- Context condition (optional) -->
+              <div>
+                <p class="text-xs text-slate-400 mb-1">Context condition <span class="text-slate-600">(optional)</span></p>
+                <div class="grid grid-cols-3 gap-2">
+                  <input [(ngModel)]="form.context_attr" class="input text-sm" placeholder="Attribute: environment" />
+                  <select [(ngModel)]="form.context_op" class="input text-sm">
+                    <option value="==">== (equals)</option>
+                    <option value="!=">!= (not equals)</option>
+                    <option value=">">> (greater than)</option>
+                    <option value="<">&#60; (less than)</option>
+                    <option value=">=">>= (greater or equal)</option>
+                    <option value="<=">&#60;= (less or equal)</option>
+                  </select>
+                  <input [(ngModel)]="form.context_value" class="input text-sm" placeholder="Value: production" />
+                </div>
+              </div>
+
+              <!-- Numeric threshold (optional) -->
+              <div>
+                <p class="text-xs text-slate-400 mb-1">Numeric threshold <span class="text-slate-600">(optional — e.g. amount &gt; 10000)</span></p>
+                <div class="grid grid-cols-3 gap-2">
+                  <input [(ngModel)]="form.threshold_attr" class="input text-sm" placeholder="Attribute: amount" />
+                  <select [(ngModel)]="form.threshold_op" class="input text-sm">
+                    <option value=">">> (greater than)</option>
+                    <option value="<">&#60; (less than)</option>
+                    <option value=">=">>= (greater or equal)</option>
+                    <option value="<=">&#60;= (less or equal)</option>
+                  </select>
+                  <input [(ngModel)]="form.threshold_value" class="input text-sm" placeholder="10000" />
+                </div>
+              </div>
+
+              <!-- Live preview -->
+              <div>
+                <p class="text-xs text-slate-400 mb-1">Generated Cedar rule (live preview)</p>
+                <pre class="text-xs bg-slate-900 rounded p-3 text-indigo-300 overflow-x-auto min-h-[2.5rem]">{{ previewCedarRule }}</pre>
+              </div>
+            } @else {
+              <!-- Raw Cedar editor -->
+              <div>
+                <label for="policy-cedar-raw" class="block text-xs text-slate-400 mb-1">Cedar rule</label>
+                <textarea
+                  id="policy-cedar-raw"
+                  [(ngModel)]="rawCedarRule"
+                  class="input w-full font-mono text-xs"
+                  rows="6"
+                  placeholder='permit(principal, action == Action::"web_search", resource);'
+                ></textarea>
+                <p class="text-xs text-slate-500 mt-1">Write Cedar directly. Must start with permit or forbid and end with ;</p>
               </div>
             }
 
@@ -482,12 +627,50 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
         </div>
       }
 
+      <!-- Search / filter bar -->
+      <div class="card">
+        <div class="flex flex-wrap gap-3 items-end">
+          <div class="flex-1 min-w-[180px]">
+            <label class="block text-xs text-slate-400 mb-1">Search by name</label>
+            <input
+              [(ngModel)]="searchQuery"
+              (keydown.enter)="loadList()"
+              (blur)="loadList()"
+              class="input w-full text-sm"
+              placeholder="allow-web-search…"
+            />
+          </div>
+          <div class="w-36">
+            <label class="block text-xs text-slate-400 mb-1">State</label>
+            <select [(ngModel)]="filterState" (ngModelChange)="loadList()" class="input w-full text-sm">
+              <option value="">Active (default)</option>
+              <option value="active">Active</option>
+              <option value="draft">Draft</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+          <div class="w-44">
+            <label class="block text-xs text-slate-400 mb-1">Effect</label>
+            <select [(ngModel)]="filterEffect" (ngModelChange)="loadList()" class="input w-full text-sm">
+              <option value="">All effects</option>
+              <option value="allow">Allow</option>
+              <option value="deny">Deny</option>
+              <option value="approval_required">Require approval</option>
+            </select>
+          </div>
+          <button
+            (click)="searchQuery = ''; filterState = ''; filterEffect = ''; loadList()"
+            class="text-xs text-slate-500 hover:text-slate-200 underline self-end pb-1"
+          >Clear</button>
+        </div>
+      </div>
+
       <!-- List -->
       @if (loading()) {
         <div class="py-16 text-center text-slate-500 text-sm">Loading…</div>
       } @else if (items().length === 0) {
         <div class="card py-16 text-center">
-          <p class="text-slate-400">No policies yet.</p>
+          <p class="text-slate-400">No policies match your filters.</p>
           <p class="text-slate-500 text-xs mt-1">Create your first policy to start governing agent tool calls.</p>
         </div>
       } @else {
@@ -819,6 +1002,11 @@ export class PoliciesComponent implements OnInit {
   readonly showForm = signal(false);
   readonly formError = signal('');
   readonly items = signal<Policy[]>([]);
+
+  // Search/filter state
+  searchQuery = '';
+  filterState: '' | 'draft' | 'active' | 'archived' = '';
+  filterEffect: '' | 'allow' | 'deny' | 'approval_required' = '';
   readonly templates = signal<PolicyTemplate[]>([]);
   readonly templatesLoading = signal(false);
   readonly templateError = signal('');
@@ -886,7 +1074,16 @@ export class PoliciesComponent implements OnInit {
   }
 
   loadList(): void {
-    this.svc.list({ limit: 100, active: true }).subscribe({
+    this.loading.set(true);
+    const params: import('../../services/policy.service').PolicyListParams = { limit: 200 };
+    if (this.filterState) {
+      params.state = this.filterState;
+    } else {
+      params.active = true;
+    }
+    if (this.searchQuery.trim()) params.search = this.searchQuery.trim();
+    if (this.filterEffect) params.effect = this.filterEffect;
+    this.svc.list(params).subscribe({
       next: (res) => {
         this.items.set(res);
         this.policyAnalytics.set({});
@@ -915,13 +1112,12 @@ export class PoliciesComponent implements OnInit {
   openOnboardingSample(): void {
     this.editingPolicy.set(null);
     this.form = {
+      ...this.emptyForm(),
       name: 'Sample policy: allow web search',
       effect: 'allow',
       action: 'web_search',
-      resource_attr: '',
-      resource_value: '',
-      level: 'org',
     };
+    this.rawCedarRule = '';
     this.formError.set('');
     this.showForm.set(true);
   }
@@ -933,9 +1129,20 @@ export class PoliciesComponent implements OnInit {
     this.formError.set('');
   }
 
+  /** Holds raw Cedar text when user switches to advanced mode. */
+  rawCedarRule = '';
+
   create(): void {
-    if (!this.form.name.trim() || !this.form.action.trim()) {
-      this.formError.set('Name and action are required.');
+    if (!this.form.name.trim()) {
+      this.formError.set('Policy name is required.');
+      return;
+    }
+    const cedarRule = this.form.advancedMode
+      ? this.rawCedarRule.trim()
+      : buildCedarRule(this.form);
+
+    if (!cedarRule) {
+      this.formError.set('Cedar rule is required. Fill in Action or switch to raw editor.');
       return;
     }
     this.saving.set(true);
@@ -943,7 +1150,7 @@ export class PoliciesComponent implements OnInit {
     const payload: PolicyCreate = {
       name: this.form.name.trim(),
       level: this.form.level,
-      cedar_rule: buildCedarRule(this.form),
+      cedar_rule: cedarRule,
     };
     this.svc.create(payload).subscribe({
       next: (p) => {
@@ -1309,7 +1516,33 @@ export class PoliciesComponent implements OnInit {
     };
   }
 
+  readonly builderTemplates = BUILDER_TEMPLATES;
+
+  applyBuilderTemplate(tpl: Partial<PolicyForm>): void {
+    this.form = { ...this.emptyForm(), ...tpl };
+    this.rawCedarRule = '';
+  }
+
+  get previewCedarRule(): string {
+    if (!this.form.action.trim()) return '// fill in Action above to see preview';
+    return buildCedarRule(this.form);
+  }
+
   private emptyForm(): PolicyForm {
-    return { name: '', effect: 'allow', action: '', resource_attr: '', resource_value: '', level: 'org' };
+    return {
+      name: '',
+      effect: 'allow',
+      action: '',
+      resource_attr: '',
+      resource_value: '',
+      context_attr: '',
+      context_op: '==',
+      context_value: '',
+      threshold_attr: '',
+      threshold_op: '>',
+      threshold_value: '',
+      level: 'org',
+      advancedMode: false,
+    };
   }
 }

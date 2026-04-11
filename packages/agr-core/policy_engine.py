@@ -251,29 +251,64 @@ def evaluate_policies(
     action: str,
     resource: str,
     context: dict[str, object],
+    no_policy_action: str = "deny",
 ) -> EvaluationResult:
     """Evaluate Cedar policies against a request.
 
     Tries the cedar CLI subprocess first; falls back to Python evaluator.
     Each policy dict must have keys: id, cedar_rule.
+
+    no_policy_action controls the fallback when no active policies exist:
+      'deny'             — block the action (safe default)
+      'allow'            — permit the action
+      'approval_required' — require human approval
     """
     start = time.perf_counter_ns()
 
     if not cedar_policies:
-        # L6: warn so ops can distinguish "no policies seeded yet" from silent deny
-        logger.warning(
-            "No active policies found for org — all actions will be DENY. "
-            "Seed default policies or create at least one policy to allow actions."
-        )
         elapsed = (time.perf_counter_ns() - start) / 1_000_000
+        # Normalise and guard against invalid values
+        _valid_actions = {"deny", "allow", "approval_required"}
+        _action = no_policy_action if no_policy_action in _valid_actions else "deny"
+
+        _action_labels = {
+            "deny": "DENY",
+            "allow": "ALLOW",
+            "approval_required": "APPROVAL_REQUIRED",
+        }
+        _decision = _action_labels[_action]
+
+        _reason_map = {
+            "DENY": (
+                "No active policies found. Action denied by org fallback policy "
+                "(no_policy_action=deny). "
+                "Create a policy or change the fallback in org settings."
+            ),
+            "ALLOW": (
+                "No active policies found. Action allowed by org fallback policy "
+                "(no_policy_action=allow). "
+                "Create a policy to enforce explicit governance."
+            ),
+            "APPROVAL_REQUIRED": (
+                "No active policies found. Action requires approval by org fallback policy "
+                "(no_policy_action=approval_required)."
+            ),
+        }
+
+        logger.warning(
+            "No active policies found for org — applying no_policy_action=%r → %s",
+            _action,
+            _decision,
+        )
         return EvaluationResult(
-            decision="DENY",
-            reason="No active policies found. All actions are denied by default.",
+            decision=_decision,
+            reason=_reason_map[_decision],
             policy_id=None,
-            requires_approval=False,
+            requires_approval=_decision == "APPROVAL_REQUIRED",
             latency_ms=elapsed,
             policy_source="no_policies",
             fallback_used=False,
+            fallback_reason=f"no_policy_action={_action}",
         )
 
     cedar_binary = _find_cedar_cli()

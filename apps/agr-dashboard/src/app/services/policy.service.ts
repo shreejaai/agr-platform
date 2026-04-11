@@ -16,6 +16,10 @@ import { ComplianceFinding } from '../core/models/compliance.model';
 
 export interface PolicyListParams {
   active?: boolean;
+  state?: 'draft' | 'active' | 'archived';
+  search?: string;
+  action?: string;
+  effect?: 'allow' | 'deny' | 'approval_required';
   limit?: number;
 }
 
@@ -84,7 +88,11 @@ export class PolicyService {
 
   list(params: PolicyListParams = {}): Observable<Policy[]> {
     let p = new HttpParams();
-    if (params.active !== undefined) p = p.set('active', String(params.active));
+    if (params.state) p = p.set('state', params.state);
+    else if (params.active !== undefined) p = p.set('active', String(params.active));
+    if (params.search) p = p.set('search', params.search);
+    if (params.action) p = p.set('action', params.action);
+    if (params.effect) p = p.set('effect', params.effect);
     if (params.limit != null) p = p.set('limit', String(params.limit));
     return this.http.get<Policy[]>('/v1/policies', { params: p });
   }

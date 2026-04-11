@@ -62,4 +62,6 @@ $PSQL -f /migrations/028_webhook_secret_rotation.sql
 echo "  028 done"
 $PSQL -f /migrations/029_policy_test_suites.sql
 echo "  029 done"
+$PSQL -f /migrations/030_no_policy_action.sql
+echo "  030 done"
 echo "All migrations complete."

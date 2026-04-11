@@ -237,6 +237,21 @@ async def list_policies(
     session: AsyncSession = Depends(get_session),
     active: bool | None = None,
     state: str | None = Query(default=None, pattern=r"^(draft|active|archived)$"),
+    search: str | None = Query(
+        default=None,
+        max_length=256,
+        description="Case-insensitive substring match against policy name.",
+    ),
+    action: str | None = Query(
+        default=None,
+        max_length=256,
+        description="Case-insensitive substring match against cedar_rule (useful for filtering by action name).",
+    ),
+    effect: str | None = Query(
+        default=None,
+        pattern=r"^(allow|deny|approval_required)$",
+        description="Filter by policy effect inferred from cedar_rule: allow | deny | approval_required.",
+    ),
 ) -> list[PolicyResponse]:
     org_id: uuid.UUID = request.state.org_id
     stmt = select(Policy).where(Policy.org_id == org_id)
@@ -245,6 +260,23 @@ async def list_policies(
     elif active is not None:
         # backward-compat: active=True → state=active, active=False → non-active
         stmt = stmt.where(Policy.active == active)
+    if search:
+        stmt = stmt.where(Policy.name.ilike(f"%{search}%"))
+    if action:
+        stmt = stmt.where(Policy.cedar_rule.ilike(f"%{action}%"))
+    if effect == "allow":
+        # permit(...) rules without the approval_status pattern
+        stmt = stmt.where(
+            Policy.cedar_rule.ilike("permit%"),
+            ~Policy.cedar_rule.ilike("%approval_status%"),
+        )
+    elif effect == "deny":
+        stmt = stmt.where(
+            Policy.cedar_rule.ilike("forbid%"),
+            ~Policy.cedar_rule.ilike("%approval_status%"),
+        )
+    elif effect == "approval_required":
+        stmt = stmt.where(Policy.cedar_rule.ilike("%approval_status%"))
     stmt = stmt.order_by(Policy.created_at.desc())
     result = await session.execute(stmt)
     policies = result.scalars().all()

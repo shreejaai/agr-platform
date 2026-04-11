@@ -52,6 +52,9 @@ class Organization(Base):
     sso_domains: Mapped[str | None] = mapped_column(Text, nullable=True)
     sso_default_role: Mapped[str] = mapped_column(Text, nullable=False, default="viewer")
     sso_auto_join: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Fallback decision when no policy matches (migration 030)
+    # Values: deny | allow | approval_required
+    no_policy_action: Mapped[str] = mapped_column(Text, nullable=False, default="deny")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

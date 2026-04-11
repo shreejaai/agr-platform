@@ -283,3 +283,52 @@ console.log(result.riskScore);
 | `decision: DENY` unexpectedly | No active policies match | Add a `permit` policy or check policy state |
 | `429 Too Many Requests` | Evaluation limit hit | Check `GET /v1/org` for `eval_count` / `eval_limit` |
 | `decision_trace.fallback_used: true` | Cedar CLI not on PATH | Install `cedar-policy-cli` for authoritative evaluation |
+
+---
+
+## Production Rollout Notes
+
+### Migration 030 — `no_policy_action`
+
+Migration `030_no_policy_action.sql` must be applied **before** deploying any backend build that includes the `no_policy_action` feature.
+
+```bash
+# Apply on the production database before rolling out the new backend image
+psql $DATABASE_URL -f infra/migrations/030_no_policy_action.sql
+```
+
+Rollback: `infra/migrations/rollback/030_down.sql` drops the column and constraint.
+
+**Default behaviour:** all existing orgs default to `deny`. No change to existing evaluation decisions until an admin explicitly changes the setting.
+
+### `no_policy_action` — mode summary
+
+| Mode | Effect when no policy matches |
+|------|-------------------------------|
+| `deny` (default) | Request blocked — same as pre-030 behaviour |
+| `allow` | Request passes through; risk scoring and compliance checks still apply |
+| `approval_required` | Request queued for human approval |
+
+Change via API (admin only):
+```bash
+curl -X PATCH $AGR_BASE/v1/org/settings \
+  -H "Authorization: Bearer $AGR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"no_policy_action": "allow"}'
+```
+
+Or use **Settings → Governance Settings** in the dashboard.
+
+### Webhook reachability
+
+`url_warning` is returned on every webhook read/create response. It is advisory — delivery is still attempted. The warning fires when the registered URL is a localhost or private-network address.
+
+AGR delivers webhooks server-to-server from a remote host. To test locally:
+- Use a public tunnel: [ngrok](https://ngrok.com), [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
+- Or deploy a staging receiver on a public HTTPS endpoint
+
+```bash
+# Example: ngrok tunnel for local testing
+ngrok http 3000
+# Use the ngrok HTTPS URL as your webhook endpoint
+```
