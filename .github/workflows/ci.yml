@@ -129,8 +129,26 @@ jobs:
           cache: "npm"
           cache-dependency-path: apps/agr-dashboard/package-lock.json
 
+      - name: Configure npm network retries
+        run: |
+          npm config set fetch-retries 5
+          npm config set fetch-retry-factor 2
+          npm config set fetch-retry-mintimeout 20000
+          npm config set fetch-retry-maxtimeout 120000
+          npm config set network-timeout 300000
+        working-directory: apps/agr-dashboard
+
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: |
+          for attempt in 1 2 3; do
+            npm ci --legacy-peer-deps && exit 0
+            echo "npm install failed (attempt ${attempt}/3)"
+            if [ "$attempt" -eq 3 ]; then
+              echo "npm install failed after 3 attempts" >&2
+              exit 1
+            fi
+            npm cache verify || true
+          done
         working-directory: apps/agr-dashboard
 
       - name: Inject Clerk publishable key (dev placeholder for CI build)

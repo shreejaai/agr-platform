@@ -29,13 +29,13 @@ from app.services.webhook_service import build_signature_headers, retry_webhook_
 
 # Private/reserved IP blocks — AGR server cannot reach these from a public host
 _PRIVATE_NETWORKS = [
-    ipaddress.ip_network("127.0.0.0/8"),    # loopback
-    ipaddress.ip_network("10.0.0.0/8"),     # RFC1918
+    ipaddress.ip_network("127.0.0.0/8"),  # loopback
+    ipaddress.ip_network("10.0.0.0/8"),  # RFC1918
     ipaddress.ip_network("172.16.0.0/12"),  # RFC1918
-    ipaddress.ip_network("192.168.0.0/16"), # RFC1918
-    ipaddress.ip_network("169.254.0.0/16"), # link-local
-    ipaddress.ip_network("::1/128"),        # IPv6 loopback
-    ipaddress.ip_network("fc00::/7"),       # IPv6 unique-local
+    ipaddress.ip_network("192.168.0.0/16"),  # RFC1918
+    ipaddress.ip_network("169.254.0.0/16"),  # link-local
+    ipaddress.ip_network("::1/128"),  # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),  # IPv6 unique-local
 ]
 
 _LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
@@ -77,6 +77,7 @@ def _url_reachability_warning(url: str) -> str | None:
         pass  # not a bare IP — hostname, fine
 
     return None
+
 
 router = APIRouter(prefix="/v1", tags=["webhooks"])
 

@@ -53,6 +53,7 @@ class _AlwaysBlockPlugin(CompliancePlugin):
             )
         ]
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -86,29 +87,21 @@ async def _set_no_policy_action(
 ) -> None:
     """Update org.no_policy_action and commit so auth middleware sees the change."""
     await db_session.execute(
-        update(Organization)
-        .where(Organization.id == org.id)
-        .values(no_policy_action=mode)
+        update(Organization).where(Organization.id == org.id).values(no_policy_action=mode)
     )
     await db_session.commit()
 
 
-async def _deactivate_all_policies(
-    db_session: AsyncSession, org: Organization
-) -> None:
+async def _deactivate_all_policies(db_session: AsyncSession, org: Organization) -> None:
     """Archive all org policies so load_active_policies returns nothing.
 
     Must update BOTH active AND state because load_active_policies filters
     by state='active', not the boolean active column.
     """
     await db_session.execute(
-        update(Policy)
-        .where(Policy.org_id == org.id)
-        .values(active=False, state="archived")
+        update(Policy).where(Policy.org_id == org.id).values(active=False, state="archived")
     )
     await db_session.commit()
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -203,9 +196,10 @@ async def test_no_policy_allow_high_risk_escalated(
     assert resp.status_code == 200
     data = resp.json()
     # Risk scoring must have escalated the ALLOW to something more restrictive
-    assert data["decision"] in ("APPROVAL_REQUIRED", "DENY"), (
-        f"Expected risk escalation from ALLOW, got {data['decision']!r}"
-    )
+    assert data["decision"] in (
+        "APPROVAL_REQUIRED",
+        "DENY",
+    ), f"Expected risk escalation from ALLOW, got {data['decision']!r}"
     # Confirm the decision_trace reflects risk was computed
     trace = data.get("decision_trace") or {}
     assert trace.get("risk_score") is not None, "risk_score missing from decision_trace"
@@ -246,13 +240,13 @@ async def test_no_policy_allow_compliance_block(
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["decision"] == "DENY", (
-            "Compliance enforcement block should override ALLOW → DENY"
-        )
+        assert (
+            data["decision"] == "DENY"
+        ), "Compliance enforcement block should override ALLOW → DENY"
         reason = data.get("reason") or ""
-        assert "Compliance" in reason or "compliance" in reason, (
-            f"Expected compliance block reason, got: {reason!r}"
-        )
+        assert (
+            "Compliance" in reason or "compliance" in reason
+        ), f"Expected compliance block reason, got: {reason!r}"
     finally:
         # Remove test-only plugin so it doesn't bleed into other tests
         registry._plugins = [p for p in registry._plugins if p is not block_plugin]  # type: ignore[attr-defined]
@@ -278,9 +272,9 @@ async def test_no_policy_decision_trace_field(
     assert resp.status_code == 200
     data = resp.json()
     trace = data.get("decision_trace") or {}
-    assert trace.get("no_policy_action") == "deny", (
-        f"Expected decision_trace.no_policy_action='deny', got: {trace!r}"
-    )
+    assert (
+        trace.get("no_policy_action") == "deny"
+    ), f"Expected decision_trace.no_policy_action='deny', got: {trace!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -312,12 +306,12 @@ async def test_no_policy_audit_markers(
     event = result.scalar_one_or_none()
     assert event is not None
     payload = event.payload or {}
-    assert payload.get("no_policy_fallback") is True, (
-        "Audit payload missing no_policy_fallback=True"
-    )
-    assert payload.get("no_policy_action") == "deny", (
-        f"Audit payload no_policy_action mismatch: {payload!r}"
-    )
+    assert (
+        payload.get("no_policy_fallback") is True
+    ), "Audit payload missing no_policy_fallback=True"
+    assert (
+        payload.get("no_policy_action") == "deny"
+    ), f"Audit payload no_policy_action mismatch: {payload!r}"
 
 
 # ---------------------------------------------------------------------------

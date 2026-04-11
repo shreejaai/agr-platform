@@ -535,7 +535,9 @@ async def evaluate(
             risk_override=risk is not None and result.decision != cedar_decision,
             fallback_used=result.fallback_used,
             fallback_reason=result.fallback_reason,
-            no_policy_action=org.no_policy_action if result.policy_source == "no_policies" else None,
+            no_policy_action=org.no_policy_action
+            if result.policy_source == "no_policies"
+            else None,
         ),
     )
     if idempotency_key:
