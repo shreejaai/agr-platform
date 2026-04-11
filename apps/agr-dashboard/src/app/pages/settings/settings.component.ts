@@ -629,7 +629,7 @@ function defaultRiskConfigForm(): RiskConfigFormModel {
         } @else {
           <div class="mt-4 space-y-4">
             <div>
-              <label class="block text-xs font-medium text-slate-300 mb-2">No-policy fallback action</label>
+              <p class="block text-xs font-medium text-slate-300 mb-2">No-policy fallback action</p>
               <div class="space-y-2">
                 <label class="flex items-start gap-3 cursor-pointer rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3 hover:border-slate-700 transition-colors"
                        [class.border-indigo-500]="noPolicyAction === 'deny'">

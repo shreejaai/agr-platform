@@ -631,8 +631,9 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
       <div class="card">
         <div class="flex flex-wrap gap-3 items-end">
           <div class="flex-1 min-w-[180px]">
-            <label class="block text-xs text-slate-400 mb-1">Search by name</label>
+            <label for="policy-search-query" class="block text-xs text-slate-400 mb-1">Search by name</label>
             <input
+              id="policy-search-query"
               [(ngModel)]="searchQuery"
               (keydown.enter)="loadList()"
               (blur)="loadList()"
@@ -641,8 +642,8 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
             />
           </div>
           <div class="w-36">
-            <label class="block text-xs text-slate-400 mb-1">State</label>
-            <select [(ngModel)]="filterState" (ngModelChange)="loadList()" class="input w-full text-sm">
+            <label for="policy-filter-state" class="block text-xs text-slate-400 mb-1">State</label>
+            <select id="policy-filter-state" [(ngModel)]="filterState" (ngModelChange)="loadList()" class="input w-full text-sm">
               <option value="">Active (default)</option>
               <option value="active">Active</option>
               <option value="draft">Draft</option>
@@ -650,8 +651,8 @@ const SAMPLE_POLICIES_JSON = JSON.stringify(
             </select>
           </div>
           <div class="w-44">
-            <label class="block text-xs text-slate-400 mb-1">Effect</label>
-            <select [(ngModel)]="filterEffect" (ngModelChange)="loadList()" class="input w-full text-sm">
+            <label for="policy-filter-effect" class="block text-xs text-slate-400 mb-1">Effect</label>
+            <select id="policy-filter-effect" [(ngModel)]="filterEffect" (ngModelChange)="loadList()" class="input w-full text-sm">
               <option value="">All effects</option>
               <option value="allow">Allow</option>
               <option value="deny">Deny</option>

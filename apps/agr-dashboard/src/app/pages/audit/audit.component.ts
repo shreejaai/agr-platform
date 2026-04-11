@@ -269,7 +269,7 @@ const DECISIONS = ['ALLOW', 'DENY', 'APPROVAL_REQUIRED'];
                         </div>
 
                         <!-- Risk scoring -->
-                        @if (ev.payload?.risk_score != null) {
+                        @if (ev.payload?.risk_score !== null && ev.payload?.risk_score !== undefined) {
                           <div class="space-y-2">
                             <h4 class="text-xs font-semibold text-slate-300 uppercase tracking-wider">Risk Scoring</h4>
                             <div class="space-y-1 text-xs">
