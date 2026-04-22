@@ -11,6 +11,9 @@ import logging
 import sys
 from pathlib import Path
 
+_RECONNECT_DELAY_SECONDS = 5
+_MAX_RECONNECT_ATTEMPTS = 12  # ~1 minute of retries before giving up
+
 # Allow running as `python -m app.workers.approval_worker` from the service root
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -31,20 +34,37 @@ async def main() -> None:
         logger.error("TEMPORAL_HOST is not set. Exiting.")
         sys.exit(1)
 
-    logger.info(
-        "Connecting to Temporal at %s (namespace=%s)",
-        settings.temporal_host,
-        settings.temporal_namespace,
-    )
-    client = await Client.connect(settings.temporal_host, namespace=settings.temporal_namespace)
+    attempt = 0
+    while True:
+        try:
+            logger.info(
+                "Connecting to Temporal at %s (namespace=%s)",
+                settings.temporal_host,
+                settings.temporal_namespace,
+            )
+            client = await Client.connect(settings.temporal_host, namespace=settings.temporal_namespace)
+            attempt = 0  # reset on successful connect
 
-    logger.info("Starting AGR approval worker on task queue '%s'", TASK_QUEUE)
-    worker = Worker(
-        client,
-        task_queue=TASK_QUEUE,
-        workflows=[ApprovalWorkflow],
-    )
-    await worker.run()
+            logger.info("Starting AGR approval worker on task queue '%s'", TASK_QUEUE)
+            worker = Worker(
+                client,
+                task_queue=TASK_QUEUE,
+                workflows=[ApprovalWorkflow],
+            )
+            await worker.run()
+        except Exception as exc:
+            attempt += 1
+            if attempt >= _MAX_RECONNECT_ATTEMPTS:
+                logger.error("Max reconnect attempts reached. Exiting. Last error: %s", exc)
+                sys.exit(1)
+            logger.warning(
+                "Worker error (attempt %d/%d): %s — retrying in %ds",
+                attempt,
+                _MAX_RECONNECT_ATTEMPTS,
+                exc,
+                _RECONNECT_DELAY_SECONDS,
+            )
+            await asyncio.sleep(_RECONNECT_DELAY_SECONDS)
 
 
 if __name__ == "__main__":
