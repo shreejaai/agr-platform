@@ -11,17 +11,17 @@ import logging
 import sys
 from pathlib import Path
 
-_RECONNECT_DELAY_SECONDS = 5
-_MAX_RECONNECT_ATTEMPTS = 12  # ~1 minute of retries before giving up
-
 # Allow running as `python -m app.workers.approval_worker` from the service root
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from temporalio.client import Client
-from temporalio.worker import Worker
+from temporalio.client import Client  # noqa: E402
+from temporalio.worker import Worker  # noqa: E402
 
-from app.config import settings
-from app.workflows.approval_workflow import ApprovalWorkflow
+_RECONNECT_DELAY_SECONDS = 5
+_MAX_RECONNECT_ATTEMPTS = 12  # ~1 minute of retries before giving up
+
+from app.config import settings  # noqa: E402
+from app.workflows.approval_workflow import ApprovalWorkflow  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -42,7 +42,9 @@ async def main() -> None:
                 settings.temporal_host,
                 settings.temporal_namespace,
             )
-            client = await Client.connect(settings.temporal_host, namespace=settings.temporal_namespace)
+            client = await Client.connect(
+                settings.temporal_host, namespace=settings.temporal_namespace
+            )
             attempt = 0  # reset on successful connect
 
             logger.info("Starting AGR approval worker on task queue '%s'", TASK_QUEUE)
