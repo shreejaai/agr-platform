@@ -9,10 +9,12 @@ import {
 } from '@angular/core';
 import { DatePipe, JsonPipe, NgClass, NgIf } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { ApprovalService } from '../../services/approval.service';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { RelativeTimePipe } from '../../shared/pipes/relative-time.pipe';
 import { Approval, ApprovalStep } from '../../core/models/approval.model';
+import { DEMO_LINKS } from '../../core/config/demo-links';
 
 type StatusFilter = '' | 'pending' | 'approved' | 'rejected';
 type HistoryTone = 'neutral' | 'warning' | 'success' | 'danger';
@@ -50,7 +52,7 @@ function slaCountdown(expiresAt: string): { label: string; urgent: boolean } | n
   selector: 'agr-approvals',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, JsonPipe, NgClass, NgIf, DatePipe, BadgeComponent, RelativeTimePipe],
+  imports: [FormsModule, JsonPipe, NgClass, NgIf, DatePipe, RouterLink, BadgeComponent, RelativeTimePipe],
   template: `
     <div class="space-y-4">
       <div>
@@ -58,6 +60,34 @@ function slaCountdown(expiresAt: string): { label: string; urgent: boolean } | n
         <p class="text-sm text-slate-400 mt-1">
           Review approval workflows, inspect approver steps, and decide on pending agent actions.
         </p>
+      </div>
+
+      <div class="rounded-xl border border-indigo-500/20 bg-indigo-500/5 px-4 py-4">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div class="max-w-3xl">
+            <p class="text-xs font-semibold uppercase tracking-[0.25em] text-indigo-300">Demo loop</p>
+            <p class="mt-2 text-sm text-slate-300">
+              Pharma parquet ingest from DataTrust lands here when regional handling policy requires human sign-off.
+              Approve or reject, then return to DataTrust ingestion to show webhook-driven state change.
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <a
+              [href]="demoLinks.datatrustIngestion"
+              target="_blank"
+              rel="noreferrer"
+              class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700 transition-colors"
+            >
+              Open DataTrust ingestion
+            </a>
+            <a routerLink="/policies" class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700 transition-colors">
+              Edit policies
+            </a>
+            <a routerLink="/audit" class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700 transition-colors">
+              Inspect audit
+            </a>
+          </div>
+        </div>
       </div>
 
       <div class="flex items-center gap-1 border-b border-slate-700 pb-0">
@@ -406,6 +436,7 @@ function slaCountdown(expiresAt: string): { label: string; urgent: boolean } | n
   `,
 })
 export class ApprovalsComponent implements OnInit, OnDestroy {
+  readonly demoLinks = DEMO_LINKS;
   private readonly svc = inject(ApprovalService);
 
   readonly statusTabs = STATUS_TABS;

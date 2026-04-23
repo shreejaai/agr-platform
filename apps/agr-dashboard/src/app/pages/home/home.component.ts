@@ -10,6 +10,7 @@ import { StatCardComponent } from '../../shared/components/stat-card/stat-card.c
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { RelativeTimePipe } from '../../shared/pipes/relative-time.pipe';
 import { AuditEvent } from '../../core/models/audit-event.model';
+import { DEMO_LINKS } from '../../core/config/demo-links';
 
 interface OnboardingStep {
   id: 'api-key' | 'agent' | 'policy' | 'evaluation';
@@ -32,6 +33,40 @@ interface OnboardingStep {
       <div>
         <h1 class="text-2xl font-bold text-slate-100">Overview</h1>
         <p class="text-sm text-slate-400 mt-1">Real-time governance metrics for your AI agents.</p>
+      </div>
+
+      <div class="card border border-indigo-500/20 bg-indigo-500/5">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div class="max-w-3xl">
+            <p class="text-xs font-semibold uppercase tracking-[0.25em] text-indigo-300">Live demo path</p>
+            <h2 class="mt-2 text-lg font-semibold text-slate-100">Drive pharma ingest from DataTrust into AGR</h2>
+            <p class="mt-2 text-sm text-slate-400">
+              Open DataTrust ingestion, upload a pharma parquet file, then use AGR approvals,
+              policies, and audit to show how regional handling rules pause and resume work.
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <a
+              [href]="demoLinks.datatrustDashboard"
+              target="_blank"
+              rel="noreferrer"
+              class="btn-secondary text-sm"
+            >
+              Open pharma dashboard
+            </a>
+            <a
+              [href]="demoLinks.datatrustIngestion"
+              target="_blank"
+              rel="noreferrer"
+              class="btn-secondary text-sm"
+            >
+              Open ingestion
+            </a>
+            <a routerLink="/approvals" class="btn-primary text-sm">Review approvals</a>
+            <a routerLink="/policies" class="btn-secondary text-sm">Edit policies</a>
+            <a routerLink="/audit" class="btn-secondary text-sm">Open audit</a>
+          </div>
+        </div>
       </div>
 
       @if (showOnboarding()) {
@@ -180,6 +215,7 @@ export class HomeComponent implements OnInit {
   private readonly auditSvc = inject(AuditService);
   private readonly onboarding = inject(OnboardingService);
   private readonly policySvc = inject(PolicyService);
+  readonly demoLinks = DEMO_LINKS;
 
   readonly loading = signal(true);
   readonly pendingCount = signal<number | string>('—');
