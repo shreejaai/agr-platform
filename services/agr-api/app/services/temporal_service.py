@@ -74,7 +74,11 @@ async def _get_client() -> object | None:
     return _temporal_client
 
 
-async def start_approval_workflow(approval_id: UUID) -> WorkflowStartResult:
+async def start_approval_workflow(
+    approval_id: UUID,
+    *,
+    sla_hours: int | None = None,
+) -> WorkflowStartResult:
     """Start a durable ApprovalWorkflow for an approval request.
 
     Returns:
@@ -84,6 +88,10 @@ async def start_approval_workflow(approval_id: UUID) -> WorkflowStartResult:
     This is a graceful degradation — the approval flow still works via email
     token links and API polling, but lacks durable retry/timeout/reminder
     semantics. Ops should monitor for TEMPORAL_UNAVAILABLE log entries.
+
+    sla_hours, when provided, is forwarded to the workflow so the suspension
+    window matches the DB-row expiry. When unset the workflow uses its
+    built-in default (48h).
     """
     client = await _get_client()
     if client is None:
@@ -110,13 +118,16 @@ async def start_approval_workflow(approval_id: UUID) -> WorkflowStartResult:
 
             assert isinstance(client, Client)
             workflow_id = f"approval-{approval_id}"
+            # Add a small buffer so the workflow's own SLA-driven wait_condition
+            # always fires before Temporal kills the run for exceeding its timeout.
+            execution_window_hours = (sla_hours or 48) + 2
             handle = await client.start_workflow(
                 ApprovalWorkflow.run,
-                str(approval_id),
+                args=[str(approval_id), sla_hours],
                 id=workflow_id,
                 task_queue=TASK_QUEUE,
-                execution_timeout=timedelta(hours=50),
-                run_timeout=timedelta(hours=50),
+                execution_timeout=timedelta(hours=execution_window_hours),
+                run_timeout=timedelta(hours=execution_window_hours),
                 task_timeout=timedelta(seconds=15),
                 retry_policy=RetryPolicy(
                     initial_interval=timedelta(seconds=1),

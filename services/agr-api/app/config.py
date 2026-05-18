@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     risk_scoring_enabled: bool = True
     auth_session_ttl_hours: int = 12
 
+    # Approval SLA — how long pending approvals stay open before expiring.
+    # default_sla_hours is used when EvaluateRequest.sla_hours is unset.
+    # max_sla_hours caps any caller-supplied SLA to prevent unbounded pending rows.
+    default_sla_hours: int = 48
+    max_sla_hours: int = 168  # 7 days
+
     # Webhook delivery — configurable timeout per attempt (seconds)
     webhook_timeout: float = 10.0
     webhook_secret_rotation_hours: int = 24

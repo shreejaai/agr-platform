@@ -1,10 +1,11 @@
 """Temporal workflow — durable approval suspension.
 
-ApprovalWorkflow suspends for up to 48 hours waiting for a human_decision signal.
+ApprovalWorkflow suspends until a human_decision signal arrives or its SLA
+window expires (default 48h, configurable per-approval via sla_hours).
 If no signal arrives within the configured timeout, the workflow returns "expired".
 
 Reminder behaviour:
-  - 24 hours after creation, if still pending, a reminder signal is logged.
+  - Halfway through the SLA window, if still pending, a reminder is logged.
     Callers that need email reminders should hook into the human_decision signal
     or implement a separate activity.
 
@@ -16,9 +17,10 @@ from datetime import timedelta
 
 from temporalio import workflow
 
-# ── Default timeouts ──────────────────────────────────────────────────────────
-_APPROVAL_TIMEOUT_HOURS = 48
-_REMINDER_AFTER_HOURS = 24
+# ── Default SLA when caller does not provide one ──────────────────────────────
+_DEFAULT_SLA_HOURS = 48
+# Reminder fires at this fraction of the total SLA window.
+_REMINDER_FRACTION = 0.5
 
 
 @workflow.defn
@@ -32,13 +34,15 @@ class ApprovalWorkflow:
         self._escalation_target: str | None = None
 
     @workflow.run
-    async def run(self, approval_id: str) -> str:
-        """Suspend until a human_decision signal arrives or the 48h window expires.
+    async def run(self, approval_id: str, sla_hours: int | None = None) -> str:
+        """Suspend until a human_decision signal arrives or the SLA window expires.
 
-        Emits a reminder log at 24h if no decision has been received.
-        Returns: "approved" | "rejected" | "expired"
+        Emits a reminder log halfway through the SLA window if no decision
+        has been received. Returns: "approved" | "rejected" | "failed".
         """
-        reminder_timeout = timedelta(hours=_REMINDER_AFTER_HOURS)
+        total_hours = sla_hours if sla_hours and sla_hours > 0 else _DEFAULT_SLA_HOURS
+        reminder_hours = max(1.0, total_hours * _REMINDER_FRACTION)
+        reminder_timeout = timedelta(hours=reminder_hours)
 
         # Phase 1 — wait up to reminder threshold
         try:
@@ -50,10 +54,10 @@ class ApprovalWorkflow:
             # No decision received by reminder point — log it
             if not self._reminder_sent:
                 workflow.logger.warning(
-                    "Approval %s has been pending for %dh with no decision. "
+                    "Approval %s has been pending for %.1fh with no decision. "
                     "Consider escalating or extending the timeout.",
                     approval_id,
-                    _REMINDER_AFTER_HOURS,
+                    reminder_hours,
                 )
                 self._reminder_sent = True
 
@@ -62,7 +66,7 @@ class ApprovalWorkflow:
             return self._decision
 
         # Phase 2 — wait for remaining window
-        remaining = timedelta(hours=_APPROVAL_TIMEOUT_HOURS - _REMINDER_AFTER_HOURS)
+        remaining = timedelta(hours=total_hours - reminder_hours)
         try:
             await workflow.wait_condition(
                 lambda: self._decision is not None,
@@ -73,7 +77,7 @@ class ApprovalWorkflow:
             workflow.logger.warning(
                 "Approval %s expired after %dh with no decision.",
                 approval_id,
-                _APPROVAL_TIMEOUT_HOURS,
+                total_hours,
             )
             return "failed"
 

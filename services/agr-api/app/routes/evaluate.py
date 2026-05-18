@@ -439,6 +439,7 @@ async def evaluate(
             resource=body.resource,
             context=body.context,
             approver_email=body.approver_email,
+            sla_hours=body.sla_hours,
             background_tasks=background_tasks,  # S3: Slack fires post-commit
         )
         approval_id = str(approval.id)
