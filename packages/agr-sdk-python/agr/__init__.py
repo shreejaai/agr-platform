@@ -7,6 +7,7 @@ from agr.client import (
     AsyncAGRClient,
     DecisionTrace,
     EvaluationResult,
+    PendingApprovalResult,
     SimulationResult,
 )
 from agr.integrations import AGRPolicyEnforcer, AsyncAGRPolicyEnforcer
@@ -21,6 +22,7 @@ __all__ = [
     "AGRAuthError",
     "AGRRateLimitError",
     "ApprovalResult",
+    "PendingApprovalResult",
     "AGRPolicyEnforcer",
     "AsyncAGRPolicyEnforcer",
 ]
