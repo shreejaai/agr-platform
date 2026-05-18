@@ -351,6 +351,10 @@ class ApprovalResponse(BaseModel):
         default=None,
         description="Timestamp of the latest escalation event, if the workflow was escalated.",
     )
+    reminder_sent_at: datetime | None = Field(
+        default=None,
+        description="Timestamp when the SLA-driven reminder notification was dispatched.",
+    )
 
 
 class ApprovalDecisionRequest(BaseModel):

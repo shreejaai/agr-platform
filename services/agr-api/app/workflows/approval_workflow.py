@@ -5,9 +5,9 @@ window expires (default 48h, configurable per-approval via sla_hours).
 If no signal arrives within the configured timeout, the workflow returns "expired".
 
 Reminder behaviour:
-  - Halfway through the SLA window, if still pending, a reminder is logged.
-    Callers that need email reminders should hook into the human_decision signal
-    or implement a separate activity.
+  - Halfway through the SLA window, if still pending, the workflow invokes the
+    `send_approval_reminder` activity which sends a follow-up email + Slack and
+    writes an APPROVAL_REMINDER_SENT audit event. The activity is idempotent.
 
 Run the worker process to activate this workflow:
     python -m app.workers.approval_worker
@@ -16,11 +16,17 @@ Run the worker process to activate this workflow:
 from datetime import timedelta
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 
 # ── Default SLA when caller does not provide one ──────────────────────────────
 _DEFAULT_SLA_HOURS = 48
 # Reminder fires at this fraction of the total SLA window.
 _REMINDER_FRACTION = 0.5
+# Name of the activity registered in app.workers.activities — kept as a string
+# so the workflow module never imports activity I/O code (Temporal requirement).
+_REMINDER_ACTIVITY = "send_approval_reminder"
+_REMINDER_TIMEOUT = timedelta(seconds=60)
+_REMINDER_RETRY = RetryPolicy(maximum_attempts=3, initial_interval=timedelta(seconds=2))
 
 
 @workflow.defn
@@ -51,14 +57,21 @@ class ApprovalWorkflow:
                 timeout=reminder_timeout,
             )
         except TimeoutError:
-            # No decision received by reminder point — log it
+            # No decision received by reminder point — dispatch reminder via activity.
+            # The activity is idempotent (reminder_sent_at column guard) so workflow
+            # replays / retries never produce duplicate notifications.
             if not self._reminder_sent:
-                workflow.logger.warning(
-                    "Approval %s has been pending for %.1fh with no decision. "
-                    "Consider escalating or extending the timeout.",
-                    approval_id,
-                    reminder_hours,
-                )
+                try:
+                    await workflow.execute_activity(
+                        _REMINDER_ACTIVITY,
+                        approval_id,
+                        start_to_close_timeout=_REMINDER_TIMEOUT,
+                        retry_policy=_REMINDER_RETRY,
+                    )
+                except Exception as exc:  # noqa: BLE001 — log and continue waiting
+                    workflow.logger.warning(
+                        "Approval %s reminder activity failed: %s", approval_id, exc
+                    )
                 self._reminder_sent = True
 
         if self._decision is not None:
