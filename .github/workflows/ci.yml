@@ -82,6 +82,9 @@ jobs:
           cd services/agr-api
           python -m mypy app/
 
+      - name: OpenAPI drift check (W4.5)
+        run: python scripts/export_openapi.py --check
+
       - name: Unit tests
         run: |
           cd services/agr-api
