@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from app.config import settings
 from app.database import async_session_factory
 from app.middleware.auth import AuthMiddleware
+from app.middleware.body_limit import BodySizeLimitMiddleware
 from app.middleware.logging_mw import RequestIDFormatter, RequestLoggingMiddleware
 from app.middleware.rate_limiter import RateLimiterMiddleware
 from app.middleware.tracing import configure_tracing
@@ -245,6 +246,9 @@ app = FastAPI(
 app.add_middleware(RateLimiterMiddleware)
 app.add_middleware(AuthMiddleware)
 app.add_middleware(VersionNegotiationMiddleware)
+# Body size limit sits just inside CORS so oversized payloads are rejected
+# before auth / rate-limit do any work, while still emitting CORS headers.
+app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
