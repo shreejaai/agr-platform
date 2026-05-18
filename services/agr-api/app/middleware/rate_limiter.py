@@ -39,6 +39,12 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
 
         if not result.allowed:
             retry_after = result.retry_after or 0
+            try:
+                from app.services.metrics_service import record_rate_limit_drop
+
+                record_rate_limit_drop()
+            except Exception:
+                pass
             return apply_cors_headers(
                 request,
                 JSONResponse(

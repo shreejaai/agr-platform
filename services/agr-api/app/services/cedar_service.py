@@ -1,5 +1,6 @@
 """Cedar policy service — loads policies from DB and evaluates them."""
 
+import contextlib
 import logging
 import sys
 from pathlib import Path
@@ -130,4 +131,16 @@ async def evaluate_request(
       'deny' | 'allow' | 'approval_required'
     """
     policies = await load_active_policies(session, org_id, agent_id)
-    return evaluate_policies(policies, agent_id, action, resource, context, no_policy_action)
+    _pool_gauge = None
+    try:
+        from app.services.metrics_service import cedar_pool_inflight as _pool_gauge
+
+        _pool_gauge.inc()
+    except Exception:
+        _pool_gauge = None
+    try:
+        return evaluate_policies(policies, agent_id, action, resource, context, no_policy_action)
+    finally:
+        if _pool_gauge is not None:
+            with contextlib.suppress(Exception):
+                _pool_gauge.dec()

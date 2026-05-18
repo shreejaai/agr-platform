@@ -41,6 +41,17 @@ class WorkflowSignalResult:
     error: str | None = None
 
 
+def _record_fallback(mode: str) -> str:
+    """Increment the approval-workflow-fallback Prometheus counter (best-effort)."""
+    try:
+        from app.services.metrics_service import record_approval_workflow_fallback
+
+        record_approval_workflow_fallback(mode)
+    except Exception:
+        pass
+    return mode
+
+
 async def _get_client() -> object | None:
     """Return a lazily initialised Temporal client, or None if unavailable.
 
@@ -104,7 +115,7 @@ async def start_approval_workflow(
         )
         return WorkflowStartResult(
             workflow_id=None,
-            fallback_mode="db_only_temporal_unavailable",
+            fallback_mode=_record_fallback("db_only_temporal_unavailable"),
             error="temporal_unavailable",
         )
 
@@ -152,7 +163,7 @@ async def start_approval_workflow(
 
     return WorkflowStartResult(
         workflow_id=None,
-        fallback_mode="db_only_start_failed",
+        fallback_mode=_record_fallback("db_only_start_failed"),
         error=last_error or "workflow_start_failed",
     )
 

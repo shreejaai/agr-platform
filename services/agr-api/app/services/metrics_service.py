@@ -14,6 +14,7 @@ from prometheus_client import (
     CONTENT_TYPE_LATEST,
     CollectorRegistry,
     Counter,
+    Gauge,
     Histogram,
     generate_latest,
 )
@@ -56,6 +57,84 @@ webhook_deliveries_total = Counter(
     ["status"],
     registry=_registry,
 )
+
+# ── W3.1 additions ────────────────────────────────────────────────────────────
+
+evaluate_latency_ms = Histogram(
+    "agr_evaluate_latency_ms",
+    "End-to-end /v1/evaluate latency in milliseconds",
+    buckets=[1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+    registry=_registry,
+)
+
+cedar_engine_mode_total = Counter(
+    "agr_cedar_engine_mode_total",
+    "Cedar engine mode used per evaluation",
+    ["mode"],
+    registry=_registry,
+)
+
+cedar_pool_inflight = Gauge(
+    "agr_cedar_pool_inflight",
+    "Number of Cedar CLI evaluations currently in flight",
+    registry=_registry,
+)
+
+approval_workflow_fallback_total = Counter(
+    "agr_approval_workflow_fallback_total",
+    "Approval rows created with a Temporal-fallback mode",
+    ["mode"],
+    registry=_registry,
+)
+
+webhook_delivery_latency_ms = Histogram(
+    "agr_webhook_delivery_latency_ms",
+    "Webhook delivery latency in milliseconds (POST round-trip)",
+    buckets=[10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000],
+    registry=_registry,
+)
+
+audit_chain_break_total = Counter(
+    "agr_audit_chain_break_total",
+    "Audit chain verifications that returned valid=false",
+    registry=_registry,
+)
+
+rate_limit_drop_total = Counter(
+    "agr_rate_limit_drop_total",
+    "Requests dropped with HTTP 429 by the rate limiter",
+    registry=_registry,
+)
+
+
+def record_evaluate_latency(latency_ms: float) -> None:
+    """Observe end-to-end /v1/evaluate latency."""
+    evaluate_latency_ms.observe(latency_ms)
+
+
+def record_cedar_engine_mode(mode: str) -> None:
+    """Increment the Cedar engine mode counter."""
+    cedar_engine_mode_total.labels(mode=mode).inc()
+
+
+def record_approval_workflow_fallback(mode: str) -> None:
+    """Increment the approval workflow fallback counter."""
+    approval_workflow_fallback_total.labels(mode=mode).inc()
+
+
+def record_webhook_delivery_latency(latency_ms: float) -> None:
+    """Observe webhook delivery round-trip latency."""
+    webhook_delivery_latency_ms.observe(latency_ms)
+
+
+def record_audit_chain_break() -> None:
+    """Increment the audit chain break counter."""
+    audit_chain_break_total.inc()
+
+
+def record_rate_limit_drop() -> None:
+    """Increment the rate-limit drop counter."""
+    rate_limit_drop_total.inc()
 
 
 def record_evaluation(decision: str, risk_score: int | None = None) -> None:

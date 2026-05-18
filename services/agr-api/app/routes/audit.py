@@ -249,6 +249,12 @@ async def verify_audit_chain(
                 prev_hash,
             )
             if expected != event.entry_hash:
+                try:
+                    from app.services.metrics_service import record_audit_chain_break
+
+                    record_audit_chain_break()
+                except Exception:
+                    pass
                 return AuditVerifyResponse(
                     valid=False,
                     total=total_verified + 1,

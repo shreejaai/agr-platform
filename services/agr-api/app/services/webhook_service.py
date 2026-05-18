@@ -301,7 +301,14 @@ async def _deliver_with_retry(
 
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
+            _post_start = time.perf_counter()
             resp = await client.post(url, content=body, headers=headers)
+            try:
+                from app.services.metrics_service import record_webhook_delivery_latency
+
+                record_webhook_delivery_latency((time.perf_counter() - _post_start) * 1000)
+            except Exception:
+                pass
             http_status = resp.status_code
             if resp.is_success:
                 logger.info(
