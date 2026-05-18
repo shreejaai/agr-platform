@@ -89,6 +89,7 @@ def _apply_filters(
 @router.get("/audit", response_model=list[AuditEventResponse])
 async def list_audit_events(
     request: Request,
+    response: Response,
     session: AsyncSession = Depends(get_session),
     event_type: str | None = None,
     agent_id: str | None = None,
@@ -100,7 +101,24 @@ async def list_audit_events(
     end_date: datetime | None = None,
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
+    after: int | None = Query(
+        default=None,
+        ge=0,
+        description=(
+            "Cursor: return events with sequence_num strictly less than this. "
+            "Mutually exclusive with `offset`. Prefer this for deep pagination."
+        ),
+    ),
 ) -> list[AuditEventResponse]:
+    """List audit events, newest first.
+
+    Supports two pagination modes:
+
+    * Legacy ``offset`` (backward-compatible). Skips ``offset`` rows.
+    * Cursor ``after`` (W4.2). Returns events where ``sequence_num < after``.
+      The response header ``X-AGR-Next-Cursor`` carries the next cursor when
+      another page is likely available (i.e. ``len(result) == limit``).
+    """
     org_id: uuid.UUID = request.state.org_id
     stmt = _apply_filters(
         select(AuditEvent),
@@ -114,9 +132,16 @@ async def list_audit_events(
         start_date=start_date,
         end_date=end_date,
     )
-    stmt = stmt.order_by(AuditEvent.sequence_num.desc()).offset(offset).limit(limit)
+    stmt = stmt.order_by(AuditEvent.sequence_num.desc())
+    if after is not None:
+        stmt = stmt.where(AuditEvent.sequence_num < after).limit(limit)
+    else:
+        stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
-    return [_event_to_response(e) for e in result.scalars().all()]
+    events = list(result.scalars().all())
+    if events and len(events) == limit:
+        response.headers["X-AGR-Next-Cursor"] = str(events[-1].sequence_num)
+    return [_event_to_response(e) for e in events]
 
 
 @router.post("/audit/search", response_model=list[AuditEventResponse])
