@@ -516,9 +516,15 @@ async def evaluate(
 
     # Record Prometheus metrics (non-blocking, fail-open)
     try:
-        from app.services.metrics_service import record_evaluation
+        from app.services.metrics_service import (
+            record_cedar_engine_mode,
+            record_evaluate_latency,
+            record_evaluation,
+        )
 
         record_evaluation(result.decision, risk.score if risk else None)
+        record_evaluate_latency(float(result.latency_ms or 0))
+        record_cedar_engine_mode(_engine_mode(result.policy_source, result.fallback_used))
     except Exception:
         pass
 

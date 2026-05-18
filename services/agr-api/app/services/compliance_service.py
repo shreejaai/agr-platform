@@ -13,6 +13,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
@@ -244,9 +245,15 @@ class ComplianceRegistry:
         """
         all_findings: list[ComplianceFinding] = []
 
+        # W3.4 — bound each plugin to a per-plugin timeout to keep evaluation
+        # latency predictable. Timeout → advisory warning finding, never blocks.
+        from app.config import settings as _settings  # local import to avoid cycle
+
+        timeout_s = max(0.001, _settings.compliance_plugin_timeout_ms / 1000.0)
+
         for plugin in self._plugins:
             try:
-                findings = await plugin.check(ctx)
+                findings = await asyncio.wait_for(plugin.check(ctx), timeout=timeout_s)
                 enriched_findings = [
                     enrich_compliance_finding(
                         finding,
@@ -274,6 +281,36 @@ class ComplianceRegistry:
                 # M9: re-raise process-terminating signals — never swallow them
                 if isinstance(exc, SystemExit | KeyboardInterrupt):
                     raise
+                if isinstance(exc, asyncio.TimeoutError | TimeoutError):
+                    # W3.4 — emit advisory finding instead of dropping the plugin silently.
+                    from app.services.metrics_service import (
+                        record_compliance_plugin_timeout,
+                    )
+
+                    record_compliance_plugin_timeout(plugin.name)
+                    logger.warning(
+                        "Compliance plugin %s exceeded %dms budget; emitting advisory.",
+                        plugin.name,
+                        _settings.compliance_plugin_timeout_ms,
+                    )
+                    all_findings.append(
+                        ComplianceFinding(
+                            plugin=plugin.name,
+                            standard="INTERNAL",
+                            rule_id="PLUGIN-TIMEOUT",
+                            severity="warning",
+                            message=(
+                                f"Compliance plugin '{plugin.name}' exceeded the "
+                                f"{_settings.compliance_plugin_timeout_ms}ms budget "
+                                "and was cancelled."
+                            ),
+                            passed=False,
+                            plugin_id=plugin.name,
+                            severity_level="medium",
+                            compliance_score=80,
+                        )
+                    )
+                    continue
                 logger.warning("Compliance plugin %s raised (skipping): %s", plugin.name, exc)
 
         return ComplianceResult(findings=all_findings)

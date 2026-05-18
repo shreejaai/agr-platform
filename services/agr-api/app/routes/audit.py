@@ -158,7 +158,7 @@ async def export_audit_events(
 ) -> Response:
     org_id: uuid.UUID = request.state.org_id
     if async_export:
-        job = start_audit_export_job(org_id, body.model_dump(), format)
+        job = await start_audit_export_job(org_id, body.model_dump(), format)
         payload = AuditExportJobResponse(job_id=job.job_id, status="pending", format=format)
         return JSONResponse(status_code=202, content=payload.model_dump())
 
@@ -176,7 +176,8 @@ async def get_audit_export_status(
     job_id: str,
     request: Request,
 ) -> AuditExportJobResponse:
-    job = get_audit_export_job(job_id)
+    org_id: uuid.UUID = request.state.org_id
+    job = await get_audit_export_job(job_id, org_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Audit export job not found.")
 
@@ -194,8 +195,9 @@ async def get_audit_export_status(
 
 
 @router.get("/audit/export/{job_id}/download", name="download_audit_export")
-async def download_audit_export(job_id: str) -> FileResponse:
-    job = get_audit_export_job(job_id)
+async def download_audit_export(job_id: str, request: Request) -> FileResponse:
+    org_id: uuid.UUID = request.state.org_id
+    job = await get_audit_export_job(job_id, org_id)
     if job is None or job.status != "ready" or job.file_path is None:
         raise HTTPException(status_code=404, detail="Audit export job not ready.")
 
@@ -249,6 +251,12 @@ async def verify_audit_chain(
                 prev_hash,
             )
             if expected != event.entry_hash:
+                try:
+                    from app.services.metrics_service import record_audit_chain_break
+
+                    record_audit_chain_break()
+                except Exception:
+                    pass
                 return AuditVerifyResponse(
                     valid=False,
                     total=total_verified + 1,

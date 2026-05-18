@@ -59,11 +59,20 @@ class Settings(BaseSettings):
     webhook_timeout: float = 10.0
     webhook_secret_rotation_hours: int = 24
 
+    # W3.4 — per-plugin timeout for compliance checks. A plugin exceeding this
+    # budget is cancelled and surfaced as a warning-level advisory finding so
+    # the evaluation path is never blocked by a slow/hung plugin.
+    compliance_plugin_timeout_ms: int = 250
+
     cedar_pool_size: int = 4
     cedar_require_cli: bool = False
     rate_limit_per_second: int = 50
     rate_limit_burst: int = 100
     rate_limit_enabled: bool = True
+    # W3.3 — what to do when Redis is unreachable. "open" allows the request
+    # (legacy behaviour, safe for dev); "closed" rejects with 503 + Retry-After
+    # to prevent stampedes during a Redis outage. Production should use closed.
+    rate_limit_fail_mode: str = "open"
     otel_enabled: bool = False
     otel_endpoint: str = "http://localhost:4317"
     otel_service_name: str = "agr-api"
@@ -162,6 +171,13 @@ class Settings(BaseSettings):
             problems.append(
                 f"MAX_REQUEST_BODY_BYTES={self.max_request_body_bytes} is out of range "
                 "(must be 1..10485760). 256 KB is the recommended default."
+            )
+
+        if self.rate_limit_enabled and self.rate_limit_fail_mode.lower() != "closed":
+            problems.append(
+                "RATE_LIMIT_FAIL_MODE must be 'closed' in production so that "
+                "Redis outages cannot let unbounded traffic bypass quotas. Set "
+                "RATE_LIMIT_FAIL_MODE=closed (recommended) or RATE_LIMIT_ENABLED=false."
             )
 
         if problems:

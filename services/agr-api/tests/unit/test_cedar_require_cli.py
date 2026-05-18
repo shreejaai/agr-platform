@@ -15,6 +15,7 @@ def test_validate_prod_requires_cedar_cli_by_default() -> None:
         cedar_require_cli=False,
         webhook_timeout=10.0,
         temporal_host="t:7233",
+        rate_limit_fail_mode="closed",
     )
     with pytest.raises(RuntimeError, match="CEDAR_REQUIRE_CLI"):
         settings.validate_production_settings()
@@ -31,5 +32,6 @@ def test_explicit_cedar_fallback_opt_in_clears_check() -> None:
         allow_cedar_fallback_in_prod=True,
         webhook_timeout=10.0,
         temporal_host="t:7233",
+        rate_limit_fail_mode="closed",
     )
     settings.validate_production_settings()  # must not raise

@@ -414,7 +414,7 @@ async def test_evaluate_cedar_cli_enriches_policy_id_for_audit(
     test_org: Organization,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import policy_engine
+    from agr_core import policy_engine
 
     monkeypatch.setattr(policy_engine, "_find_cedar_cli", lambda: "/usr/bin/cedar")
     monkeypatch.setattr(policy_engine, "_cedar_cli_authorize", lambda *args, **kwargs: "ALLOW")
@@ -451,7 +451,7 @@ async def test_evaluate_cedar_cli_enriches_policy_id_for_approval_required(
     auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import policy_engine
+    from agr_core import policy_engine
 
     def _fake_authorize(
         cedar_binary: str,

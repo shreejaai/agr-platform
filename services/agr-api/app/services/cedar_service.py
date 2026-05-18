@@ -1,26 +1,10 @@
 """Cedar policy service — loads policies from DB and evaluates them."""
 
+import contextlib
 import logging
-import sys
-from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.middleware.tracing import get_tracer
-from app.models import Policy
-
-# Resolve agr-core: walk up from this file looking for packages/agr-core,
-# then fall back to /packages/agr-core (Docker image path).
-_agr_core: str | None = None
-for _p in Path(__file__).resolve().parents:
-    _candidate = _p / "packages" / "agr-core"
-    if _candidate.exists():
-        _agr_core = str(_candidate)
-        break
-sys.path.insert(0, _agr_core or "/packages/agr-core")
-from policy_engine import (  # type: ignore[import-not-found]  # noqa: E402, I001
+from agr_core.policy_engine import (
     EvaluationResult,
     PolicyShapeResult,
     ValidationResult,
@@ -28,12 +12,23 @@ from policy_engine import (  # type: ignore[import-not-found]  # noqa: E402, I00
     close_cedar_process_pool,
     configure_cedar_process_pool,
     evaluate_policies,
-    infer_policy_match as _infer_policy_match,
     initialize_cedar_process_pool,
     set_cedar_degraded,
+)
+from agr_core.policy_engine import (
+    infer_policy_match as _infer_policy_match,
+)
+from agr_core.policy_engine import (
     validate_cedar_rule as _validate_cedar_rule,
+)
+from agr_core.policy_engine import (
     validate_policy_shape as _validate_policy_shape,
 )
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.middleware.tracing import get_tracer
+from app.models import Policy
 
 logger = logging.getLogger(__name__)
 
@@ -130,4 +125,16 @@ async def evaluate_request(
       'deny' | 'allow' | 'approval_required'
     """
     policies = await load_active_policies(session, org_id, agent_id)
-    return evaluate_policies(policies, agent_id, action, resource, context, no_policy_action)
+    _pool_gauge = None
+    try:
+        from app.services.metrics_service import cedar_pool_inflight as _pool_gauge
+
+        _pool_gauge.inc()
+    except Exception:
+        _pool_gauge = None
+    try:
+        return evaluate_policies(policies, agent_id, action, resource, context, no_policy_action)
+    finally:
+        if _pool_gauge is not None:
+            with contextlib.suppress(Exception):
+                _pool_gauge.dec()

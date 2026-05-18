@@ -10,6 +10,7 @@ A lazily cached client is used to avoid reconnecting on every call.
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID
@@ -22,6 +23,111 @@ TASK_QUEUE = "agr-approvals"
 _START_RETRY_ATTEMPTS = 3
 _SIGNAL_RETRY_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = 0.5
+
+# ── W3.2 circuit breaker ──────────────────────────────────────────────────────
+# closed   → normal operation
+# open     → short-circuit all calls; bypass Temporal entirely
+# half_open→ allow exactly one probe call to check recovery
+_CB_FAILURE_THRESHOLD = 5
+_CB_FAILURE_WINDOW_SEC = 30.0
+_CB_OPEN_DURATION_SEC = 30.0
+
+
+class _CircuitBreaker:
+    __slots__ = ("state", "failures", "opened_at", "half_open_in_flight", "_lock")
+
+    def __init__(self) -> None:
+        self.state: str = "closed"
+        self.failures: list[float] = []
+        self.opened_at: float = 0.0
+        self.half_open_in_flight: bool = False
+        self._lock = asyncio.Lock()
+
+    async def allow_request(self) -> bool:
+        """Return True if the call should be attempted, False if short-circuited."""
+        async with self._lock:
+            now = time.monotonic()
+            if self.state == "open":
+                if now - self.opened_at >= _CB_OPEN_DURATION_SEC:
+                    self.state = "half_open"
+                    self.half_open_in_flight = False
+                    _emit_state("half_open")
+                else:
+                    return False
+            if self.state == "half_open":
+                if self.half_open_in_flight:
+                    return False
+                self.half_open_in_flight = True
+                return True
+            return True  # closed
+
+    async def record_success(self) -> None:
+        async with self._lock:
+            self.failures.clear()
+            if self.state in ("open", "half_open"):
+                self.state = "closed"
+                self.half_open_in_flight = False
+                _emit_state("closed")
+            elif self.state == "closed":
+                _emit_state("closed")
+
+    async def record_failure(self) -> None:
+        async with self._lock:
+            now = time.monotonic()
+            if self.state == "half_open":
+                self.state = "open"
+                self.opened_at = now
+                self.half_open_in_flight = False
+                self.failures.clear()
+                _emit_state("open")
+                _emit_trip()
+                return
+            self.failures = [t for t in self.failures if now - t <= _CB_FAILURE_WINDOW_SEC]
+            self.failures.append(now)
+            if len(self.failures) >= _CB_FAILURE_THRESHOLD and self.state == "closed":
+                self.state = "open"
+                self.opened_at = now
+                self.failures.clear()
+                _emit_state("open")
+                _emit_trip()
+
+    def snapshot(self) -> str:
+        return self.state
+
+
+def _emit_state(state: str) -> None:
+    try:
+        from app.services.metrics_service import set_temporal_circuit_state
+
+        set_temporal_circuit_state(state)
+    except Exception:
+        pass
+
+
+def _emit_trip() -> None:
+    try:
+        from app.services.metrics_service import record_temporal_circuit_trip
+
+        record_temporal_circuit_trip()
+    except Exception:
+        pass
+
+
+_circuit = _CircuitBreaker()
+
+
+def get_circuit_state() -> str:
+    return _circuit.snapshot()
+
+
+def _reset_circuit_for_tests() -> None:
+    """Test helper — fully reset breaker state."""
+    _circuit.state = "closed"
+    _circuit.failures.clear()
+    _circuit.opened_at = 0.0
+    _circuit.half_open_in_flight = False
+    _emit_state("closed")
+
 
 _temporal_client: object | None = None
 _client_initialised = False
@@ -39,6 +145,17 @@ class WorkflowStartResult:
 class WorkflowSignalResult:
     delivered: bool
     error: str | None = None
+
+
+def _record_fallback(mode: str) -> str:
+    """Increment the approval-workflow-fallback Prometheus counter (best-effort)."""
+    try:
+        from app.services.metrics_service import record_approval_workflow_fallback
+
+        record_approval_workflow_fallback(mode)
+    except Exception:
+        pass
+    return mode
 
 
 async def _get_client() -> object | None:
@@ -93,8 +210,19 @@ async def start_approval_workflow(
     window matches the DB-row expiry. When unset the workflow uses its
     built-in default (48h).
     """
+    if not await _circuit.allow_request():
+        logger.warning(
+            "Temporal circuit OPEN — short-circuiting start_approval_workflow for %s",
+            approval_id,
+        )
+        return WorkflowStartResult(
+            workflow_id=None,
+            fallback_mode=_record_fallback("db_only_circuit_open"),
+            error="temporal_circuit_open",
+        )
     client = await _get_client()
     if client is None:
+        await _circuit.record_failure()
         logger.warning(
             "Temporal unavailable — approval %s will be tracked by DB row only. "
             "mode=db_only approval_id=%s "
@@ -104,7 +232,7 @@ async def start_approval_workflow(
         )
         return WorkflowStartResult(
             workflow_id=None,
-            fallback_mode="db_only_temporal_unavailable",
+            fallback_mode=_record_fallback("db_only_temporal_unavailable"),
             error="temporal_unavailable",
         )
 
@@ -137,6 +265,7 @@ async def start_approval_workflow(
                 ),
             )
             logger.info("Started Temporal workflow %s for approval %s", handle.id, approval_id)
+            await _circuit.record_success()
             return WorkflowStartResult(workflow_id=handle.id, fallback_mode="none")
         except Exception as exc:
             last_error = str(exc)
@@ -150,9 +279,10 @@ async def start_approval_workflow(
             if attempt < _START_RETRY_ATTEMPTS:
                 await asyncio.sleep(_RETRY_BACKOFF_SECONDS * attempt)
 
+    await _circuit.record_failure()
     return WorkflowStartResult(
         workflow_id=None,
-        fallback_mode="db_only_start_failed",
+        fallback_mode=_record_fallback("db_only_start_failed"),
         error=last_error or "workflow_start_failed",
     )
 
@@ -172,8 +302,11 @@ async def _signal_workflow(
     Returns:
         WorkflowSignalResult describing signal delivery.
     """
+    if not await _circuit.allow_request():
+        return WorkflowSignalResult(delivered=False, error="temporal_circuit_open")
     client = await _get_client()
     if client is None:
+        await _circuit.record_failure()
         return WorkflowSignalResult(delivered=False, error="temporal_unavailable")
 
     last_error: str | None = None
@@ -190,6 +323,7 @@ async def _signal_workflow(
             else:
                 await handle.signal(ApprovalWorkflow.escalate, payload)
             logger.info("Signaled workflow %s with %s=%s", workflow_id, signal_name, payload)
+            await _circuit.record_success()
             return WorkflowSignalResult(delivered=True)
         except Exception as exc:
             last_error = str(exc)
@@ -204,6 +338,7 @@ async def _signal_workflow(
             if attempt < _SIGNAL_RETRY_ATTEMPTS:
                 await asyncio.sleep(_RETRY_BACKOFF_SECONDS * attempt)
 
+    await _circuit.record_failure()
     return WorkflowSignalResult(delivered=False, error=last_error or "signal_failed")
 
 
