@@ -57,70 +57,57 @@ export class ClerkService {
    * Fetch the AGR API key from the backend using the current Clerk session.
    *
    * Retries up to 3 times with a 2-second delay to handle the race between
-   * first login and the Clerk webhook creating the org row. Returns a result
-   * object so callers can surface failures to the user.
+  /**
+   * Exchange a Clerk session for an AGR API key.
+   *
+   * The backend `/v1/clerk/api-key` endpoint auto-provisions the org row JIT
+   * for any verified Clerk user (W2.5), so we no longer need to poll while
+   * waiting for the Clerk webhook to land. Returns a result object so callers
+   * can surface failures to the user.
    */
   async fetchApiKey(): Promise<FetchKeyResult> {
     if (!this.clerk?.session) {
       return { ok: false, reason: 'not_signed_in' };
     }
 
-    const maxAttempts = 3;
-    const retryDelayMs = 2000;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const token: string = await this.clerk.session.getToken();
-        const res = await firstValueFrom(
-          this.http.get<{ api_key: string }>('/v1/clerk/api-key', {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-        );
-        if (res?.api_key) {
-          if (res.api_key.startsWith('agr_sk_')) {
-            console.warn(
-              'Warning: SSO exchange returned a raw API key. Configure CLERK_SESSION_MODE=session on the backend.',
-            );
-          }
-          this.apiKeySvc.setKey(res.api_key);
-          return { ok: true };
+    try {
+      const token: string = await this.clerk.session.getToken();
+      const res = await firstValueFrom(
+        this.http.get<{ api_key: string }>('/v1/clerk/api-key', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      );
+      if (res?.api_key) {
+        if (res.api_key.startsWith('agr_sk_')) {
+          console.warn(
+            'Warning: SSO exchange returned a raw API key. Configure CLERK_SESSION_MODE=session on the backend.',
+          );
         }
-      } catch (err: any) {
-        const status: number = err?.status ?? 0;
-
-        if (status === 503) {
-          // CLERK_SECRET_KEY not configured on backend — retrying won't help
-          return { ok: false, reason: 'clerk_not_configured' };
-        }
-
-        if (status === 404 && attempt < maxAttempts) {
-          // Org not created yet — Clerk webhook may still be in flight. Retry.
-          console.warn(`ClerkService: org not found (attempt ${attempt}/${maxAttempts}), retrying in ${retryDelayMs}ms…`);
-          await new Promise(r => setTimeout(r, retryDelayMs));
-          continue;
-        }
-
-        if (status === 404) {
-          return { ok: false, reason: 'org_not_found' };
-        }
-
-        if (status === 403) {
-          return { ok: false, reason: 'access_denied' };
-        }
-
-        if (status === 409) {
-          return { ok: false, reason: 'ambiguous_org_mapping' };
-        }
-
-        console.warn('ClerkService: fetchApiKey failed', err);
-        if (attempt === maxAttempts) {
-          return { ok: false, reason: 'error' };
-        }
-        await new Promise(r => setTimeout(r, retryDelayMs));
+        this.apiKeySvc.setKey(res.api_key);
+        return { ok: true };
       }
-    }
+      return { ok: false, reason: 'error' };
+    } catch (err: any) {
+      const status: number = err?.status ?? 0;
 
-    return { ok: false, reason: 'error' };
+      if (status === 503) {
+        return { ok: false, reason: 'clerk_not_configured' };
+      }
+      if (status === 404) {
+        // Backend now JIT-provisions on every call, so 404 is a real "not
+        // mapped" condition (e.g. session token belongs to a deleted org).
+        return { ok: false, reason: 'org_not_found' };
+      }
+      if (status === 403) {
+        return { ok: false, reason: 'access_denied' };
+      }
+      if (status === 409) {
+        return { ok: false, reason: 'ambiguous_org_mapping' };
+      }
+
+      console.warn('ClerkService: fetchApiKey failed', err);
+      return { ok: false, reason: 'error' };
+    }
   }
 
   private _syncUser(): void {
