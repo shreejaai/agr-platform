@@ -1,71 +1,65 @@
 #!/bin/sh
-set -e
+# Transactional, idempotent migration runner for AGR.
+#
+# Each *.sql file under $MIGRATIONS_DIR is applied inside a single transaction
+# via `psql --single-transaction -v ON_ERROR_STOP=1`. The same psql invocation
+# also records the file's sha256 in `schema_migrations`, so a mid-file failure
+# rolls back *both* the schema change and the bookkeeping row.
+#
+# Re-running the script is a no-op for already-applied files. If a file's
+# content changes after it was applied, the runner aborts to prevent silent
+# drift.
+set -eu
 
-PSQL="psql postgresql://${POSTGRES_USER:-agr_svc_usr}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-agr_platform}"
+PSQL_URL="postgresql://${POSTGRES_USER:-agr_svc_usr}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-agr_platform}"
+PSQL="psql ${PSQL_URL}"
+MIGRATIONS_DIR="${MIGRATIONS_DIR:-/migrations}"
 
-echo "Running migrations..."
-$PSQL -f /migrations/001_initial_schema.sql
-echo "  001 done"
-$PSQL -f /migrations/002_approval_enhancements.sql
-echo "  002 done"
-$PSQL -f /migrations/003_default_policy_trigger.sql
-echo "  003 done"
-$PSQL -f /migrations/004_agents_table.sql
-echo "  004 done"
-$PSQL -f /migrations/005_webhooks_table.sql
-echo "  005 done"
-$PSQL -f /migrations/006_audit_partitioning.sql
-echo "  006 done"
-$PSQL -f /migrations/007_pg_cron_audit_partitions.sql
-echo "  007 done"
-$PSQL -f /migrations/008_webhook_deliveries.sql
-echo "  008 done"
-$PSQL -f /migrations/009_agent_active.sql
-echo "  009 done"
-$PSQL -f /migrations/010_eval_week.sql
-echo "  010 done"
-$PSQL -f /migrations/011_indexes.sql
-echo "  011 done"
-$PSQL -f /migrations/012_token_version.sql
-echo "  012 done"
-$PSQL -f /migrations/013_status_check.sql
-echo "  013 done"
-$PSQL -f /migrations/014_audit_sequence_per_org.sql
-echo "  014 done"
-$PSQL -f /migrations/015_audit_agent_index.sql
-echo "  015 done"
-$PSQL -f /migrations/016_copilot_history.sql
-echo "  016 done"
-$PSQL -f /migrations/017_policy_state.sql
-echo "  017 done"
-$PSQL -f /migrations/018_policy_versions.sql
-echo "  018 done"
-$PSQL -f /migrations/019_org_roles.sql
-echo "  019 done"
-$PSQL -f /migrations/020_agent_profile.sql
-echo "  020 done"
-$PSQL -f /migrations/021_agent_capabilities.sql
-echo "  021 done"
-$PSQL -f /migrations/022_org_risk_config.sql
-echo "  022 done"
-$PSQL -f /migrations/023_approval_steps.sql
-echo "  023 done"
-$PSQL -f /migrations/024_org_members.sql
-echo "  024 done"
-$PSQL -f /migrations/025_enterprise_auth_usage_workflows.sql
-echo "  025 done"
-$PSQL -f /migrations/026_compliance_enforcement.sql
-echo "  026 done"
-$PSQL -f /migrations/027_api_key_scopes.sql
-echo "  027 done"
-$PSQL -f /migrations/028_webhook_secret_rotation.sql
-echo "  028 done"
-$PSQL -f /migrations/029_policy_test_suites.sql
-echo "  029 done"
-$PSQL -f /migrations/030_no_policy_action.sql
-echo "  030 done"
-$PSQL -f /migrations/031_approval_reminder_audit.sql
-echo "  031 done"
-$PSQL -f /migrations/032_audit_export_jobs.sql
-echo "  032 done"
+# Bootstrap bookkeeping table.
+$PSQL -v ON_ERROR_STOP=1 -q <<'SQL'
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    filename   TEXT PRIMARY KEY,
+    sha256     TEXT NOT NULL,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+SQL
+
+if command -v sha256sum >/dev/null 2>&1; then
+    sha_cmd="sha256sum"
+elif command -v shasum >/dev/null 2>&1; then
+    sha_cmd="shasum -a 256"
+else
+    echo "ERROR: need sha256sum or shasum on PATH" >&2
+    exit 1
+fi
+
+echo "Running migrations from $MIGRATIONS_DIR ..."
+for f in "$MIGRATIONS_DIR"/[0-9][0-9][0-9]_*.sql; do
+    [ -f "$f" ] || continue
+    name=$(basename "$f")
+    hash=$($sha_cmd "$f" | awk '{print $1}')
+
+    applied=$($PSQL -v ON_ERROR_STOP=1 -At \
+        -c "SELECT sha256 FROM schema_migrations WHERE filename = '${name}';")
+
+    if [ -n "$applied" ]; then
+        if [ "$applied" != "$hash" ]; then
+            echo "ERROR: ${name} already applied with a different content hash" >&2
+            echo "       (db=${applied} file=${hash}). Refusing to re-apply." >&2
+            exit 1
+        fi
+        echo "  ${name} skip (already applied)"
+        continue
+    fi
+
+    echo "  ${name} applying..."
+    # Pipe migration body + bookkeeping insert into one transactional psql call
+    # so a mid-file error rolls back both the schema change and the row insert.
+    {
+        cat "$f"
+        printf "\nINSERT INTO schema_migrations (filename, sha256) VALUES ('%s', '%s');\n" "$name" "$hash"
+    } | $PSQL -v ON_ERROR_STOP=1 --single-transaction -q
+    echo "  ${name} done"
+done
+
 echo "All migrations complete."
