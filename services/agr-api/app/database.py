@@ -15,8 +15,9 @@ _request_org_id: ContextVar[UUID | None] = ContextVar("request_org_id", default=
 engine = create_async_engine(
     settings.database_url,
     echo=False,
-    pool_size=20,
-    max_overflow=10,
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_recycle=settings.db_pool_recycle,
     pool_pre_ping=True,
 )
 
