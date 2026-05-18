@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     webhook_timeout: float = 10.0
     webhook_secret_rotation_hours: int = 24
 
+    # W3.4 — per-plugin timeout for compliance checks. A plugin exceeding this
+    # budget is cancelled and surfaced as a warning-level advisory finding so
+    # the evaluation path is never blocked by a slow/hung plugin.
+    compliance_plugin_timeout_ms: int = 250
+
     cedar_pool_size: int = 4
     cedar_require_cli: bool = False
     rate_limit_per_second: int = 50

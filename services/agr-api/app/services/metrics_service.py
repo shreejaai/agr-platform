@@ -146,6 +146,20 @@ def record_rate_limit_redis_unavailable(fail_mode: str) -> None:
     rate_limit_redis_unavailable_total.labels(fail_mode=fail_mode).inc()
 
 
+# ── W3.4 additions ────────────────────────────────────────────────────────────
+
+compliance_plugin_timeout_total = Counter(
+    "agr_compliance_plugin_timeout_total",
+    "Compliance plugin executions cancelled due to per-plugin timeout",
+    ["plugin"],
+    registry=_registry,
+)
+
+
+def record_compliance_plugin_timeout(plugin: str) -> None:
+    compliance_plugin_timeout_total.labels(plugin=plugin).inc()
+
+
 def record_evaluate_latency(latency_ms: float) -> None:
     """Observe end-to-end /v1/evaluate latency."""
     evaluate_latency_ms.observe(latency_ms)
