@@ -188,6 +188,14 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     logger.info("Compliance registry ready (%d plugins)", len(registry.plugins))
     await clear_expired_rotating_secrets()
 
+    # W3.5 — re-schedule audit export jobs that were interrupted by a restart.
+    try:
+        from app.services.audit_service import resume_pending_audit_exports
+
+        await resume_pending_audit_exports()
+    except Exception:
+        logger.exception("Failed to resume pending audit export jobs.")
+
     primary_org = await _get_primary_org()
     if settings.deployment_mode == "onprem" and first_boot and primary_org is not None:
         async with async_session_factory() as session:

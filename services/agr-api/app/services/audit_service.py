@@ -1,6 +1,7 @@
 """Hash-chained append-only audit logger."""
 
 import asyncio
+import contextlib
 import csv
 import hashlib
 import io
@@ -11,6 +12,7 @@ import tempfile
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -18,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
 from app.database import async_session_factory
-from app.models import AuditEvent
+from app.models import AuditEvent, AuditExportJobRecord
 
 _MAX_PAYLOAD_BYTES = 64_000  # ~64 KB — prevents unbounded JSONB growth
 
@@ -34,7 +36,16 @@ class AuditExportJob:
     error: str | None = None
 
 
-_EXPORT_JOBS: dict[str, AuditExportJob] = {}
+def _record_to_job(record: AuditExportJobRecord) -> AuditExportJob:
+    return AuditExportJob(
+        job_id=str(record.id),
+        format=record.format,
+        status=record.status,
+        file_path=record.file_path,
+        error=record.error,
+    )
+
+
 _STREAM_BATCH_SIZE = 500
 
 
@@ -241,7 +252,11 @@ async def _run_export_job(
     filters: dict[str, object],
     format: str,
 ) -> None:
-    job = _EXPORT_JOBS[job_id]
+    """Stream events to disk and update the DB row on completion/failure.
+
+    Job state is persisted via ``audit_export_jobs`` (W3.5) so the operator can
+    resume incomplete exports after a process restart.
+    """
     fd, path = tempfile.mkstemp(prefix=f"agr_audit_{job_id}_", suffix=f".{format}")
     os.close(fd)
 
@@ -251,22 +266,80 @@ async def _run_export_job(
                 filter_obj = type("AuditExportFilters", (), filters)()
                 async for chunk in stream_audit_events(session, org_id, filter_obj, format):
                     handle.write(chunk)
-        job.file_path = path
-        job.status = "ready"
+
+        async with async_session_factory() as session:
+            record = await session.get(AuditExportJobRecord, UUID(job_id))
+            if record is not None:
+                record.status = "ready"
+                record.file_path = path
+                record.finished_at = datetime.now(UTC)
+                await session.commit()
     except Exception as exc:
-        job.status = "failed"
-        job.error = str(exc)
         if os.path.exists(path):
-            os.unlink(path)
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+        async with async_session_factory() as session:
+            record = await session.get(AuditExportJobRecord, UUID(job_id))
+            if record is not None:
+                record.status = "failed"
+                record.error = str(exc)
+                record.finished_at = datetime.now(UTC)
+                await session.commit()
+        logger.exception("Audit export job %s failed", job_id)
 
 
-def start_audit_export_job(org_id: UUID, filters: dict[str, object], format: str) -> AuditExportJob:
-    job_id = str(uuid.uuid4())
-    job = AuditExportJob(job_id=job_id, format=format)
-    _EXPORT_JOBS[job_id] = job
-    asyncio.create_task(_run_export_job(job_id, org_id, filters, format))
-    return job
+async def start_audit_export_job(
+    org_id: UUID, filters: dict[str, object], format: str
+) -> AuditExportJob:
+    """Create a durable export-job row and schedule the background run."""
+    job_id = uuid.uuid4()
+    async with async_session_factory() as session:
+        record = AuditExportJobRecord(
+            id=job_id,
+            org_id=org_id,
+            status="pending",
+            format=format,
+            filters=filters,
+        )
+        session.add(record)
+        await session.commit()
+
+    asyncio.create_task(_run_export_job(str(job_id), org_id, filters, format))
+    return AuditExportJob(job_id=str(job_id), format=format, status="pending")
 
 
-def get_audit_export_job(job_id: str) -> AuditExportJob | None:
-    return _EXPORT_JOBS.get(job_id)
+async def get_audit_export_job(job_id: str, org_id: UUID) -> AuditExportJob | None:
+    try:
+        job_uuid = UUID(job_id)
+    except ValueError:
+        return None
+    async with async_session_factory() as session:
+        record = await session.get(AuditExportJobRecord, job_uuid)
+        if record is None or record.org_id != org_id:
+            return None
+        return _record_to_job(record)
+
+
+async def resume_pending_audit_exports() -> int:
+    """W3.5 — re-schedule pending export jobs that were interrupted by a restart.
+
+    Returns the number of jobs resumed. Safe to call multiple times.
+    """
+    resumed = 0
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(AuditExportJobRecord).where(AuditExportJobRecord.status == "pending")
+        )
+        for record in result.scalars():
+            asyncio.create_task(
+                _run_export_job(
+                    str(record.id),
+                    record.org_id,
+                    dict(record.filters or {}),
+                    record.format,
+                )
+            )
+            resumed += 1
+    if resumed:
+        logger.info("Resumed %d pending audit export job(s) after restart.", resumed)
+    return resumed

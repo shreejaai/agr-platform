@@ -66,4 +66,6 @@ $PSQL -f /migrations/030_no_policy_action.sql
 echo "  030 done"
 $PSQL -f /migrations/031_approval_reminder_audit.sql
 echo "  031 done"
+$PSQL -f /migrations/032_audit_export_jobs.sql
+echo "  032 done"
 echo "All migrations complete."
