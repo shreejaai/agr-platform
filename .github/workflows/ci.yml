@@ -249,13 +249,12 @@ jobs:
 
   # ── PostgreSQL integration tests ──────────────────────────────────────────────
   # Runs against a real PostgreSQL 16 instance with all migrations applied.
-  # Marked continue-on-error so a flaky PG environment does not block publish,
-  # but failures are still reported and visible in PR checks.
+  # W5.1 — blocking: RLS / JSONB / partitioning / constraint regressions fail
+  # the merge rather than being silently tolerated.
   test-postgres:
     name: PostgreSQL integration tests
     runs-on: ubuntu-latest
     needs: [secret-scan]
-    continue-on-error: true
     services:
       postgres-test:
         image: postgres:16
