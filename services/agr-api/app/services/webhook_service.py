@@ -67,6 +67,7 @@ def build_signature_headers(
     timestamp: int,
     body: str,
     event: str,
+    delivery_id: uuid.UUID | str | None = None,
 ) -> dict[str, str]:
     primary_sig = _sign_payload(str(webhook.secret), timestamp, body)
     headers = {
@@ -75,6 +76,10 @@ def build_signature_headers(
         "X-AGR-Signature-1": f"t={timestamp},v1={primary_sig}",
         "X-AGR-Event": event,
     }
+    if delivery_id is not None:
+        # W3.6: per-delivery nonce so receivers can detect replays
+        # (combine with the X-AGR-Signature timestamp window for safety).
+        headers["X-AGR-Webhook-Id"] = str(delivery_id)
     if _rotation_active(webhook):
         rotating_sig = _sign_payload(str(webhook.rotating_secret), timestamp, body)
         headers["X-AGR-Signature-2"] = f"t={timestamp},v1={rotating_sig}"
@@ -162,10 +167,13 @@ async def fire_approval_webhook(
 
             async with httpx.AsyncClient(timeout=_webhook_timeout()) as client:
                 for wh in matching:
-                    headers = build_signature_headers(wh, timestamp, body, event)
+                    delivery_id = uuid.uuid4()
+                    headers = build_signature_headers(
+                        wh, timestamp, body, event, delivery_id=delivery_id
+                    )
 
                     delivery = WebhookDelivery(
-                        id=uuid.uuid4(),
+                        id=delivery_id,
                         webhook_id=wh.id,
                         org_id=org_id,
                         event=event,
@@ -217,10 +225,13 @@ async def retry_webhook_delivery(
 
     body = json.dumps(orig_delivery.payload, default=str)
     timestamp = int(time.time())
-    headers = build_signature_headers(wh, timestamp, body, orig_delivery.event)
+    new_delivery_id = uuid.uuid4()
+    headers = build_signature_headers(
+        wh, timestamp, body, orig_delivery.event, delivery_id=new_delivery_id
+    )
 
     new_delivery = WebhookDelivery(
-        id=uuid.uuid4(),
+        id=new_delivery_id,
         webhook_id=wh.id,
         org_id=org_id,
         event=orig_delivery.event,
