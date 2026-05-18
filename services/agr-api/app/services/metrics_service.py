@@ -80,6 +80,12 @@ cedar_pool_inflight = Gauge(
     registry=_registry,
 )
 
+cedar_pool_size = Gauge(
+    "agr_cedar_pool_size",
+    "Configured size of the Cedar CLI process pool (workers)",
+    registry=_registry,
+)
+
 approval_workflow_fallback_total = Counter(
     "agr_approval_workflow_fallback_total",
     "Approval rows created with a Temporal-fallback mode",

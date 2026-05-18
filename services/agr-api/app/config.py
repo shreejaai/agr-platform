@@ -3,6 +3,13 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://agr:password@localhost:5432/agr_dev"
+    # SQLAlchemy async engine pool sizing (W4.3). Tune per replica.
+    # When fronted by PgBouncer in transaction-pooling mode, set
+    # `db_pool_size` low (e.g. 5-10) — PgBouncer is the real pool.
+    db_pool_size: int = 20
+    db_max_overflow: int = 10
+    # Recycle connections every 30 min to avoid stale TCP / PgBouncer drops.
+    db_pool_recycle: int = 1800
     redis_url: str = "redis://localhost:6379"
     secret_key: str = "dev-secret-key-not-for-production"
     env: str = "development"
@@ -64,7 +71,8 @@ class Settings(BaseSettings):
     # the evaluation path is never blocked by a slow/hung plugin.
     compliance_plugin_timeout_ms: int = 250
 
-    cedar_pool_size: int = 4
+    # W4.4 — `0` means autosize to max(4, os.cpu_count()) at boot.
+    cedar_pool_size: int = 0
     cedar_require_cli: bool = False
     rate_limit_per_second: int = 50
     rate_limit_burst: int = 100

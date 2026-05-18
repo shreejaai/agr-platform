@@ -118,6 +118,29 @@ See [`docs/tenant_isolation_audit.md`](tenant_isolation_audit.md) for full audit
 | `copilot_conversations` | AI assistant history | `app.current_org_id` |
 | `copilot_messages` | Conversation messages | (via FK) |
 
+### Connection Pooling (W4.3)
+
+The API uses SQLAlchemy's async engine pool. Tunables (`app/config.py`):
+
+| Setting | Env var | Default | Purpose |
+|---------|---------|---------|---------|
+| `db_pool_size` | `DB_POOL_SIZE` | 20 | Persistent connections per replica |
+| `db_max_overflow` | `DB_MAX_OVERFLOW` | 10 | Burst headroom above `pool_size` |
+| `db_pool_recycle` | `DB_POOL_RECYCLE` | 1800 | Recycle each conn after N seconds |
+
+**PgBouncer (recommended for >2 replicas):** front Postgres with PgBouncer in
+`pool_mode = transaction`. Then size the SQLAlchemy pool **small** (e.g.
+`DB_POOL_SIZE=5`, `DB_MAX_OVERFLOW=5`) — PgBouncer is the real pool and
+Postgres only sees its bounded set of server connections.
+
+The RLS setup in `database.py` uses `SELECT set_config(..., true)` (the `true`
+arg = transaction-local), which is compatible with PgBouncer transaction
+pooling: each transaction re-establishes `app.current_org_id` before any
+query, so a recycled backend connection cannot leak org context.
+
+Do **not** use PgBouncer `pool_mode = session` with the async engine — it
+defeats pool sharing and serializes every request behind a single backend.
+
 ---
 
 ## Policy Lifecycle

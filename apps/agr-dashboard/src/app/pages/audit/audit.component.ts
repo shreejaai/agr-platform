@@ -335,12 +335,12 @@ const DECISIONS = ['ALLOW', 'DENY', 'APPROVAL_REQUIRED'];
           <div class="flex gap-2">
             <button
               (click)="prevPage()"
-              [disabled]="offset() === 0"
+              [disabled]="cursorStack().length === 0"
               class="px-2 py-1 rounded hover:bg-slate-800 disabled:opacity-40 transition-colors"
             >← Prev</button>
             <button
               (click)="nextPage()"
-              [disabled]="items().length < pageSize"
+              [disabled]="!nextCursor()"
               class="px-2 py-1 rounded hover:bg-slate-800 disabled:opacity-40 transition-colors"
             >Next →</button>
           </div>
@@ -366,7 +366,12 @@ export class AuditComponent implements OnInit {
   readonly loading = signal(true);
   readonly verifying = signal(false);
   readonly exporting = signal(false);
-  readonly offset = signal(0);
+  /** Cursor used for the *current* page (null = first page). */
+  readonly activeCursor = signal<string | null>(null);
+  /** Cursors of pages we've navigated forward through, for Prev. */
+  readonly cursorStack = signal<(string | null)[]>([]);
+  /** Cursor for the next page, from `X-AGR-Next-Cursor`; null if no more. */
+  readonly nextCursor = signal<string | null>(null);
   readonly items = signal<AuditEvent[]>([]);
   readonly chainResult = signal<AuditVerifyResult | null>(null);
   readonly exportError = signal('');
@@ -375,7 +380,7 @@ export class AuditComponent implements OnInit {
   /** ID of the row showing raw JSON payload. */
   readonly showRawId = signal<string | null>(null);
 
-  readonly currentPage = () => Math.floor(this.offset() / this.pageSize);
+  readonly currentPage = () => this.cursorStack().length;
 
   ngOnInit(): void {
     this.load();
@@ -393,7 +398,9 @@ export class AuditComponent implements OnInit {
   }
 
   resetAndLoad(): void {
-    this.offset.set(0);
+    this.activeCursor.set(null);
+    this.cursorStack.set([]);
+    this.nextCursor.set(null);
     this.expandedId.set(null);
     this.showRawId.set(null);
     this.load();
@@ -401,7 +408,7 @@ export class AuditComponent implements OnInit {
 
   load(): void {
     this.loading.set(true);
-    this.svc.search({
+    this.svc.searchWithCursor({
       event_type: (this.filterType as AuditEvent['event_type']) || undefined,
       agent_id: this.filterAgent.trim() || undefined,
       action: this.filterAction.trim() || undefined,
@@ -409,10 +416,11 @@ export class AuditComponent implements OnInit {
       start_date: this.filterStartDate || undefined,
       end_date: this.filterEndDate || undefined,
       limit: this.pageSize,
-      offset: this.offset(),
+      after: this.activeCursor(),
     }).subscribe({
-      next: (res) => {
-        this.items.set(res);
+      next: (page) => {
+        this.items.set(page.events);
+        this.nextCursor.set(page.nextCursor);
         this.loading.set(false);
       },
       error: () => this.loading.set(false),
@@ -420,14 +428,21 @@ export class AuditComponent implements OnInit {
   }
 
   nextPage(): void {
-    this.offset.update((o) => o + this.pageSize);
+    const next = this.nextCursor();
+    if (!next) return;
+    this.cursorStack.update((s) => [...s, this.activeCursor()]);
+    this.activeCursor.set(next);
     this.expandedId.set(null);
     this.showRawId.set(null);
     this.load();
   }
 
   prevPage(): void {
-    this.offset.update((o) => Math.max(0, o - this.pageSize));
+    const stack = this.cursorStack();
+    if (stack.length === 0) return;
+    const prev = stack[stack.length - 1];
+    this.cursorStack.set(stack.slice(0, -1));
+    this.activeCursor.set(prev);
     this.expandedId.set(null);
     this.showRawId.set(null);
     this.load();
