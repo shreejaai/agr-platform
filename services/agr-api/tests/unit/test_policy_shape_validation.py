@@ -14,9 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from app.services.cedar_service import validate_policy_shape
-
 
 VALID_RULES = [
     'permit(principal, action == Action::"deploy", resource);',
@@ -59,20 +57,14 @@ def test_syntax_error_passed_through() -> None:
 
 
 def test_has_construct_emits_warning_but_passes() -> None:
-    rule = (
-        'permit(principal, action == Action::"read", resource) '
-        "when { context has region };"
-    )
+    rule = 'permit(principal, action == Action::"read", resource) ' "when { context has region };"
     result = validate_policy_shape(rule)
     assert result.valid is True
     assert any("has" in w for w in result.warnings)
 
 
 def test_entity_set_in_emits_warning_but_passes() -> None:
-    rule = (
-        'permit(principal in [Agent::"a", Agent::"b"], '
-        'action == Action::"read", resource);'
-    )
+    rule = 'permit(principal in [Agent::"a", Agent::"b"], ' 'action == Action::"read", resource);'
     result = validate_policy_shape(rule)
     assert result.valid is True
     assert any("in [...]" in w or "entity-set" in w for w in result.warnings)
@@ -96,10 +88,6 @@ def test_all_shipped_policy_packs_validate_clean() -> None:
                 continue
             result = validate_policy_shape(rule)
             if not result.valid:
-                failures.append(
-                    f"{pack_file.name} :: {policy.get('name', '?')} :: {result.error}"
-                )
+                failures.append(f"{pack_file.name} :: {policy.get('name', '?')} :: {result.error}")
 
-    assert not failures, "Shipped policy packs failed shape validation:\n" + "\n".join(
-        failures
-    )
+    assert not failures, "Shipped policy packs failed shape validation:\n" + "\n".join(failures)

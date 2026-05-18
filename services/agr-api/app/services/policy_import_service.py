@@ -158,9 +158,7 @@ async def import_policies(
                 raise ValueError(f"Invalid Cedar syntax: {syntax.error}")
             shape = validate_policy_shape(item.cedar_rule)
             if not shape.valid:
-                raise ValueError(
-                    f"{shape.error} hint={shape.hint} doc_url={shape.doc_url}"
-                )
+                raise ValueError(f"{shape.error} hint={shape.hint} doc_url={shape.doc_url}")
 
             if req.dry_run:
                 status = "updated" if existing else "created"

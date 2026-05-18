@@ -1,5 +1,4 @@
 import pytest
-
 from app.config import Settings
 
 
@@ -131,4 +130,3 @@ def test_max_request_body_bytes_range_enforced() -> None:
     settings = _prod_settings(max_request_body_bytes=50 * 1024 * 1024)
     with pytest.raises(RuntimeError, match="MAX_REQUEST_BODY_BYTES"):
         settings.validate_production_settings()
-

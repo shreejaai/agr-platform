@@ -1,7 +1,6 @@
 """W1.1 — Cedar require-CLI startup behavior."""
 
 import pytest
-
 from app.config import Settings
 
 

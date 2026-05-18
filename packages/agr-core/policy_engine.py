@@ -65,7 +65,6 @@ class PolicyShapeResult:
     warnings: list[str] = field(default_factory=list)
 
 
-
 @dataclass
 class EvaluationResult:
     decision: str  # "ALLOW" | "DENY" | "APPROVAL_REQUIRED"
@@ -1077,9 +1076,7 @@ def validate_cedar_rule(rule: str) -> ValidationResult:
     return _heuristic_validate_cedar_rule(stripped)
 
 
-_DOC_URL_POLICY_SHAPE = (
-    "https://docs.agr.dev/policies/authoring#shape-validation"
-)
+_DOC_URL_POLICY_SHAPE = "https://docs.agr.dev/policies/authoring#shape-validation"
 
 
 def validate_policy_shape(cedar_rule: str) -> PolicyShapeResult:
@@ -1122,24 +1119,23 @@ def validate_policy_shape(cedar_rule: str) -> PolicyShapeResult:
         unless_match = re.search(r"unless\s*\{([^}]+)\}", stripped, re.DOTALL)
         if unless_match:
             unless_body = unless_match.group(1)
-            if "approval_status" in unless_body:
+            if "approval_status" in unless_body and not re.search(
+                r'approval_status\s*==\s*"approved"', unless_body
+            ):
                 # If they used approval_status, they must compare it to "approved"
                 # to actually unlock the forbid via the approval workflow.
-                if not re.search(
-                    r'approval_status\s*==\s*"approved"', unless_body
-                ):
-                    return PolicyShapeResult(
-                        valid=False,
-                        error=(
-                            "Approval-pattern policy references approval_status "
-                            "but does not compare it to \"approved\"."
-                        ),
-                        hint=(
-                            "Use `unless { context.approval_status == \"approved\" }` "
-                            "so the approval workflow can unlock this forbid."
-                        ),
-                        doc_url=_DOC_URL_POLICY_SHAPE,
-                    )
+                return PolicyShapeResult(
+                    valid=False,
+                    error=(
+                        "Approval-pattern policy references approval_status "
+                        'but does not compare it to "approved".'
+                    ),
+                    hint=(
+                        'Use `unless { context.approval_status == "approved" }` '
+                        "so the approval workflow can unlock this forbid."
+                    ),
+                    doc_url=_DOC_URL_POLICY_SHAPE,
+                )
 
     # --- Fallback-engine warnings (non-blocking) ---
     if re.search(r"\b(context|resource)\s+has\s+\w+", stripped):
@@ -1147,17 +1143,13 @@ def validate_policy_shape(cedar_rule: str) -> PolicyShapeResult:
             "Uses `has` — the Python fallback engine treats this as a presence "
             "check only. Install the Cedar CLI for full semantics."
         )
-    if re.search(r"\.contains\s*\(", stripped) or re.search(
-        r"\.containsAll\s*\(", stripped
-    ):
+    if re.search(r"\.contains\s*\(", stripped) or re.search(r"\.containsAll\s*\(", stripped):
         warnings.append(
             "Uses Cedar set operations (`contains` / `containsAll`) which are "
             "not honored by the Python fallback engine."
         )
     # `in` against an entity set
-    if re.search(
-        r"\b(principal|action|resource)\s+in\s+\[", stripped
-    ):
+    if re.search(r"\b(principal|action|resource)\s+in\s+\[", stripped):
         warnings.append(
             "Uses `in [...]` entity-set membership — only the first entity is "
             "honored by the Python fallback engine."

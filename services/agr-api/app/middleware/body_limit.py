@@ -16,13 +16,16 @@ Strategy:
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.middleware.cors_utils import apply_cors_headers
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 
 def _too_large_response(request: Request, limit: int) -> Response:
@@ -72,7 +75,7 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
         received_bytes = 0
         original_receive = request.receive
 
-        async def counting_receive() -> dict:  # type: ignore[type-arg]
+        async def counting_receive() -> Any:
             nonlocal received_bytes
             message = await original_receive()
             if message.get("type") == "http.request":
@@ -81,7 +84,7 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
                 if received_bytes > limit:
                     # Mark the stream complete so the handler doesn't hang
                     # waiting for further chunks; the response is sent below.
-                    raise _BodyTooLarge(limit)
+                    raise _BodyTooLargeError(limit)
             return message
 
         # Re-bind the wrapped receive onto the request scope so downstream
@@ -90,11 +93,11 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
 
         try:
             return await call_next(request)
-        except _BodyTooLarge as exc:
+        except _BodyTooLargeError as exc:
             return _too_large_response(request, exc.limit)
 
 
-class _BodyTooLarge(Exception):
+class _BodyTooLargeError(Exception):
     def __init__(self, limit: int) -> None:
         super().__init__(f"body exceeded {limit} bytes")
         self.limit = limit

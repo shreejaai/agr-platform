@@ -1,9 +1,8 @@
 """Integration tests for BodySizeLimitMiddleware (W1.5)."""
 
 import pytest
-from httpx import AsyncClient
-
 from app.config import settings
+from httpx import AsyncClient
 
 
 @pytest.mark.asyncio

@@ -1,9 +1,8 @@
 """W1.1 — /health/ready reflects Cedar engine mode when CLI is required."""
 
 import pytest
-from httpx import AsyncClient
-
 from app.config import settings
+from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
