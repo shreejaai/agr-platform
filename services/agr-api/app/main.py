@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from app.config import settings
 from app.database import async_session_factory
 from app.middleware.auth import AuthMiddleware
+from app.middleware.body_limit import BodySizeLimitMiddleware
 from app.middleware.logging_mw import RequestIDFormatter, RequestLoggingMiddleware
 from app.middleware.rate_limiter import RateLimiterMiddleware
 from app.middleware.tracing import configure_tracing
@@ -153,6 +154,14 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     cedar_ready = init_cedar_process_pool(settings.cedar_pool_size)
     cedar_cli_present = is_cedar_cli_available()
     if not cedar_cli_present:
+        # W1.1: when the operator has declared that the CLI is required, treat
+        # its absence as a hard startup failure rather than silently degrading.
+        if settings.cedar_require_cli and not settings.allow_cedar_fallback_in_prod:
+            raise RuntimeError(
+                "CEDAR_REQUIRE_CLI=true but the `cedar` CLI was not found on PATH. "
+                "Install cedar-policy CLI, or set ALLOW_CEDAR_FALLBACK_IN_PROD=true "
+                "to acknowledge the risk and run in Python fallback mode."
+            )
         logger.warning(
             "CEDAR CLI NOT FOUND — evaluation running in DEGRADED MODE (Python regex "
             "fallback). Decisions may differ from Cedar semantics. Install cedar-policy CLI "
@@ -245,6 +254,9 @@ app = FastAPI(
 app.add_middleware(RateLimiterMiddleware)
 app.add_middleware(AuthMiddleware)
 app.add_middleware(VersionNegotiationMiddleware)
+# Body size limit sits just inside CORS so oversized payloads are rejected
+# before auth / rate-limit do any work, while still emitting CORS headers.
+app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,

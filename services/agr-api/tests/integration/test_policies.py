@@ -126,6 +126,32 @@ async def test_create_policy_rejects_invalid_cedar_rule(
 
 
 @pytest.mark.asyncio
+async def test_create_policy_rejects_bad_approval_shape_with_hint(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    """W1.2: approval-pattern policy that doesn't compare to "approved" → 400 with hint."""
+    response = await client.post(
+        "/v1/policies",
+        json={
+            "name": "Broken approval pattern",
+            "level": "org",
+            "cedar_rule": (
+                'forbid(principal, action == Action::"transfer", resource) '
+                'unless { context.approval_status == "ok" };'
+            ),
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["error"] is not None
+    assert detail["hint"] is not None
+    assert "approved" in detail["hint"]
+    assert detail["doc_url"] is not None
+
+
+@pytest.mark.asyncio
 async def test_policy_analytics_infers_legacy_audit_rows_without_policy_id(
     client: AsyncClient,
     auth_headers: dict[str, str],

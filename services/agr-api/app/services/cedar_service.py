@@ -22,6 +22,7 @@ for _p in Path(__file__).resolve().parents:
 sys.path.insert(0, _agr_core or "/packages/agr-core")
 from policy_engine import (  # type: ignore[import-not-found]  # noqa: E402, I001
     EvaluationResult,
+    PolicyShapeResult,
     ValidationResult,
     cedar_cli_available,
     close_cedar_process_pool,
@@ -31,6 +32,7 @@ from policy_engine import (  # type: ignore[import-not-found]  # noqa: E402, I00
     initialize_cedar_process_pool,
     set_cedar_degraded,
     validate_cedar_rule as _validate_cedar_rule,
+    validate_policy_shape as _validate_policy_shape,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,10 @@ def is_cedar_cli_available() -> bool:
 
 def validate_cedar_rule(rule: str) -> ValidationResult:
     return _validate_cedar_rule(rule)
+
+
+def validate_policy_shape(rule: str) -> PolicyShapeResult:
+    return _validate_policy_shape(rule)
 
 
 async def load_active_policies(
