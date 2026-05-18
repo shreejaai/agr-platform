@@ -66,6 +66,28 @@ def _engine_mode(policy_source: str, fallback_used: bool) -> EngineMode:
     return "cedar_cli"
 
 
+# W1.1: rate-limited fallback warning. We don't want every evaluate call to
+# print a WARN line when the CLI is missing — that floods logs. Throttle to one
+# WARN per org per minute.
+_FALLBACK_WARN_TTL = 60.0
+_fallback_warn_last: dict[str, float] = {}
+
+
+def _log_cedar_fallback_used(org_id: str) -> None:
+    import time as _time
+
+    now = _time.monotonic()
+    last = _fallback_warn_last.get(org_id, 0.0)
+    if now - last < _FALLBACK_WARN_TTL:
+        return
+    _fallback_warn_last[org_id] = now
+    logger.warning(
+        "event=cedar_fallback_used org_id=%s — Cedar CLI not available, "
+        "decisions are using the Python regex fallback engine.",
+        org_id,
+    )
+
+
 @router.post(
     "/evaluate",
     response_model=EvaluateResponse,
@@ -91,6 +113,7 @@ async def evaluate(
             )
             response.headers["X-Idempotency-Replayed"] = "true"
             response.headers["X-AGR-Engine"] = replayed_response.engine_mode
+            response.headers["X-AGR-Engine-Mode"] = replayed_response.engine_mode
             return replayed_response
 
     # -------------------------------------------------------------------------
@@ -196,6 +219,7 @@ async def evaluate(
         policy_id = cached.get("policy_id")
         latency_ms = float(cached.get("latency_ms") or 0)  # type: ignore[arg-type]
         response.headers["X-AGR-Engine"] = "cache"
+        response.headers["X-AGR-Engine-Mode"] = "cache"
         if decision == "ALLOW":
             anomaly_detected = await is_new_action(str(org_id), body.agent_id, body.action)
             if anomaly_detected:
@@ -274,7 +298,12 @@ async def evaluate(
             context=body.context,
             no_policy_action=org.no_policy_action,
         )
-    response.headers["X-AGR-Engine"] = _engine_mode(result.policy_source, result.fallback_used)
+    _mode = _engine_mode(result.policy_source, result.fallback_used)
+    response.headers["X-AGR-Engine"] = _mode
+    response.headers["X-AGR-Engine-Mode"] = _mode
+
+    if result.fallback_used:
+        _log_cedar_fallback_used(str(org_id))
 
     if result.fallback_used and settings.cedar_require_cli:
         raise HTTPException(

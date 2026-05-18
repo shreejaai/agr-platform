@@ -59,9 +59,20 @@ async def health_ready() -> Response:
             # Redis down is degraded but not fatal (policy eval has DB fallback)
             checks["redis"] = f"degraded: {exc}"
 
-    # --- Cedar CLI (advisory) ---
+    # --- Cedar CLI ---
+    # W1.1: when the operator has declared the CLI a hard requirement, treat
+    # its absence as a readiness failure (Kubernetes / load balancers will then
+    # stop routing traffic to this pod). Otherwise it's purely advisory.
+    from app.config import settings as _settings
+
     cedar_path = shutil.which("cedar")
-    checks["cedar_cli"] = "available" if cedar_path else "not_found (python_fallback_active)"
+    if cedar_path:
+        checks["cedar_cli"] = "available"
+    else:
+        checks["cedar_cli"] = "not_found (python_fallback_active)"
+        if _settings.cedar_require_cli and not _settings.allow_cedar_fallback_in_prod:
+            healthy = False
+            checks["cedar_cli"] = "not_found (CEDAR_REQUIRE_CLI=true)"
 
     return Response(
         content=json.dumps({"status": "ok" if healthy else "degraded", "checks": checks}),
