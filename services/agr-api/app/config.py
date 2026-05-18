@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # max_sla_hours caps any caller-supplied SLA to prevent unbounded pending rows.
     default_sla_hours: int = 48
     max_sla_hours: int = 168  # 7 days
+    # Hours added to expires_at when an approval is escalated. The new expiry
+    # is clamped to created_at + max_sla_hours so escalation cannot extend
+    # an approval beyond the absolute SLA ceiling.
+    escalation_extension_hours: int = 24
 
     # Webhook delivery — configurable timeout per attempt (seconds)
     webhook_timeout: float = 10.0
