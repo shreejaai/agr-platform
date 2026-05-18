@@ -23,7 +23,7 @@ import sys
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,26 @@ _cedar_pool_lock = threading.Lock()
 class ValidationResult:
     valid: bool
     error: str | None = None
+
+
+@dataclass
+class PolicyShapeResult:
+    """Result of validate_policy_shape — richer than ValidationResult.
+
+    valid     : True if the rule is safe to persist.
+    error     : Human-readable description of the first hard error, if any.
+    hint      : Actionable suggestion for the author.
+    doc_url   : Pointer to the relevant docs section.
+    warnings  : Non-blocking issues (e.g. constructs only fully supported by
+                the Cedar CLI, which the Python fallback engine cannot honor).
+    """
+
+    valid: bool
+    error: str | None = None
+    hint: str | None = None
+    doc_url: str | None = None
+    warnings: list[str] = field(default_factory=list)
+
 
 
 @dataclass
@@ -1055,6 +1075,95 @@ def validate_cedar_rule(rule: str) -> ValidationResult:
         return ValidationResult(valid=False, error=error)
 
     return _heuristic_validate_cedar_rule(stripped)
+
+
+_DOC_URL_POLICY_SHAPE = (
+    "https://docs.agr.dev/policies/authoring#shape-validation"
+)
+
+
+def validate_policy_shape(cedar_rule: str) -> PolicyShapeResult:
+    """Higher-level policy shape validation.
+
+    Runs `validate_cedar_rule` first (syntax). On top of that:
+
+      1. If the policy uses the approval-required pattern
+         (`forbid(...) unless { ... approval_status ... }`), the unless block
+         MUST reference ``approval_status`` and compare it against
+         ``"approved"``. A common authoring mistake is to write
+         ``approval_status == "ok"`` which silently never matches anything
+         the API knows about.
+
+      2. Emit non-blocking warnings when the rule uses Cedar constructs that
+         the in-process Python fallback engine cannot fully honor (e.g.
+         ``has``, set operations, ``in`` against entity sets). These still
+         persist successfully but the operator should be aware that decisions
+         may differ in degraded mode.
+
+    Returns:
+        PolicyShapeResult — when ``valid`` is False the caller MUST surface
+        ``error``, ``hint`` and ``doc_url`` in its 4xx response.
+    """
+    base = validate_cedar_rule(cedar_rule)
+    if not base.valid:
+        return PolicyShapeResult(
+            valid=False,
+            error=base.error,
+            hint="Fix the Cedar syntax error above and resubmit.",
+            doc_url=_DOC_URL_POLICY_SHAPE,
+        )
+
+    warnings: list[str] = []
+    stripped = cedar_rule.strip()
+    lower = stripped.lower()
+
+    # --- Approval pattern correctness ---
+    if "forbid(" in lower and "unless" in lower:
+        unless_match = re.search(r"unless\s*\{([^}]+)\}", stripped, re.DOTALL)
+        if unless_match:
+            unless_body = unless_match.group(1)
+            if "approval_status" in unless_body:
+                # If they used approval_status, they must compare it to "approved"
+                # to actually unlock the forbid via the approval workflow.
+                if not re.search(
+                    r'approval_status\s*==\s*"approved"', unless_body
+                ):
+                    return PolicyShapeResult(
+                        valid=False,
+                        error=(
+                            "Approval-pattern policy references approval_status "
+                            "but does not compare it to \"approved\"."
+                        ),
+                        hint=(
+                            "Use `unless { context.approval_status == \"approved\" }` "
+                            "so the approval workflow can unlock this forbid."
+                        ),
+                        doc_url=_DOC_URL_POLICY_SHAPE,
+                    )
+
+    # --- Fallback-engine warnings (non-blocking) ---
+    if re.search(r"\b(context|resource)\s+has\s+\w+", stripped):
+        warnings.append(
+            "Uses `has` — the Python fallback engine treats this as a presence "
+            "check only. Install the Cedar CLI for full semantics."
+        )
+    if re.search(r"\.contains\s*\(", stripped) or re.search(
+        r"\.containsAll\s*\(", stripped
+    ):
+        warnings.append(
+            "Uses Cedar set operations (`contains` / `containsAll`) which are "
+            "not honored by the Python fallback engine."
+        )
+    # `in` against an entity set
+    if re.search(
+        r"\b(principal|action|resource)\s+in\s+\[", stripped
+    ):
+        warnings.append(
+            "Uses `in [...]` entity-set membership — only the first entity is "
+            "honored by the Python fallback engine."
+        )
+
+    return PolicyShapeResult(valid=True, warnings=warnings)
 
 
 def _cedar_worker_main(cedar_binary: str) -> int:

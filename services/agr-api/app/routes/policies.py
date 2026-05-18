@@ -40,6 +40,7 @@ from app.services.cedar_service import (
     evaluate_request,
     infer_policy_match,
     validate_cedar_rule,
+    validate_policy_shape,
 )
 from app.services.compliance_service import ComplianceContext, get_registry
 from app.services.policy_conflict_service import detect_conflicts
@@ -384,6 +385,16 @@ async def create_policy(
     validation = validate_cedar_rule(body.cedar_rule)
     if not validation.valid:
         raise HTTPException(status_code=422, detail=f"Invalid Cedar rule: {validation.error}")
+    shape = validate_policy_shape(body.cedar_rule)
+    if not shape.valid:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": shape.error,
+                "hint": shape.hint,
+                "doc_url": shape.doc_url,
+            },
+        )
     conflicts = await _check_conflicts(session, org_id, body.cedar_rule, body.name)
     is_active = _state_to_active(body.state)
     policy = Policy(
@@ -736,6 +747,22 @@ async def update_policy(
     new_name = body.name if body.name is not None else policy.name
     conflicts: list[str] | None = None
     if body.cedar_rule is not None and body.cedar_rule != policy.cedar_rule:
+        validation = validate_cedar_rule(body.cedar_rule)
+        if not validation.valid:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid Cedar rule: {validation.error}",
+            )
+        shape = validate_policy_shape(body.cedar_rule)
+        if not shape.valid:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": shape.error,
+                    "hint": shape.hint,
+                    "doc_url": shape.doc_url,
+                },
+            )
         conflicts = (
             await _check_conflicts(session, org_id, new_rule, new_name, exclude_policy_id=policy_id)
             or None

@@ -147,6 +147,21 @@ async def import_policies(
                 skipped += 1
                 continue
 
+            # W1.2: shape-validate every imported policy before persisting.
+            from app.services.cedar_service import (
+                validate_cedar_rule,
+                validate_policy_shape,
+            )
+
+            syntax = validate_cedar_rule(item.cedar_rule)
+            if not syntax.valid:
+                raise ValueError(f"Invalid Cedar syntax: {syntax.error}")
+            shape = validate_policy_shape(item.cedar_rule)
+            if not shape.valid:
+                raise ValueError(
+                    f"{shape.error} hint={shape.hint} doc_url={shape.doc_url}"
+                )
+
             if req.dry_run:
                 status = "updated" if existing else "created"
                 results.append(PolicyImportResult(name=item.name, status=status))
