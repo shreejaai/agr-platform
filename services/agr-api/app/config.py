@@ -71,7 +71,8 @@ class Settings(BaseSettings):
     # the evaluation path is never blocked by a slow/hung plugin.
     compliance_plugin_timeout_ms: int = 250
 
-    cedar_pool_size: int = 4
+    # W4.4 — `0` means autosize to max(4, os.cpu_count()) at boot.
+    cedar_pool_size: int = 0
     cedar_require_cli: bool = False
     rate_limit_per_second: int = 50
     rate_limit_burst: int = 100

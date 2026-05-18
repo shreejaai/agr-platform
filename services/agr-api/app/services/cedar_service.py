@@ -2,6 +2,7 @@
 
 import contextlib
 import logging
+import os
 from uuid import UUID
 
 from agr_core.policy_engine import (
@@ -33,9 +34,37 @@ from app.models import Policy
 logger = logging.getLogger(__name__)
 
 
+def _autosize_cedar_pool(requested: int) -> int:
+    """Return the effective Cedar pool size.
+
+    ``0`` (or any non-positive) means autosize to ``max(4, os.cpu_count())``
+    so we have one worker per core but never fewer than 4.
+    """
+    if requested > 0:
+        return requested
+    return max(4, os.cpu_count() or 4)
+
+
 def init_cedar_process_pool(pool_size: int) -> bool:
-    configure_cedar_process_pool(pool_size)
-    return initialize_cedar_process_pool(pool_size) is not None
+    effective = _autosize_cedar_pool(pool_size)
+    configure_cedar_process_pool(effective)
+    pool = initialize_cedar_process_pool(effective)
+    if pool is None:
+        return False
+    # W4.4 — publish pool size gauge + prewarm by issuing one trivial
+    # authorize call so the first real /v1/evaluate doesn't pay subprocess
+    # spawn latency.
+    try:
+        from app.services.metrics_service import cedar_pool_size as _pool_size_gauge
+
+        _pool_size_gauge.set(effective)
+    except Exception:
+        logger.debug("cedar pool size gauge unavailable", exc_info=True)
+    try:
+        evaluate_policies([], "__prewarm__", "__noop__", "__noop__", {})
+    except Exception:
+        logger.debug("cedar pool prewarm failed (non-fatal)", exc_info=True)
+    return True
 
 
 def shutdown_cedar_process_pool() -> None:
