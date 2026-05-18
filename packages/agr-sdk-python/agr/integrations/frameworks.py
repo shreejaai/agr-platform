@@ -5,14 +5,22 @@ from __future__ import annotations
 import functools
 import logging
 from collections.abc import Awaitable, Callable
-from typing import ParamSpec, TypeVar, cast
+from typing import Literal, ParamSpec, TypeVar, cast
 
-from agr.client import AGRClient, AGRError, AsyncAGRClient, EvaluationResult
+from agr.client import (
+    AGRClient,
+    AGRError,
+    AsyncAGRClient,
+    EvaluationResult,
+    PendingApprovalResult,
+)
 
 logger = logging.getLogger(__name__)
 
 P = ParamSpec("P")
 R = TypeVar("R")
+
+ApprovalMode = Literal["block", "non_blocking"]
 
 ActionResolver = str | Callable[..., str] | None
 ResourceResolver = str | Callable[..., str | None] | None
@@ -94,8 +102,16 @@ class AGRPolicyEnforcer:
         context: dict[str, object] | None = None,
         approval_timeout: float = 3600.0,
         poll_interval: float = 2.0,
-    ) -> EvaluationResult:
-        """Run policy enforcement before tool execution."""
+        mode: ApprovalMode = "block",
+    ) -> EvaluationResult | PendingApprovalResult:
+        """Run policy enforcement before tool execution.
+
+        ``mode='block'`` (default, backwards-compatible): blocks the calling
+        thread until the approval is decided, then raises on rejection.
+        ``mode='non_blocking'``: returns a :class:`PendingApprovalResult` so
+        the caller can hand the approval_id off to whatever orchestration
+        layer it controls (queue, durable workflow, UI hand-off, ...).
+        """
         result = self.evaluate(action=action, resource=resource, context=context)
 
         if result.denied:
@@ -105,6 +121,14 @@ class AGRPolicyEnforcer:
             if not result.approval_id:
                 raise AGRError(
                     f"Action '{action}' requires approval, but the API returned no approval_id."
+                )
+            if mode == "non_blocking":
+                return PendingApprovalResult(
+                    approval_id=result.approval_id,
+                    action=action,
+                    resource=resource or action,
+                    reason=result.reason,
+                    eval_id=result.eval_id,
                 )
             logger.info(
                 "Action '%s' requires approval (id=%s). Waiting...",
@@ -130,22 +154,35 @@ class AGRPolicyEnforcer:
         context: ContextResolver = None,
         approval_timeout: float = 3600.0,
         poll_interval: float = 2.0,
-    ) -> Callable[[Callable[P, R]], Callable[P, R]] | Callable[P, R]:
-        """Wrap a callable so AGR policies are enforced before execution."""
+        mode: ApprovalMode = "block",
+    ) -> (
+        Callable[[Callable[P, R]], Callable[P, R | PendingApprovalResult]]
+        | Callable[P, R | PendingApprovalResult]
+    ):
+        """Wrap a callable so AGR policies are enforced before execution.
 
-        def decorator(inner: Callable[P, R]) -> Callable[P, R]:
+        With ``mode='non_blocking'`` the wrapped function returns a
+        :class:`PendingApprovalResult` instead of invoking the inner
+        callable when AGR requires approval; the caller is responsible
+        for re-invoking after :meth:`AGRClient.await_decision` resolves.
+        """
+
+        def decorator(inner: Callable[P, R]) -> Callable[P, R | PendingApprovalResult]:
             @functools.wraps(inner)
-            def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
+            def wrapped(*args: P.args, **kwargs: P.kwargs) -> R | PendingApprovalResult:
                 resolved_action = _resolve_action(action, inner.__name__, *args, **kwargs)
                 resolved_resource = _resolve_resource(resource, resolved_action, *args, **kwargs)
                 resolved_context = _resolve_context(self.default_context, context, *args, **kwargs)
-                self.before_tool(
+                outcome = self.before_tool(
                     action=resolved_action,
                     resource=resolved_resource,
                     context=resolved_context,
                     approval_timeout=approval_timeout,
                     poll_interval=poll_interval,
+                    mode=mode,
                 )
+                if isinstance(outcome, PendingApprovalResult):
+                    return outcome
                 return inner(*args, **kwargs)
 
             return wrapped
@@ -195,7 +232,8 @@ class AsyncAGRPolicyEnforcer:
         context: dict[str, object] | None = None,
         approval_timeout: float = 3600.0,
         poll_interval: float = 2.0,
-    ) -> EvaluationResult:
+        mode: ApprovalMode = "block",
+    ) -> EvaluationResult | PendingApprovalResult:
         """Run policy enforcement before async tool execution."""
         result = await self.evaluate(action=action, resource=resource, context=context)
 
@@ -206,6 +244,14 @@ class AsyncAGRPolicyEnforcer:
             if not result.approval_id:
                 raise AGRError(
                     f"Action '{action}' requires approval, but the API returned no approval_id."
+                )
+            if mode == "non_blocking":
+                return PendingApprovalResult(
+                    approval_id=result.approval_id,
+                    action=action,
+                    resource=resource or action,
+                    reason=result.reason,
+                    eval_id=result.eval_id,
                 )
             logger.info(
                 "Action '%s' requires approval (id=%s). Waiting...",
@@ -231,27 +277,40 @@ class AsyncAGRPolicyEnforcer:
         context: ContextResolver = None,
         approval_timeout: float = 3600.0,
         poll_interval: float = 2.0,
+        mode: ApprovalMode = "block",
     ) -> (
-        Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]] | Callable[P, Awaitable[R]]
+        Callable[
+            [Callable[P, Awaitable[R]]],
+            Callable[P, Awaitable[R | PendingApprovalResult]],
+        ]
+        | Callable[P, Awaitable[R | PendingApprovalResult]]
     ):
         """Wrap an async callable so AGR policies are enforced before execution."""
 
-        def decorator(inner: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+        def decorator(
+            inner: Callable[P, Awaitable[R]],
+        ) -> Callable[P, Awaitable[R | PendingApprovalResult]]:
             @functools.wraps(inner)
-            async def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
+            async def wrapped(*args: P.args, **kwargs: P.kwargs) -> R | PendingApprovalResult:
                 resolved_action = _resolve_action(action, inner.__name__, *args, **kwargs)
                 resolved_resource = _resolve_resource(resource, resolved_action, *args, **kwargs)
                 resolved_context = _resolve_context(self.default_context, context, *args, **kwargs)
-                await self.before_tool(
+                outcome = await self.before_tool(
                     action=resolved_action,
                     resource=resolved_resource,
                     context=resolved_context,
                     approval_timeout=approval_timeout,
                     poll_interval=poll_interval,
+                    mode=mode,
                 )
+                if isinstance(outcome, PendingApprovalResult):
+                    return outcome
                 return await inner(*args, **kwargs)
 
-            return cast("Callable[P, Awaitable[R]]", wrapped)
+            return cast(
+                "Callable[P, Awaitable[R | PendingApprovalResult]]",
+                wrapped,
+            )
 
         if func is None:
             return decorator

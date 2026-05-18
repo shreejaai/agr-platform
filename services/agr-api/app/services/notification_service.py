@@ -86,8 +86,12 @@ def verify_decision_token(token: str) -> tuple[str, str, int | None] | None:
     return None
 
 
-async def send_approval_email(approval: ApprovalRequest) -> None:
-    """Send one-click approve/reject email. No-ops if Resend is not configured."""
+async def send_approval_email(approval: ApprovalRequest, *, is_reminder: bool = False) -> None:
+    """Send one-click approve/reject email. No-ops if Resend is not configured.
+
+    When ``is_reminder`` is True, the subject is prefixed with "[AGR Reminder]"
+    to distinguish a follow-up nudge from the initial notification.
+    """
     if not settings.resend_api_key or not approval.approver_email:
         logger.debug(
             "Skipping approval email: resend configured=%s, approver_email=%s",
@@ -111,10 +115,11 @@ async def send_approval_email(approval: ApprovalRequest) -> None:
     safe_action = approval.action.replace("\r", " ").replace("\n", " ")
     safe_resource = approval.resource.replace("\r", " ").replace("\n", " ")
 
+    subject_prefix = "[AGR Reminder]" if is_reminder else "[AGR]"
     payload = {
         "from": "AGR <no-reply@agr.dev>",
         "to": [approval.approver_email],
-        "subject": f"[AGR] Approval required: {safe_action} on {safe_resource}",
+        "subject": f"{subject_prefix} Approval required: {safe_action} on {safe_resource}",
         "html": _build_html(approval, approve_url, reject_url),
     }
 

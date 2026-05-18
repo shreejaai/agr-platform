@@ -92,6 +92,30 @@ class ApprovalResult:
 
 
 @dataclass
+class PendingApprovalResult:
+    """Returned by framework integrations in non-blocking mode when AGR
+    requires human approval before the wrapped tool can run.
+
+    The agent gets back a structured object instead of an exception so it
+    can persist the approval id, surface the dashboard URL to the operator,
+    and resume later via ``AGRClient.await_decision(approval_id)`` once the
+    approval has been actioned.
+    """
+
+    approval_id: str
+    action: str
+    resource: str
+    reason: str | None = None
+    expires_at: str | None = None
+    dashboard_url: str | None = None
+    eval_id: str | None = None
+
+    @property
+    def is_pending(self) -> bool:  # convenience for `if result.is_pending:`
+        return True
+
+
+@dataclass
 class SimulationResult:
     decision: str
     reason: str
@@ -357,6 +381,41 @@ class AGRClient:
                     return True
                 if status == "rejected":
                     return False
+            elif response.status_code >= 400:
+                raise AGRError(
+                    f"AGR API error ({response.status_code}): {response.text}",
+                    status_code=response.status_code,
+                )
+
+            time.sleep(poll_interval)
+
+    def await_decision(
+        self,
+        approval_id: str,
+        poll_interval: float = 2.0,
+        timeout: float = 3600.0,
+    ) -> ApprovalResult:
+        """Poll for an approval until it resolves and return the full
+        ``ApprovalResult``.
+
+        Unlike :meth:`wait_for_approval` (which collapses the answer to a
+        bool), this preserves who decided and when so callers can
+        attribute the action in their own audit log. If the polling
+        deadline is hit before the approver acts, returns
+        ``ApprovalResult(status="expired")`` rather than raising.
+        """
+        start = time.monotonic()
+        while True:
+            if time.monotonic() - start >= timeout:
+                return ApprovalResult(approval_id=approval_id, status="expired")
+
+            response = self._client.get(f"/v1/approvals/{approval_id}")
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, dict):
+                    result = _parse_approval_result(data, approval_id)
+                    if result.status != "pending":
+                        return result
             elif response.status_code >= 400:
                 raise AGRError(
                     f"AGR API error ({response.status_code}): {response.text}",
@@ -679,6 +738,15 @@ class AsyncAGRClient:
                 )
 
             await asyncio.sleep(poll_interval)
+
+    # Public alias — matches the sync client name (W2.1).
+    async def await_decision(
+        self,
+        approval_id: str,
+        poll_interval: float = 2.0,
+        timeout: float = 3600.0,
+    ) -> ApprovalResult:
+        return await self.await_approval(approval_id, poll_interval=poll_interval, timeout=timeout)
 
     async def register_agent(
         self, agent_id: str, metadata: dict[str, object] | None = None

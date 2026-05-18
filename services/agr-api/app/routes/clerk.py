@@ -241,28 +241,33 @@ async def get_api_key_from_clerk_session(
     org = result.scalar_one_or_none()
 
     if org is None:
-        # Org not found — webhook may not have fired yet (common in local dev where
-        # localhost is unreachable from Clerk's servers). Auto-provision the org now
-        # using the verified Clerk user data so the user can proceed immediately.
+        # W2.5: JIT-provision the org for any verified Clerk user. The Clerk
+        # webhook normally creates the row, but in local dev (where Clerk
+        # cannot reach localhost) or if the webhook is temporarily down we
+        # still want the user to be able to sign in. The INSERT is wrapped
+        # in a SAVEPOINT so a unique-constraint race with a parallel request
+        # does not abort the outer transaction — we simply roll the
+        # savepoint back and re-read the winner.
         logger.info("Auto-provisioning org for verified Clerk user %s", user_id)
+        new_org_id = uuid.uuid4()
         try:
-            org = Organization(
-                id=uuid.uuid4(),
-                name=display_name or identity_email or user_id,
-                slug=user_id,
-                plan="developer",
-                api_key="agr_sk_" + secrets.token_hex(24),
-                eval_count=0,
-                eval_limit=100,
-                eval_week_start=datetime.now(UTC),
-            )
-            session.add(org)
-            await session.flush()
-            await seed_default_policies(session, org.id)
+            async with session.begin_nested():
+                org = Organization(
+                    id=new_org_id,
+                    name=display_name or identity_email or user_id,
+                    slug=user_id,
+                    plan="developer",
+                    api_key="agr_sk_" + secrets.token_hex(24),
+                    eval_count=0,
+                    eval_limit=100,
+                    eval_week_start=datetime.now(UTC),
+                )
+                session.add(org)
+                await session.flush()
+                await seed_default_policies(session, org.id)
             logger.info("Auto-provisioned org %s for Clerk user %s", org.id, user_id)
         except IntegrityError:
-            await session.rollback()
-            # Another request raced us — re-fetch the row that was just created
+            # Another request won the race — re-fetch the row it created.
             result = await session.execute(select(Organization).where(Organization.slug == user_id))
             org = result.scalar_one_or_none()
             if org is None:

@@ -21,6 +21,7 @@ _RECONNECT_DELAY_SECONDS = 5
 _MAX_RECONNECT_ATTEMPTS = 12  # ~1 minute of retries before giving up
 
 from app.config import settings  # noqa: E402
+from app.workers.activities import send_approval_reminder  # noqa: E402
 from app.workflows.approval_workflow import ApprovalWorkflow  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -52,6 +53,7 @@ async def main() -> None:
                 client,
                 task_queue=TASK_QUEUE,
                 workflows=[ApprovalWorkflow],
+                activities=[send_approval_reminder],
             )
             await worker.run()
         except Exception as exc:

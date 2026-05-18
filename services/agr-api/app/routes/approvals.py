@@ -3,13 +3,14 @@
 import html as _html
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal, cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_session
 from app.middleware.auth import require_scope
 from app.models import ApprovalRequest, ApprovalStep
@@ -566,6 +567,24 @@ async def escalate_approval(
     approval.workflow_status = "escalated"
     approval.workflow_escalated_at = datetime.now(UTC)
     approval.workflow_last_transition_at = approval.workflow_escalated_at
+
+    # W2.4: extend the SLA window so the new approver has a fresh chance to
+    # respond. New expiry = now + escalation_extension_hours, clamped to the
+    # absolute ceiling (created_at + max_sla_hours) so a long chain of
+    # escalations can never keep an approval open indefinitely.
+    previous_expires_at = approval.expires_at
+    extension = timedelta(hours=settings.escalation_extension_hours)
+    # SQLite returns naive datetimes for tz-aware columns; normalize so the
+    # arithmetic below mixes only tz-aware values.
+    created_at_aware = (
+        approval.created_at
+        if approval.created_at.tzinfo is not None
+        else approval.created_at.replace(tzinfo=UTC)
+    )
+    absolute_cap = created_at_aware + timedelta(hours=settings.max_sla_hours)
+    proposed_expiry = approval.workflow_escalated_at + extension
+    approval.expires_at = min(proposed_expiry, absolute_cap)
+
     await session.flush()
     if approval.temporal_run_id:
         signal_result = await signal_approval_escalation(
@@ -585,7 +604,12 @@ async def escalate_approval(
         resource=approval.resource,
         decision="APPROVAL_REQUIRED",
         approval_id=approval.id,
-        payload={"approver_email": body.approver_email},
+        payload={
+            "approver_email": body.approver_email,
+            "previous_expires_at": previous_expires_at.isoformat(),
+            "new_expires_at": approval.expires_at.isoformat(),
+            "extension_hours": settings.escalation_extension_hours,
+        },
     )
     # H1: send email as background task — don't block the response
     background_tasks.add_task(send_approval_email, approval)

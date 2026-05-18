@@ -152,6 +152,11 @@ class ApprovalRequest(Base):
     workflow_escalated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Migration 031: when the Temporal reminder activity successfully fires.
+    # Acts as a durable idempotency guard against double-send on worker restarts.
+    reminder_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     organization: Mapped["Organization"] = relationship(back_populates="approval_requests")
     steps: Mapped[list["ApprovalStep"]] = relationship(

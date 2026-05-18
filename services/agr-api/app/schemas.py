@@ -53,6 +53,16 @@ class EvaluateRequest(BaseModel):
         max_length=256,
         description="Override approver email for this specific request.",
     )
+    sla_hours: int | None = Field(
+        default=None,
+        ge=1,
+        le=168,
+        description=(
+            "How long (in hours) a resulting approval should remain pending before "
+            "expiring. Defaults to settings.default_sla_hours (48h) when unset; "
+            "capped at settings.max_sla_hours (168h / 7d)."
+        ),
+    )
 
     @field_validator("agent_id", "action", "resource")
     @classmethod
@@ -340,6 +350,10 @@ class ApprovalResponse(BaseModel):
     workflow_escalated_at: datetime | None = Field(
         default=None,
         description="Timestamp of the latest escalation event, if the workflow was escalated.",
+    )
+    reminder_sent_at: datetime | None = Field(
+        default=None,
+        description="Timestamp when the SLA-driven reminder notification was dispatched.",
     )
 
 

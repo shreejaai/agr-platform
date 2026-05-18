@@ -276,8 +276,16 @@ async def test_email_decide_idempotent_on_already_resolved(
 async def test_approval_escalation_updates_workflow_status(
     client: AsyncClient,
     auth_headers: dict[str, str],
+    db_session: AsyncSession,
 ) -> None:
     approval_id = await _trigger_approval(client, auth_headers)
+
+    original = (
+        await db_session.execute(
+            select(ApprovalRequest).where(ApprovalRequest.id == uuid.UUID(approval_id))
+        )
+    ).scalar_one()
+    original_expiry = original.expires_at
 
     response = await client.post(
         f"/v1/approvals/{approval_id}/escalate",
@@ -290,6 +298,74 @@ async def test_approval_escalation_updates_workflow_status(
     assert data["status"] == "pending"
     assert data["workflow_status"] == "escalated"
     assert data["workflow_escalated_at"] is not None
+
+    # W2.4: expires_at should be pushed forward by escalation_extension_hours.
+    from app.config import settings as _settings
+
+    new_expiry = datetime.fromisoformat(data["expires_at"])
+    if new_expiry.tzinfo is None:
+        new_expiry = new_expiry.replace(tzinfo=UTC)
+    original_expiry_aware = (
+        original_expiry
+        if original_expiry.tzinfo is not None
+        else original_expiry.replace(tzinfo=UTC)
+    )
+    assert new_expiry > original_expiry_aware
+    expected_min = datetime.now(UTC) + timedelta(hours=_settings.escalation_extension_hours - 1)
+    assert new_expiry >= expected_min
+
+
+@pytest.mark.asyncio
+async def test_escalation_capped_at_max_sla(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    """Escalation cannot push expires_at past created_at + max_sla_hours."""
+    from app.config import settings as _settings
+
+    approval_id = await _trigger_approval(client, auth_headers)
+
+    # Backdate created_at so the absolute cap is already nearly hit. After
+    # escalation the new expires_at should be clamped to the cap, not
+    # now + escalation_extension_hours.
+    approval = (
+        await db_session.execute(
+            select(ApprovalRequest).where(ApprovalRequest.id == uuid.UUID(approval_id))
+        )
+    ).scalar_one()
+    approval.created_at = datetime.now(UTC) - timedelta(hours=_settings.max_sla_hours - 1)
+    await db_session.commit()
+
+    response = await client.post(
+        f"/v1/approvals/{approval_id}/escalate",
+        json={"approver_email": "escalated@example.com"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+
+    refreshed = (
+        await db_session.execute(
+            select(ApprovalRequest).where(ApprovalRequest.id == uuid.UUID(approval_id))
+        )
+    ).scalar_one()
+    created_at_aware = (
+        refreshed.created_at
+        if refreshed.created_at.tzinfo is not None
+        else refreshed.created_at.replace(tzinfo=UTC)
+    )
+    expires_at_aware = (
+        refreshed.expires_at
+        if refreshed.expires_at.tzinfo is not None
+        else refreshed.expires_at.replace(tzinfo=UTC)
+    )
+    absolute_cap = created_at_aware + timedelta(hours=_settings.max_sla_hours)
+    # Clamp should leave expires_at at-or-just-below the absolute ceiling.
+    assert expires_at_aware <= absolute_cap + timedelta(seconds=1)
+    # And below now + escalation_extension_hours (because the cap is tighter).
+    assert expires_at_aware < datetime.now(UTC) + timedelta(
+        hours=_settings.escalation_extension_hours
+    )
 
 
 @pytest.mark.asyncio
