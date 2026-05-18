@@ -58,6 +58,16 @@ class Settings(BaseSettings):
     otel_endpoint: str = "http://localhost:4317"
     otel_service_name: str = "agr-api"
 
+    # Request body size cap (bytes). Enforced by BodySizeLimitMiddleware.
+    max_request_body_bytes: int = 256 * 1024  # 256 KB
+
+    # Production safety escape hatches. Both default off; setting either to
+    # True opts the operator out of the corresponding hard check in
+    # validate_production_settings(). Used for staged migrations or test envs
+    # that intentionally run in degraded mode.
+    allow_cedar_fallback_in_prod: bool = False
+    allow_db_only_approvals_in_prod: bool = False
+
     # Copilot (LLM-powered policy assistant) — paid plans only
     anthropic_api_key: str = ""
     copilot_model: str = "claude-sonnet-4-20250514"
@@ -74,17 +84,81 @@ class Settings(BaseSettings):
     def cors_allow_credentials(self) -> bool:
         return not self.cors_uses_wildcard
 
+    @property
+    def is_production(self) -> bool:
+        return self.env == "production"
+
     def validate_production_settings(self) -> None:
         """Raise RuntimeError for dangerous defaults that must not reach production.
 
         Called at app startup in main.py lifespan so the process refuses to
-        start rather than silently running with insecure config.
+        start rather than silently running with insecure config. Collects all
+        problems and reports them in a single error so operators can fix the
+        full set in one pass instead of whack-a-mole.
         """
-        if self.env == "production" and "dev-secret-key" in self.secret_key:
+        if not self.is_production:
+            return
+
+        problems: list[str] = []
+
+        if "dev-secret-key" in self.secret_key:
             # S2: a predictable secret_key lets attackers forge approval tokens
-            raise RuntimeError(
+            problems.append(
                 "SECRET_KEY must be changed for production. "
                 'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+            )
+
+        if self.cors_uses_wildcard:
+            problems.append(
+                "CORS_ORIGINS must not be '*' in production. "
+                "Set CORS_ORIGINS to the explicit list of allowed dashboard/app origins."
+            )
+
+        if not self.redis_url.strip():
+            problems.append(
+                "REDIS_URL must be set in production (required for rate limiting, "
+                "idempotency, and the evaluate cache). Run a Redis instance and set "
+                "REDIS_URL=redis://host:6379."
+            )
+
+        if "sqlite" in self.database_url.lower():
+            problems.append(
+                "DATABASE_URL must point at PostgreSQL in production, not SQLite. "
+                "SQLite has no RLS support and is not safe for multi-tenant deployments."
+            )
+
+        if not self.cedar_require_cli and not self.allow_cedar_fallback_in_prod:
+            problems.append(
+                "CEDAR_REQUIRE_CLI must be true in production, or set "
+                "ALLOW_CEDAR_FALLBACK_IN_PROD=true to explicitly run the Python regex "
+                "fallback (NOT recommended — decisions may differ from Cedar semantics)."
+            )
+
+        if self.webhook_timeout > 30:
+            problems.append(
+                f"WEBHOOK_TIMEOUT={self.webhook_timeout}s is too high for production. "
+                "Set WEBHOOK_TIMEOUT to <= 30 to avoid blocking worker threads on "
+                "slow receivers."
+            )
+
+        if not self.temporal_host.strip() and not self.allow_db_only_approvals_in_prod:
+            problems.append(
+                "TEMPORAL_HOST must be set in production, or set "
+                "ALLOW_DB_ONLY_APPROVALS_IN_PROD=true to explicitly accept the "
+                "DB-only fallback (no durable retry, no escalation timers)."
+            )
+
+        if self.max_request_body_bytes <= 0 or self.max_request_body_bytes > 10 * 1024 * 1024:
+            problems.append(
+                f"MAX_REQUEST_BODY_BYTES={self.max_request_body_bytes} is out of range "
+                "(must be 1..10485760). 256 KB is the recommended default."
+            )
+
+        if problems:
+            joined = "\n  - " + "\n  - ".join(problems)
+            raise RuntimeError(
+                "Refusing to start: production configuration has "
+                f"{len(problems)} problem(s):{joined}"
             )
 
 
