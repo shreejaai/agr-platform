@@ -11,6 +11,7 @@ from app.middleware.cors_utils import apply_cors_headers
 from app.services.redis_service import check_rate_limit, get_redis_client
 
 _RATE_LIMITED_PATHS = frozenset({"/v1/evaluate"})
+_REDIS_CLOSED_RETRY_SECONDS = 5
 
 
 class RateLimiterMiddleware(BaseHTTPMiddleware):
@@ -36,6 +37,33 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
             settings.rate_limit_burst,
         )
         limit = settings.rate_limit_per_second
+
+        # W3.3 — when Redis is down, decide based on configured fail mode.
+        if not result.redis_available:
+            fail_mode = (settings.rate_limit_fail_mode or "open").lower()
+            try:
+                from app.services.metrics_service import record_rate_limit_redis_unavailable
+
+                record_rate_limit_redis_unavailable(fail_mode)
+            except Exception:
+                pass
+            import logging
+
+            logging.getLogger(__name__).critical(
+                "Rate limiter: Redis unavailable (org=%s, fail_mode=%s)", org_id, fail_mode
+            )
+            if fail_mode == "closed":
+                return apply_cors_headers(
+                    request,
+                    JSONResponse(
+                        status_code=503,
+                        content={
+                            "error": "rate_limit_unavailable",
+                            "message": ("Rate limiter dependency is unavailable; retry shortly."),
+                        },
+                        headers={"Retry-After": str(_REDIS_CLOSED_RETRY_SECONDS)},
+                    ),
+                )
 
         if not result.allowed:
             retry_after = result.retry_after or 0

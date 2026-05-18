@@ -16,6 +16,7 @@ def _prod_settings(**overrides: object) -> Settings:
         "cedar_require_cli": True,
         "webhook_timeout": 10.0,
         "temporal_host": "temporal:7233",
+        "rate_limit_fail_mode": "closed",
     }
     base.update(overrides)
     return Settings(**base)  # type: ignore[arg-type]

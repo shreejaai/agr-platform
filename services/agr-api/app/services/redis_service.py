@@ -80,6 +80,7 @@ class RateLimitResult:
     remaining: int
     reset_at: float
     retry_after: float | None = None
+    redis_available: bool = True
 
 
 def _get_redis() -> aioredis.Redis | None:
@@ -307,7 +308,12 @@ async def check_rate_limit(
 ) -> RateLimitResult:
     if redis_client is None:
         now = time.time()
-        return RateLimitResult(allowed=True, remaining=max(0, burst - 1), reset_at=now)
+        return RateLimitResult(
+            allowed=True,
+            remaining=max(0, burst - 1),
+            reset_at=now,
+            redis_available=False,
+        )
 
     now = time.time()
     try:
@@ -335,7 +341,12 @@ async def check_rate_limit(
         )
     except Exception as exc:
         logger.warning("Redis token bucket failed (allowing request): %s", exc)
-        return RateLimitResult(allowed=True, remaining=max(0, burst - 1), reset_at=now)
+        return RateLimitResult(
+            allowed=True,
+            remaining=max(0, burst - 1),
+            reset_at=now,
+            redis_available=False,
+        )
 
 
 async def increment_eval_count(org_id: UUID, db_count: int) -> int:

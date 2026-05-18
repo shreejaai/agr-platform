@@ -132,6 +132,20 @@ def record_temporal_circuit_trip() -> None:
     temporal_circuit_trips_total.inc()
 
 
+# ── W3.3 additions ────────────────────────────────────────────────────────────
+
+rate_limit_redis_unavailable_total = Counter(
+    "agr_rate_limit_redis_unavailable_total",
+    "Rate-limit checks where Redis was unreachable (per fail mode)",
+    ["fail_mode"],
+    registry=_registry,
+)
+
+
+def record_rate_limit_redis_unavailable(fail_mode: str) -> None:
+    rate_limit_redis_unavailable_total.labels(fail_mode=fail_mode).inc()
+
+
 def record_evaluate_latency(latency_ms: float) -> None:
     """Observe end-to-end /v1/evaluate latency."""
     evaluate_latency_ms.observe(latency_ms)
