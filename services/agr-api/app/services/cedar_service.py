@@ -2,26 +2,9 @@
 
 import contextlib
 import logging
-import sys
-from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.middleware.tracing import get_tracer
-from app.models import Policy
-
-# Resolve agr-core: walk up from this file looking for packages/agr-core,
-# then fall back to /packages/agr-core (Docker image path).
-_agr_core: str | None = None
-for _p in Path(__file__).resolve().parents:
-    _candidate = _p / "packages" / "agr-core"
-    if _candidate.exists():
-        _agr_core = str(_candidate)
-        break
-sys.path.insert(0, _agr_core or "/packages/agr-core")
-from policy_engine import (  # type: ignore[import-not-found]  # noqa: E402, I001
+from agr_core.policy_engine import (
     EvaluationResult,
     PolicyShapeResult,
     ValidationResult,
@@ -29,12 +12,23 @@ from policy_engine import (  # type: ignore[import-not-found]  # noqa: E402, I00
     close_cedar_process_pool,
     configure_cedar_process_pool,
     evaluate_policies,
-    infer_policy_match as _infer_policy_match,
     initialize_cedar_process_pool,
     set_cedar_degraded,
+)
+from agr_core.policy_engine import (
+    infer_policy_match as _infer_policy_match,
+)
+from agr_core.policy_engine import (
     validate_cedar_rule as _validate_cedar_rule,
+)
+from agr_core.policy_engine import (
     validate_policy_shape as _validate_policy_shape,
 )
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.middleware.tracing import get_tracer
+from app.models import Policy
 
 logger = logging.getLogger(__name__)
 
