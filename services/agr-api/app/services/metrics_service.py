@@ -106,6 +106,31 @@ rate_limit_drop_total = Counter(
     registry=_registry,
 )
 
+# ── W3.2 additions ────────────────────────────────────────────────────────────
+
+temporal_circuit_state = Gauge(
+    "agr_temporal_circuit_state",
+    "Temporal client circuit-breaker state (1 if state is active, else 0)",
+    ["state"],
+    registry=_registry,
+)
+
+temporal_circuit_trips_total = Counter(
+    "agr_temporal_circuit_trips_total",
+    "Number of times the Temporal circuit breaker transitioned to open",
+    registry=_registry,
+)
+
+
+def set_temporal_circuit_state(state: str) -> None:
+    """Set the temporal circuit breaker gauge so only the active state is 1."""
+    for s in ("closed", "open", "half_open"):
+        temporal_circuit_state.labels(state=s).set(1.0 if s == state else 0.0)
+
+
+def record_temporal_circuit_trip() -> None:
+    temporal_circuit_trips_total.inc()
+
 
 def record_evaluate_latency(latency_ms: float) -> None:
     """Observe end-to-end /v1/evaluate latency."""
