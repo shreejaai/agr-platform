@@ -384,6 +384,17 @@ jobs:
           AGR_API_KEY: ${{ steps.seed.outputs.agr_api_key }}
           CI: "true"
 
+      # W5.2 — also run the per-domain Playwright suites against the same stack.
+      # Smoke covers cross-domain assertions; the full suite covers each domain's
+      # individual scenario file (finance / pharma / banking / insurance).
+      - name: Run per-domain Playwright suites
+        run: npm run test:full
+        working-directory: tests
+        env:
+          AGR_BASE_URL: http://localhost:8000
+          AGR_API_KEY: ${{ steps.seed.outputs.agr_api_key }}
+          CI: "true"
+
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
