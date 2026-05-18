@@ -34,6 +34,10 @@ from app.services.copilot_prompts import (
     GENERAL_SYSTEM_PROMPT,
     POLICY_GENERATION_SYSTEM_PROMPT,
 )
+from app.services.copilot_retrieval import (
+    augment_user_message,
+    retrieve_org_context,
+)
 from app.services.redis_service import (
     get_conversation_cache,
     set_conversation_cache,
@@ -857,9 +861,10 @@ class CopilotService:
     async def _handle_explain(
         self, message: str, conversation_history: list[CopilotMessage]
     ) -> CopilotResponse:
+        org_context = await retrieve_org_context(self.session, self.org_id, message)
         llm_response = await self._call_llm(
             system_prompt=EXPLANATION_SYSTEM_PROMPT,
-            user_message=message,
+            user_message=augment_user_message(message, org_context),
             conversation_history=conversation_history,
         )
 
@@ -880,9 +885,10 @@ class CopilotService:
     async def _handle_general(
         self, message: str, conversation_history: list[CopilotMessage]
     ) -> CopilotResponse:
+        org_context = await retrieve_org_context(self.session, self.org_id, message)
         llm_response = await self._call_llm(
             system_prompt=GENERAL_SYSTEM_PROMPT,
-            user_message=message,
+            user_message=augment_user_message(message, org_context),
             conversation_history=conversation_history,
         )
 

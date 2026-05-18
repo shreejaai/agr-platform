@@ -166,12 +166,10 @@ jobs:
         working-directory: apps/agr-dashboard
 
       - name: Test
-        # continue-on-error: Karma + ChromeHeadless is unreliable in ephemeral CI VMs.
-        # Tracked: https://github.com/angular/angular-cli/issues/committed
-        # Build gate (below) is strict — a test flake will not block publish.
-        run: npm test -- --watch=false --browsers=ChromeHeadlessNoSandbox
+        # W5.3 — dashboard tests are required. ChromeHeadlessNoSandbox + --watch=false
+        # (== --single-run) + --progress=false keep Karma stable in ephemeral CI VMs.
+        run: npm test -- --watch=false --browsers=ChromeHeadlessNoSandbox --progress=false
         working-directory: apps/agr-dashboard
-        continue-on-error: true
 
       - name: Build (strict)
         run: npm run build -- --configuration production
@@ -249,13 +247,12 @@ jobs:
 
   # ── PostgreSQL integration tests ──────────────────────────────────────────────
   # Runs against a real PostgreSQL 16 instance with all migrations applied.
-  # Marked continue-on-error so a flaky PG environment does not block publish,
-  # but failures are still reported and visible in PR checks.
+  # W5.1 — blocking: RLS / JSONB / partitioning / constraint regressions fail
+  # the merge rather than being silently tolerated.
   test-postgres:
     name: PostgreSQL integration tests
     runs-on: ubuntu-latest
     needs: [secret-scan]
-    continue-on-error: true
     services:
       postgres-test:
         image: postgres:16
@@ -379,6 +376,17 @@ jobs:
 
       - name: Run domain scenario smoke suite
         run: npm run test:smoke
+        working-directory: tests
+        env:
+          AGR_BASE_URL: http://localhost:8000
+          AGR_API_KEY: ${{ steps.seed.outputs.agr_api_key }}
+          CI: "true"
+
+      # W5.2 — also run the per-domain Playwright suites against the same stack.
+      # Smoke covers cross-domain assertions; the full suite covers each domain's
+      # individual scenario file (finance / pharma / banking / insurance).
+      - name: Run per-domain Playwright suites
+        run: npm run test:full
         working-directory: tests
         env:
           AGR_BASE_URL: http://localhost:8000

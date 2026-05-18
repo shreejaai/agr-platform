@@ -30,7 +30,12 @@ from app.schemas import (
     EvaluateRequest,
     EvaluateResponse,
 )
-from app.services.anomaly_service import is_new_action, record_action
+from app.services.anomaly_service import (
+    behavioral_anomaly_finding,
+    is_new_action,
+    record_action,
+    record_triple,
+)
 from app.services.approval_service import create_approval_request
 from app.services.audit_service import create_audit_event
 from app.services.cedar_service import evaluate_request
@@ -229,8 +234,18 @@ async def evaluate(
                     body.agent_id,
                     body.action,
                 )
+            # W5.5 — advisory behavioural anomaly check before recording the
+            # triple so the current call is scored against history, not itself.
+            advisory = await behavioral_anomaly_finding(
+                str(org_id), body.agent_id, body.action, body.resource
+            )
+            if advisory is not None:
+                anomaly_flags.append("triple_outlier")
             background_tasks.add_task(
                 record_action, str(org_id), body.agent_id, body.action, body.resource
+            )
+            background_tasks.add_task(
+                record_triple, str(org_id), body.agent_id, body.action, body.resource
             )
 
         await create_audit_event(
@@ -460,8 +475,20 @@ async def evaluate(
                 body.agent_id,
                 body.action,
             )
+        # W5.5 — advisory behavioural anomaly check (info-severity finding).
+        advisory_finding = await behavioral_anomaly_finding(
+            str(org_id), body.agent_id, body.action, body.resource
+        )
+        if advisory_finding is not None:
+            anomaly_flags.append("triple_outlier")
+            if compliance_findings is None:
+                compliance_findings = []
+            compliance_findings.append(advisory_finding)
         background_tasks.add_task(
             record_action, str(org_id), body.agent_id, body.action, body.resource
+        )
+        background_tasks.add_task(
+            record_triple, str(org_id), body.agent_id, body.action, body.resource
         )
 
     extra_payload: dict[str, object] = {
